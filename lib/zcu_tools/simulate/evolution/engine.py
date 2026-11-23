@@ -18,6 +18,7 @@ from zcu_tools.simulate.boundary import CancellationQuery, Cancelled
 
 if TYPE_CHECKING:
     from ._capture import CaptureBuffer
+    from ._probe_memo import SampledRWAProbeMemo
     from .kernel import Kernel
 
 import numpy as np
@@ -37,8 +38,8 @@ from .secular import (
 )
 from .telemetry import (
     FamilyRouting,
-    first_opencl_detection_error,
     merge_family,
+    reused_routing,
     warn_stark_order,
 )
 
@@ -409,24 +410,14 @@ class PathDiagnostics:
         through a telemetry-disabled report. Any recorded detection failure is
         preserved. Disabled reports have no routing.
         """
-        return replace(
-            self,
-            frontend_cpu_s=0.0,
-            routing={
-                name: FamilyRouting(
-                    rows=count,
-                    cache_hits=count,
-                    estimated_cpu_s=0.0,
-                    duration_ns=self.duration_ns_by_kernel[name],
-                    opencl_detection_error=first_opencl_detection_error(
-                        (self.routing.get(name),)
-                    ),
-                )
-                for name, count in self.segments_by_kernel.items()
-            }
+        routing = (
+            reused_routing(
+                self.segments_by_kernel, self.duration_ns_by_kernel, self.routing
+            )
             if telemetry
-            else {},
+            else {}
         )
+        return replace(self, frontend_cpu_s=0.0, routing=routing)
 
     def _freeze_logical_durations(self) -> None:
         """Own the immutable duration map and enforce its segment-count alignment."""
@@ -751,6 +742,7 @@ class Engine:
         telemetry: bool = False,
         reuse_key: bytes | None = None,
         capture: CaptureBuffer | None = None,
+        probe_memo: SampledRWAProbeMemo | None = None,
     ) -> EvolutionResult:
         """Evolve all batches to readout, forwarding per-segment budget to kernels.
 
@@ -777,6 +769,10 @@ class Engine:
         actual routes and sampled RWA spot decisions/errors, not probe states.
         Success marks records complete; exceptions leave them incomplete. Concurrent
         use raises ValueError at entry. No file I/O; OpenCL builds may use the user cache.
+        probe_memo: optional caller-owned SampledRWAProbeMemo for exact sampled
+        multitone guard comparisons only. Lend it within one FTF preparation
+        and close it after the calls drain. Hits still route, record and evolve
+        the supplied timelines. None uses only evolve-local guard facts.
         telemetry enables per-family calling-thread CPU and routing accounting
         without I/O; False avoids CPU clock reads and returns empty routing.
         Model ValueErrors propagate; a kernel numerical failure raises
@@ -851,6 +847,7 @@ class Engine:
                     self._families,
                     workers=workers,
                     capture=capture_run,
+                    probe_memo=probe_memo,
                 )
                 reuse_snapshot = self._routing_reuse.snapshot(
                     reuse_key, geometry.table, context

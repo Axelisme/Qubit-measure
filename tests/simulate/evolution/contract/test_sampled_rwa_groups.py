@@ -9,7 +9,9 @@ from zcu_tools.simulate.evolution import (
     CaptureBuffer,
     Engine,
     EnvelopeSpec,
+    ModelSource,
     NoValidKernel,
+    SampledRWAProbeMemo,
     TimelineBatch,
     read_capture_metadata,
 )
@@ -104,6 +106,67 @@ def _short_sampled_pair(case: AccuracyCase, count: int) -> TimelineBatch:
     )
 
 
+@pytest.mark.parametrize(
+    "change", ["point", "duration", "rates", "dephasing", "phase", "gain"]
+)
+def test_sampled_multitone_memo_requires_exact_probe_inputs(change: str) -> None:
+    case = accuracy_case("joint_constant")
+    batch = _short_sampled_pair(case, 1)
+    model = case.source.model((0,))
+    changed = replace(batch, points=np.array([13], dtype=np.int64))
+    first, second = changed.tracks
+    if change == "duration":
+        changed = replace(changed, end_ns=changed.end_ns - 0.125)
+    elif change == "rates":
+        rates = model.rates_per_ns.copy()
+        rates[0, 1] += 1e-5
+        model = replace(model, rates_per_ns=rates)
+    elif change == "dephasing":
+        dephasing = model.dephasing_per_ns.copy()
+        dephasing[0, 1] += 1e-5
+        dephasing[1, 0] += 1e-5
+        model = replace(model, dephasing_per_ns=dephasing)
+    elif change == "phase":
+        changed = replace(
+            changed, tracks=(replace(first, phase_rad=first.phase_rad + 0.125), second)
+        )
+    elif change == "gain":
+        changed = replace(
+            changed, tracks=(replace(first, amplitude=-first.amplitude), second)
+        )
+
+    capture = CaptureBuffer()
+    # Keep the model's caller identity even when its loss arrays differ.
+    with (
+        closing(case.source),
+        closing(
+            ModelSource(case.source.initial_density, lambda level: model)
+        ) as source,
+        closing(SampledRWAProbeMemo()) as memo,
+        closing(Engine(1, backend="cpu", families=("multitone_rwa",))) as engine,
+    ):
+        initial = engine.evolve(
+            case.source, (batch,), telemetry=True, probe_memo=memo, capture=capture
+        )
+        result = engine.evolve(
+            source, (changed,), telemetry=True, probe_memo=memo, capture=capture
+        )
+    assert initial.paths.routing["multitone_rwa"].admission_rows == 1
+    hit = change == "point"
+    routing = result.paths.routing["multitone_rwa"]
+    assert routing.admission_rows == int(not hit)
+    assert routing.probe_memo_hits == int(hit)
+    assert (routing.probe_integration_cpu_s > 0.0) == (not hit)
+    if hit:
+        assert result.densities.tobytes() == initial.densities.tobytes()
+        assert result.paths.segments_by_kernel == initial.paths.segments_by_kernel
+        before, after = [read_capture_metadata(record) for record in capture.records]
+        (before_group,) = before["sampled_rwa_admissions"]
+        (after_group,) = after["sampled_rwa_admissions"]
+        assert before_group["decision"] == after_group["decision"] == "accepted"
+        assert after_group["spots"] == [{**before_group["spots"][0], "point": 13}]
+
+
 def test_sampled_multitone_uses_its_own_group_in_shared_prefix() -> None:
     case = accuracy_case("joint_constant")
     scan = _short_sampled_pair(case, 3)
@@ -142,13 +205,26 @@ def test_sampled_multitone_probes_each_tones_amplitude_maximum() -> None:
             )
         ),
     )
+    first, second = batch.tracks
+    changed = replace(
+        batch, tracks=(first, replace(second, amplitude=np.array([0.015, 0.03, 0.002])))
+    )
     with (
         closing(case.source),
+        closing(SampledRWAProbeMemo()) as memo,
         closing(Engine(1, backend="cpu", families=("multitone_rwa",))) as engine,
     ):
-        result = engine.evolve(case.source, (batch,), telemetry=True)
+        result = engine.evolve(case.source, (batch,), telemetry=True, probe_memo=memo)
+        partial = engine.evolve(
+            case.source, (changed,), telemetry=True, probe_memo=memo
+        )
+        cold = engine.evolve(case.source, (changed,))
     assert result.paths.segments_by_kernel == {"multitone_rwa": 3}
     assert result.paths.routing["multitone_rwa"].admission_rows == 2
+    routing = partial.paths.routing["multitone_rwa"]
+    assert routing.admission_rows == routing.probe_memo_hits == 1
+    assert partial.paths.segments_by_kernel == cold.paths.segments_by_kernel
+    assert partial.densities.tobytes() == cold.densities.tobytes()
 
 
 @pytest.mark.parametrize("variation", ["scale", "one_ulp_sample", "sample_grid"])

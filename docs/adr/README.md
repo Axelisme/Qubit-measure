@@ -133,7 +133,7 @@ ADR 宣告 package 之間的依賴方向時，同時在 `.importlinter` 建立�
 - [0085 — 實驗數值工具的 fitting owner](0085-numerical-fitting-owners.md)：六組純數值工具由 fitting 持有，lab 保留選資料、herald、維度換算、live 與畫圖。
 
 - [0071 — Coherence 頻率與時間單位](0071-coherence-units.md)：頻率、時間、loss parameters 與 lifetime 的單位和換算契約。
-- [0078 — Evolution 黑盒邊界與算法內聚](0078-evolution-module-boundary.md)：Evolution 的 dispatch／kernel 分工、公開黑箱、數值 preparation 壽命與 t6 只保留 direct 的決定。
+- [0078 — Evolution 黑盒邊界與算法內聚](0078-evolution-module-boundary.md)：Evolution 的 dispatch／kernel 分工、公開黑箱、[數值 preparation 壽命與 FTF 探針例外](0078-evolution-module-boundary.md#損耗漂移下的結構與-preparation-lifetime)，以及 t6 只保留 direct 的決定。
 - [0084 — 模擬 request 的公共整數時基](0084-simulation-integer-time-base.md)：公共有理數時基、整數 request 與 compiled frontend。
 
 改模擬器時的流程與自查見 [模擬器維護規則](../../lib/zcu_tools/simulate/maintenance.md)。

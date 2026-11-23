@@ -44,8 +44,13 @@ class FamilyRouting:
     admission_rows: common_frame counts row indicator evaluations; multitone_rwa
         counts sampled rows with a completed RWA/full-drive spot comparison,
         whether accepted or rejected. Neither counts apply or reuse hits.
-        For multitone_rwa, row proxies and cost skips do not count.
+        For multitone_rwa, row proxies, cost skips and memo hits do not count.
         Other families leave this count zero.
+    probe_memo_hits: sampled multitone_rwa probes served by the preparation memo.
+    probe_integration_cpu_s: calling-thread CPU seconds in both sampled probe
+        integrators, excluding payload construction and memo lookups. This is
+        measured within prepare_cpu_s, not added to it. Both probe fields are
+        zero for other families and on complete-result reuse.
     opencl_rows: physical endpoints executed by OpenCL within this family.
         Zero for CPU-only calls and reuse hits. The backend does not rename
         the family or change the logical row counts.
@@ -76,6 +81,8 @@ class FamilyRouting:
     dp54_rows: int = 0
     dop853_rows: int = 0
     prepare_key_builds: int = 0
+    probe_memo_hits: int = 0
+    probe_integration_cpu_s: float = 0.0
 
     @property
     def actual_cpu_s(self) -> float:
@@ -105,11 +112,36 @@ def merge_family(parts: Sequence[FamilyRouting]) -> FamilyRouting:
         prepare_builds=sum(part.prepare_builds for part in parts),
         prepare_key_builds=sum(part.prepare_key_builds for part in parts),
         admission_rows=sum(part.admission_rows for part in parts),
+        probe_memo_hits=sum(part.probe_memo_hits for part in parts),
+        probe_integration_cpu_s=sum(part.probe_integration_cpu_s for part in parts),
         opencl_rows=sum(part.opencl_rows for part in parts),
         dp54_rows=sum(part.dp54_rows for part in parts),
         dop853_rows=sum(part.dop853_rows for part in parts),
         opencl_detection_error=first_opencl_detection_error(parts),
     )
+
+
+def reused_routing(
+    segments: Mapping[str, int],
+    durations: Mapping[str, float],
+    previous: Mapping[str, FamilyRouting],
+) -> dict[str, FamilyRouting]:
+    """Report complete-result reuse without counting any kernel work.
+
+    segments and durations give the logical row counts and ns by family.
+    Each segment family must have a duration, otherwise raises KeyError.
+    previous supplies any recorded device detection errors, or can be empty.
+    """
+    return {
+        name: FamilyRouting(
+            rows=count,
+            cache_hits=count,
+            estimated_cpu_s=0.0,
+            duration_ns=durations[name],
+            opencl_detection_error=first_opencl_detection_error((previous.get(name),)),
+        )
+        for name, count in segments.items()
+    }
 
 
 def warn_stark_order(inversions: Sequence[StarkOrderInversion]) -> None:
@@ -160,6 +192,8 @@ class _Totals:
     dp54_rows: int = 0
     dop853_rows: int = 0
     prepare_key_builds: int = 0
+    probe_memo_hits: int = 0
+    probe_integration_cpu_s: float = 0.0
 
 
 class RoutingCollector:
@@ -178,7 +212,9 @@ class RoutingCollector:
         self._tables: dict[int, object] = {}
 
     @contextmanager
-    def measure(self, name: str, phase: Literal["prepare", "apply"]) -> Generator[None]:
+    def measure(
+        self, name: str, phase: Literal["prepare", "apply", "probe_integration"]
+    ) -> Generator[None]:
         """Account a kernel call, including work completed before an exception."""
         if not self.enabled:
             yield
@@ -192,8 +228,10 @@ class RoutingCollector:
                 total = self._totals.setdefault(name, _Totals())
                 if phase == "prepare":
                     total.prepare_cpu_s += elapsed
-                else:
+                elif phase == "apply":
                     total.apply_cpu_s += elapsed
+                else:
+                    total.probe_integration_cpu_s += elapsed
 
     def built(self, name: str, count: int) -> None:
         """Count coefficient products built by instrumented numerical owners."""
@@ -212,6 +250,12 @@ class RoutingCollector:
         if self.enabled and count:
             with self._lock:
                 self._totals.setdefault(name, _Totals()).admission_rows += count
+
+    def hit_probe_memo(self, name: str, count: int) -> None:
+        """Count sampled guard comparisons skipped by the preparation memo."""
+        if self.enabled and count:
+            with self._lock:
+                self._totals.setdefault(name, _Totals()).probe_memo_hits += count
 
     def ran_opencl(self, name: str, count: int, *, dp54: bool) -> None:
         """Record completed OpenCL endpoints for the selected tableau."""
@@ -284,6 +328,8 @@ class RoutingCollector:
                 prepare_builds=total.prepare_builds,
                 prepare_key_builds=total.prepare_key_builds,
                 admission_rows=total.admission_rows,
+                probe_memo_hits=total.probe_memo_hits,
+                probe_integration_cpu_s=total.probe_integration_cpu_s,
                 opencl_rows=total.opencl_rows,
                 dp54_rows=total.dp54_rows,
                 dop853_rows=total.dop853_rows,

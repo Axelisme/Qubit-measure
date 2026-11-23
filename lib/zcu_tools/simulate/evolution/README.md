@@ -1,6 +1,6 @@
 # Segment evolution
 
-**Last updated:** 2026-11-23, fixed-H collapse operators and frozen physical v2
+**Last updated:** 2026-11-23, sampled RWA probe lifetime
 
 **讀者：** framework-dev、agent。Segment evolution 的公開輸入、路由與數值邊界。
 
@@ -43,6 +43,7 @@ The exports in [__init__.py](__init__.py) fall into these groups:
 | Execution capture | `CaptureBuffer`, `CaptureMetadata`, `CaptureRoute`, `CaptureCandidate`, `CapturePrefixRun`, `CapturePosition`, `CaptureAdopter`, `CaptureSampledAdmission`, `CaptureSampledSpot`, `CaptureRowKey` |
 | Dispatch inspection | `DispatchInspection`, `DispatchRow`, `DispatchCandidate`, `RowKey` |
 | Engine model source and routing history | `ModelSource`, `SecularModel`, `SecularDrive`, `RoutingHistory` |
+| Sampled guard reuse within one preparation | `SampledRWAProbeMemo` |
 | Flux description | `FluxExpansion`, `FluxTerm`, `FluxLevel`, `FluxSchedule`, `FluxWaveform` |
 | Batched timelines | `TimelineBatch`, `DriveTrack`, `EnvelopeSpec`, `SegmentShift`, `segment_spans` |
 | Control description | `ControlPulse`, `ControlSequence`, `Envelope`, `PhaseEvent`, `quantize_ns` |
@@ -59,7 +60,7 @@ The exports in [__init__.py](__init__.py) fall into these groups:
 
 `Engine(workers, *, families=None, kernels=None, chunks_per_worker=None,
 routing_cache_bytes=4*1024**2, backend="auto")` owns immutable routing facts.
-Numerical preparations live only within one evolve. `evolve(source, batches, *, budget=1e-3, cancel=event)` consumes a
+Numerical payloads live only within one evolve. `evolve(source, batches, *, budget=1e-3, cancel=event)` consumes a
 `ModelSource` and all `TimelineBatch` inputs for one acquire. `NumericModel` is a
 separate fixed-coordinate record, not an Engine input. Constructor and field
 contracts live with their types in [engine.py](engine.py), [secular.py](secular.py),
@@ -794,7 +795,13 @@ Rejections count actual numerical guard refusals, not cost-based skips or planne
 feasibility probes. A shared prefix executes once although logical rows include
 all adopting timelines. Caller-retained complete preparation hits report logical
 rows as `cache_hits`, with zero CPU, rejected rows and estimated work.
-Engine evolves always execute numerical work. For `dop853`, `opencl_rows`
+Engine evolves always execute numerical work. For `multitone_rwa`,
+`admission_rows` counts sampled probes actually integrated. `probe_memo_hits`
+counts sampled probes supplied by the preparation memo. `probe_integration_cpu_s`
+measures both probe integrators and is part of `prepare_cpu_s`, not additional
+CPU. These values add across Engine reports and are zero on complete-preparation
+reuse. The acquire JSONL keeps its explicit fields and does not store the new
+probe counters or timing. For `dop853`, `opencl_rows`
 counts endpoints computed on GPU and `opencl_detection_error` reports why
 automatic detection or compilation for the active dimension and tableau failed.
 It is `None` when neither failed. `dp54_rows` counts physical DP5(4) endpoints;
@@ -1463,8 +1470,16 @@ sources. Oversized facts compute without evicting existing entries.
 active payloads, ADC preparation and Numba's compilation cache are separate.
 The byte cap is not a process RAM limit.
 
-Engine prepare residency, exact-result memoization and source ADC solver
-residency are removed. Representative single CPMG, six-cavity and FTF
+FTF can lend `SampledRWAProbeMemo` to `Engine.evolve(probe_memo=...)` for
+one [complete preparation](../../simulators/ftf/environment/README.md#preparation-reuse).
+The bounded memo retains only per-probe differences and decisions for exact
+sampled multitone RWA inputs. Each evolve still chooses the probe rows, applies
+the group threshold, records its own routing and capture, and evolves its own
+densities. Dispatch inspection does not borrow the memo. FTF closes it on
+completion, cancellation or failure. See [ADR-0078](../../../../docs/adr/0078-evolution-module-boundary.md#損耗漂移下的結構與-preparation-lifetime).
+
+Engine prepare residency, production exact-result memoization and source ADC
+solver residency are removed. Representative single CPMG, six-cavity and FTF
 acquisitions had zero hits in those layers within an acquisition.
 Recomputing across acquisitions avoids retaining loss-dependent products as
 losses drift. Single-source complete preparation and model reuse, and FTF's

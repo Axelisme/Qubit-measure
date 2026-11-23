@@ -14,6 +14,7 @@ from zcu_tools.simulate.evolution import (
     Engine,
     EvolutionResult,
     ModelSource,
+    SampledRWAProbeMemo,
     TimelineBatch,
 )
 from zcu_tools.simulators.ftf.environment import FTFSource
@@ -165,6 +166,7 @@ class RecordingEngine(Engine):
         telemetry: bool = False,
         reuse_key: bytes | None = None,
         capture: CaptureBuffer | None = None,
+        probe_memo: SampledRWAProbeMemo | None = None,
     ) -> EvolutionResult:
         result = super().evolve(
             source,
@@ -174,6 +176,7 @@ class RecordingEngine(Engine):
             telemetry=telemetry,
             reuse_key=reuse_key,
             capture=capture,
+            probe_memo=probe_memo,
         )
         self.density_bytes = result.densities.tobytes()
         return result

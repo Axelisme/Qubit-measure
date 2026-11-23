@@ -11,12 +11,19 @@ from numpy.typing import NDArray
 from scipy.linalg import expm
 
 from .._envelope import sample_value
+from .._probe_memo import ProbeCertificate
 from ..kernel import ApplyContext, KernelContext, Prepared, SegmentTable
 from ..secular import SecularModel
 from ..workplan import FactKey, WorkPlan
 from ._dop853 import Tolerances, integrate, tolerances
 from ._dop853_data import Models, Segments, pack_models
-from ._multitone_spot import SPOT_POLICY, SampledGroup, probe_density, sampled_groups
+from ._multitone_spot import (
+    SPOT_POLICY,
+    SampledGroup,
+    probe_density,
+    probe_key,
+    sampled_groups,
+)
 from ._rwa_fourier import (
     RWACoefficients,
     endpoint_kick,
@@ -386,8 +393,9 @@ class MultitoneRWAKernel:
     Admission requires two envelopes, fixed flux, each |f|>=0.05 GHz and
     budget >=1e-3. Constant pairs require distinct ports. Sampled candidates
     share an evolve-local spot check against full-drive DOP853 on a fixed
-    coherent probe. Within each same-shape group, select the row with the
-    largest abs(gain) times envelope peak for each tone and probe each selected
+    coherent probe. A preparation memo can supply exact probe certificates.
+    Within each same-shape group, select the row with the largest abs(gain)
+    times envelope peak for each tone and probe each selected
     row once. No additional slope or curvature probes are selected. All probes
     must agree within 0.1 times the budget in maximum absolute density difference.
     Carrier spacing does not veto admission: close or equal carriers use the same joint
@@ -479,12 +487,68 @@ class MultitoneRWAKernel:
 
         def build() -> bool:
             rows = np.asarray(group.spot_rows, dtype=np.int64)
-            keys = self.prepare_keys(table, rows, context)
-            prepared = self.prepare(keys, table, rows, context)
-            size = prepared.models.energies.shape[1]
-            initial = np.repeat(probe_density(size)[None], len(rows), axis=0)
-            rwa, direct = initial.copy(), initial
-            indices = np.arange(len(rows), dtype=np.int64)
+            certificates = self._certify_spots(table, rows, context)
+            accepted = all(certificate.accepted for certificate in certificates)
+            if context.capture is not None:
+                context.capture.sampled_group(
+                    group,
+                    "accepted" if accepted else "rejected",
+                    np.asarray([c.difference for c in certificates]),
+                )
+            return accepted
+
+        return context.work_plan.fact(key, build)
+
+    def _certify_spots(
+        self, table: SegmentTable, rows: NDArray[np.int64], context: KernelContext
+    ) -> tuple[ProbeCertificate, ...]:
+        keys = self.prepare_keys(table, rows, context)
+        memo = context.probe_memo
+        if memo is None:
+            return self._integrate_spots(keys, table, rows, context)
+
+        probe_keys = [
+            probe_key(table, int(row), context, key.tobytes())
+            for row, key in zip(rows, keys, strict=True)
+        ]
+        certificates = {}
+        misses = []
+        for index, key in enumerate(probe_keys):
+            certificate = memo.get(key)
+            if certificate is None:
+                misses.append(index)
+            else:
+                certificates[index] = certificate
+        context.work_plan.routing.hit_probe_memo(self.name, len(certificates))
+        if misses:
+            integrated = self._integrate_spots(
+                keys[misses], table, rows[misses], context
+            )
+            for index, certificate in zip(misses, integrated, strict=True):
+                memo.put(probe_keys[index], certificate)
+                certificates[index] = certificate
+        return tuple(certificates[index] for index in range(len(rows)))
+
+    def _integrate_spots(
+        self,
+        keys: NDArray[np.void],
+        table: SegmentTable,
+        rows: NDArray[np.int64],
+        context: KernelContext,
+    ) -> tuple[ProbeCertificate, ...]:
+        prepared = self.prepare(keys, table, rows, context)
+        size = prepared.models.energies.shape[1]
+        direct = np.repeat(probe_density(size)[None], len(rows), axis=0)
+        rwa = direct.copy()
+        indices = np.arange(len(rows), dtype=np.int64)
+        # These probes are independent endpoints, never a production chain.
+        plan = DOP853Plan(
+            np.full(len(table.timeline), "interaction"),
+            np.full(len(table.timeline), -1, dtype=np.int64),
+        )
+        data = EndpointData(prepared.models, packed_segments(table, context.work_plan))
+        routing = context.work_plan.routing
+        with routing.measure(self.name, "probe_integration"):
             self.apply(
                 prepared,
                 indices,
@@ -493,27 +557,13 @@ class MultitoneRWAKernel:
                 rwa,
                 ApplyContext(context.budget, work_plan=context.work_plan),
             )
-            # These probes are independent endpoints, never a production chain.
-            plan = DOP853Plan(
-                np.full(len(table.timeline), "interaction"),
-                np.full(len(table.timeline), -1, dtype=np.int64),
-            )
-            data = EndpointData(
-                prepared.models, packed_segments(table, context.work_plan)
-            )
             advance_endpoints(data, (rows, indices), direct, context.budget, plan)
-            context.work_plan.routing.admitted(self.name, len(rows))
-            difference = np.abs(rwa - direct)
-            accepted = bool(np.max(difference) <= SPOT_POLICY[1] * context.budget)
-            if context.capture is not None:
-                context.capture.sampled_group(
-                    group,
-                    "accepted" if accepted else "rejected",
-                    np.max(difference, axis=(1, 2)),
-                )
-            return accepted
-
-        return context.work_plan.fact(key, build)
+        routing.admitted(self.name, len(rows))
+        threshold = SPOT_POLICY[1] * context.budget
+        return tuple(
+            ProbeCertificate(float(difference), bool(difference <= threshold))
+            for difference in np.max(np.abs(rwa - direct), axis=(1, 2))
+        )
 
     def prepare_keys(
         self, table: SegmentTable, rows: NDArray[np.int64], context: KernelContext
