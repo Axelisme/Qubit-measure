@@ -7,7 +7,18 @@ from numpy.typing import NDArray
 
 logger = logging.getLogger(__name__)
 
-_ROUNDING_RTOL = 16 * np.finfo(np.float64).eps
+
+def _iq_rounding_rtol(n: NDArray[np.float64]) -> NDArray[np.float64]:
+    # A shot product and up to N-1 serial additions give the sum bound
+    # gamma_N = N*u/(1-N*u), with unit roundoff u = eps/2. Centering also
+    # multiplies two first sums and divides by N. Cauchy-Schwarz bounds
+    # the absolute sums of I, Q and IQ by the corresponding second moments,
+    # even for cancellation. In this small-error regime, 8*N*u covers the
+    # sum and centering errors relative to those scales.
+    u = np.finfo(np.float64).eps / 2
+    # Cap the error budget at the scale of losing half the significand:
+    # very large stored counts must not turn PSD checks into no-ops.
+    return 8 * np.clip(n * u, 4 * u, np.sqrt(u))
 
 
 class IQCovarianceError(ValueError):
@@ -24,15 +35,14 @@ def _validate_counts(counts: NDArray[np.float64] | NDArray[np.int64]) -> None:
         raise ValueError("shot counts must be finite nonnegative integers or NaN")
 
 
-def _validate_centered_iq(
+def _centered_iq(
     n: NDArray[np.float64],
-    i: NDArray[np.float64],
-    q: NDArray[np.float64],
-    ii: NDArray[np.float64],
-    iq: NDArray[np.float64],
-    qq: NDArray[np.float64],
-) -> None:
-    """Check both variances and the covariance before choosing a projection."""
+    sums: NDArray[np.float64],
+    *,
+    rtol: NDArray[np.float64],
+) -> tuple[NDArray[np.float64], NDArray[np.float64], NDArray[np.float64]]:
+    """Return centered sums from the five raw sums on the first axis."""
+    i, q, ii, iq, qq = sums
     with np.errstate(over="ignore", invalid="ignore"):
         i_mean_term = i * (i / n)
         q_mean_term = q * (q / n)
@@ -44,12 +54,13 @@ def _validate_centered_iq(
     if np.isinf([centered_i, centered_q, centered_cross]).any():
         raise IQCovarianceError("centered IQ moments overflow float64")
 
-    i_tol = _ROUNDING_RTOL * np.maximum(np.abs(ii), i_mean_term)
-    q_tol = _ROUNDING_RTOL * np.maximum(np.abs(qq), q_mean_term)
+    i_tol = rtol * np.maximum(np.abs(ii), i_mean_term)
+    q_tol = rtol * np.maximum(np.abs(qq), q_mean_term)
     if np.any(centered_i < -i_tol) or np.any(centered_q < -q_tol):
         raise IQCovarianceError("IQ moments give a negative centered sum of squares")
 
-    cross_tol = _ROUNDING_RTOL * np.maximum(np.abs(iq), np.abs(cross_mean_term))
+    # The cross sum may have canceled; use a bound on the sum of |I*Q|.
+    cross_tol = (rtol * np.sqrt(np.abs(ii))) * np.sqrt(np.abs(qq))
     # Allow rounding in each difference, including when a variance rounds to zero.
     # Bound |cross| by the product of square roots, not the overflowing determinant.
     i_bound = np.hypot(np.sqrt(np.maximum(centered_i, 0)), np.sqrt(i_tol))
@@ -58,6 +69,47 @@ def _validate_centered_iq(
         cross_bound = i_bound * q_bound
     if np.any(np.abs(centered_cross) - cross_bound > cross_tol):
         raise IQCovarianceError("centered IQ cross sum exceeds the covariance bound")
+    return centered_i, centered_cross, centered_q
+
+
+def _iq_defined_counts(moments: NDArray[np.float64]) -> NDArray[np.float64]:
+    """Validate six-column moments and return counts masked at undefined points."""
+    if moments.shape[-1:] != (6,):
+        raise ValueError("IQ moments must have shape (..., 6)")
+    n = moments[..., 0]
+    _validate_counts(n)
+    if np.isinf(moments).any():
+        raise ValueError("IQ moments must not be infinite")
+    defined = (n >= 2) & ~np.isnan(moments).any(axis=-1)
+    if np.any(defined & ((moments[..., 3] < 0) | (moments[..., 5] < 0))):
+        raise ValueError("IQ squared sums must be nonnegative")
+    return np.where(defined, n, np.nan)
+
+
+def iq_mean_covariance(moments: NDArray[np.float64]) -> NDArray[np.float64]:
+    """Estimate the covariance of mean I and Q from retained shot sums.
+
+    ``moments`` has shape ``(..., 6)`` in shot-sums order (ADR-0074):
+    ``[N, ΣI, ΣQ, ΣI², ΣIQ, ΣQ²]``. Return ``(..., 2, 2)`` matrices in
+    I/Q order and squared IQ units, using sample covariance (ddof=1) divided
+    by N. Fewer than two shots or any NaN sum gives a NaN matrix. Rounding-scale
+    excesses are clipped to keep the matrix positive semidefinite. The raw
+    sums use the same bounded, retained-count rounding tolerance as
+    ``iq_shot_sem``; the matrix repair and direct projection can differ near
+    the boundary. Invalid moment shape, counts, infinite moments or negative
+    squared sums at defined points raise ValueError. Invalid centered covariance
+    or overflow raises IQCovarianceError (a ValueError).
+    """
+    n = _iq_defined_counts(moments)
+    sums = np.moveaxis(moments[..., 1:], -1, 0)
+    i_sq, cross, q_sq = _centered_iq(n, sums, rtol=_iq_rounding_rtol(n))
+    i_var = np.maximum(i_sq, 0) / n / (n - 1)
+    q_var = np.maximum(q_sq, 0) / n / (n - 1)
+    bound = np.sqrt(i_var) * np.sqrt(q_var)
+    cov = np.clip(cross / n / (n - 1), -bound, bound)
+    return np.stack((i_var, cov, cov, q_var), axis=-1).reshape(
+        (*moments.shape[:-1], 2, 2)
+    )
 
 
 def _project_iq_sem(
@@ -65,6 +117,8 @@ def _project_iq_sem(
     n: NDArray[np.float64],
     a: NDArray[np.float64],
     b: NDArray[np.float64],
+    *,
+    rtol: NDArray[np.float64],
 ) -> NDArray[np.float64]:
     """Project validated sums; return NaN on overflow, reject negative variance."""
     _, i, q, ii, iq, qq = np.moveaxis(moments, -1, 0)
@@ -80,7 +134,7 @@ def _project_iq_sem(
     scale = np.maximum.reduce(
         [np.abs(i_term), np.abs(iq_term), np.abs(q_term), mean_term]
     )
-    if np.any(centered < -_ROUNDING_RTOL * scale):
+    if np.any(centered < -rtol * scale):
         raise IQCovarianceError("IQ moments give a negative centered sum of squares")
     return np.asarray(np.sqrt(np.maximum(centered, 0)) / np.sqrt(n) / np.sqrt(n - 1))
 
@@ -104,11 +158,12 @@ def iq_shot_sem(
     Invalid shape, nonfinite weights, invalid counts, infinite moments or
     negative squared sums at defined points raise ValueError. At defined points,
     the centered moments must describe a valid covariance up to rounding, even
-    outside the projection direction. Inconsistent centered moments or
-    overflow that prevents estimation raise IQCovarianceError (a ValueError).
+    outside the projection direction. The raw sums use the same retained-count
+    tolerance as ``iq_mean_covariance``; the projection has its own rounding
+    check. Inconsistent centered moments or overflow that prevents estimation
+    raise IQCovarianceError (a ValueError).
     """
-    if moments.shape[-1:] != (6,):
-        raise ValueError("IQ moments must have shape (..., 6)")
+    n = _iq_defined_counts(moments)
     a, b = (np.asarray(weight, dtype=np.float64) for weight in direction)
     if not (np.isfinite(a).all() and np.isfinite(b).all()):
         raise ValueError("IQ projection weights must be finite")
@@ -120,17 +175,11 @@ def iq_shot_sem(
             "IQ projection weights must broadcast to the point shape"
         ) from error
 
-    n, i, q, ii, iq, qq = np.moveaxis(moments, -1, 0)
-    _validate_counts(n)
-    if np.isinf(moments).any():
-        raise ValueError("IQ moments must not be infinite")
-    defined = (n >= 2) & ~np.isnan(moments).any(axis=-1)
-    if np.any(defined & ((ii < 0) | (qq < 0))):
-        raise ValueError("IQ squared sums must be nonnegative")
-    n = np.where(defined, n, np.nan)
-    _validate_centered_iq(n, i, q, ii, iq, qq)
-    sem = _project_iq_sem(moments, n, a, b)
-    overflow = defined & ~np.isfinite(sem)
+    rtol = _iq_rounding_rtol(n)
+    # Validate all covariance terms, even those outside this projection.
+    _centered_iq(n, np.moveaxis(moments[..., 1:], -1, 0), rtol=rtol)
+    sem = _project_iq_sem(moments, n, a, b, rtol=rtol)
+    overflow = (n >= 2) & ~np.isfinite(sem)
     if np.any(overflow):
         # Scale only overflowing projections by a power of two. With weights
         # at most 1/4, even near-limit sums have headroom for the cross term.
@@ -138,7 +187,11 @@ def iq_shot_sem(
         _, exponent = np.frexp(np.maximum(np.maximum(np.abs(a), np.abs(b)), 1.0))
         shift = exponent + 1
         scaled = _project_iq_sem(
-            moments[overflow], n[overflow], np.ldexp(a, -shift), np.ldexp(b, -shift)
+            moments[overflow],
+            n[overflow],
+            np.ldexp(a, -shift),
+            np.ldexp(b, -shift),
+            rtol=rtol[overflow],
         )
         with np.errstate(over="ignore"):
             sem[overflow] = np.ldexp(scaled, shift)

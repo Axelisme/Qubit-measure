@@ -43,3 +43,7 @@ Live 本來用掃描首段的複數均值，Analyze 空白參考時卻用第一�
 
 - 2026-11-23，使用者對主軸投影說「有獨特理由」才另選；對反演誤差說：「反演出來的量如果可以從變異矩陣推導那也畫。」見[投影慣例](2026-11-23-mean-iq-plot-projection.md)與[一維反演量討論](2026-11-23-inverted-error-bars-and-figure-facts.md)。這些是代裁的先例，不是這次代裁的覆核。
 - 原始選項調查與同源驗收工件未入庫。當時的成因、變更與不採用的方案記在本篇。實際操作及限制見 [MIST single trace guide](../../zcu_lab/v2/mist/power_dep/single_trace/guide.md)。
+
+## 後記
+
+2026-11-23，使用者推翻不畫棒的結論。本次保留觀測量與參考，只改用同批 shot 六矩傳遞距離的 shot SEM，Live 與 Analyze 都畫。見 [MIST 距離的一階誤差棒](2026-11-23-mist-trace-propagated-sem.md)。
