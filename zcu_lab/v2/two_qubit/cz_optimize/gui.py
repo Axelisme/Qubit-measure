@@ -41,15 +41,19 @@ def _analyze(
 def _get_writeback_items(
     req: WritebackRequest[_Run, CZOptimizeAnalysis | CZOptimizeUnavailable],
 ) -> Sequence[WritebackItem]:
+    cfg, best = req.run_result.cfg, req.analyze_result
+    if isinstance(best, CZOptimizeUnavailable):
+        return []
+    if cfg is None:
+        raise ValueError(
+            "CZ optimization writeback requires the saved starting cfg; see Load diagnostics"
+        )
     parameters = req.ctx.parameters
     if parameters is None:
         raise ValueError("CZ optimization writeback requires a Run/Load capture")
-    cfg, best = req.run_result.cfg, req.analyze_result
-    if cfg is None or isinstance(best, CZOptimizeUnavailable):
-        return []
 
-    samples = best.render_best()
-    key = f"cz_opt_{hash_samples(samples)[:12]}"
+    samples = best.render_best() if best.best_evaluation else None
+    key = f"cz_opt_{hash_samples(samples)[:12]}" if samples is not None else None
     selected = best.start_target is not None and best.best_target > best.start_target
     note = None
     if best.start_target is None:
@@ -60,27 +64,39 @@ def _get_writeback_items(
         note = "The best measured survival does not exceed the starting survival."
 
     # ADR-0008: one draft can publish the asset and apply the pulses that use it.
-    items: list[WritebackItem] = [
-        ArbAssetWriteback(
-            target_name=key,
-            description="Best CZ envelope for both drive lines",
-            samples=samples,
-            selected=selected,
-            note=note,
+    items: list[WritebackItem] = []
+    if samples is not None and key is not None:
+        items.append(
+            ArbAssetWriteback(
+                target_name=key,
+                description="Best CZ envelope for both drive lines",
+                samples=samples,
+                selected=selected,
+                note=note,
+            )
         )
-    ]
-    for position, pulse in (("qubit1", cfg.drive.qubit1), ("qubit2", cfg.drive.qubit2)):
+    for index, (position, pulse) in enumerate(
+        (("qubit1", cfg.drive.qubit1), ("qubit2", cfg.drive.qubit2))
+    ):
         label = position.capitalize()
+        changes = {}
+        if key is not None and best.best_raw_gains is not None:
+            changes = {
+                "gain": best.best_raw_gains[index],
+                "waveform": {"style": "arb", "data": key},
+            }
+        # A saved native arb adds a host path, which is not part of a persistent Spec.
+        proposal = PulseSpec.model_validate(
+            {**pulse.to_dict(), **changes}, extra="ignore"
+        )
         # Pulse library keys: $coupler.pulses.cz_qubit1 and $coupler.pulses.cz_qubit2.
         target = f"$coupler.pulses.cz_{position}"
         items.extend(
             (
                 ModuleWriteback(
                     target_name=target,
-                    description=f"CZ {label} pulse with the best envelope",
-                    proposal=PulseSpec.model_validate(
-                        {**pulse.to_dict(), "waveform": {"style": "arb", "data": key}}
-                    ),
+                    description=f"Selected CZ {label} pulse",
+                    proposal=proposal,
                     selected=selected,
                     note=note,
                 ),
@@ -94,6 +110,14 @@ def _get_writeback_items(
                 ),
             )
         )
+    angle1, angle2 = (
+        best.corrections_deg
+        if best.best_evaluation
+        else (
+            cfg.phase_pair.correction_qubit1_deg,
+            cfg.phase_pair.correction_qubit2_deg,
+        )
+    )
     items.append(
         ParameterWriteback(
             # Keys: $coupler.ext.cz_phase.qubit1, $coupler.ext.cz_phase.qubit2,
@@ -104,8 +128,8 @@ def _get_writeback_items(
             proposed_value={
                 "qubit1": parameters.resolve_path("$qubit1"),
                 "qubit2": parameters.resolve_path("$qubit2"),
-                "correction_qubit1_deg": best.best_params[-2],
-                "correction_qubit2_deg": best.best_params[-1],
+                "correction_qubit1_deg": angle1,
+                "correction_qubit2_deg": angle2,
             },
             selected=selected,
             note=note,
@@ -121,12 +145,8 @@ def run(cfg: CZOptimizeCfg, *, context: RunContext) -> _Run:
 
 def _summary_lines(source: _Run) -> tuple[str, ...]:
     cfg = source.cfg
-    if cfg is None:
-        return ()
-    return (
-        f"Reps×Rounds {cfg.reps}×1",
-        f"Applied CZ envelope duration {source.result.duration:.6g} µs",
-    )
+    duration = f"Starting CZ duration {source.result.start_duration_s * 1e9:.6g} ns"
+    return (duration,) if cfg is None else (f"Reps×Rounds {cfg.reps}×1", duration)
 
 
 DEFINITION = Adapter(
