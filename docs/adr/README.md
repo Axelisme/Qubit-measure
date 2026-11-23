@@ -2,7 +2,7 @@
 
 **讀者：** framework-dev、agent。透過本索引與各篇 ADR 查找架構決策及其依據。
 
-符合任一條的取捨寫進 ADR：約束或可能約束多個底層模組；決定一個子系統內所有部件共同遵守的架構；難以反悔或需要留下被否決方案的理由。像 Python 的 [PEP 659](https://peps.python.org/pep-0659/) 一樣，內部但架構重大的改變也寫，小改進不寫。Evolution 的 kernel 共同規則留在 [ADR-0078](0078-evolution-module-boundary.md#每個-kernel-的量測場景只有一段)，個別 kernel 的閾值寫在 [Evolution README](../../lib/zcu_tools/simulate/evolution/README.md#kernel-summary)。單一實驗自己用、可在一個 task 內反悔的取捨寫進 README，例如 [zcu_lab/v2/README.md 的獨立 heralded 入口規則](../../zcu_lab/v2/README.md#何時保留獨立-heralded-入口)。索引只放 ADR 原則的摘要與指標。
+依 [CLAUDE.md〈使用者決策的引用〉](../../CLAUDE.md#使用者決策的引用)，取捨符合任一條就寫進 ADR：對多個底層模組已有或可能產生約束；定下整個子系統共用的架構；不易撤回，或得記下為何否決其他方案。像 Python 的 [PEP 659](https://peps.python.org/pep-0659/) 一樣，內部的重大架構改變也收錄，小改進不收。Evolution 的 kernel 共同規則留在 [ADR-0078](0078-evolution-module-boundary.md#每個-kernel-的量測場景只有一段)，個別 kernel 的閾值寫在 [Evolution README](../../lib/zcu_tools/simulate/evolution/README.md#kernel-summary)。只有單一實驗自己用、能在一個 task 內反悔的取捨，寫在該實驗的 README。獨立 heralded 入口的取捨則寫在管理這些實驗入口的 [zcu_lab/v2/README.md〈何時保留獨立 heralded 入口〉](../../zcu_lab/v2/README.md#何時保留獨立-heralded-入口)。索引只放 ADR 原則的摘要與指標。
 ADR 正文寫目前生效的規則與客觀事實。裁決日期、使用者原話與沿革的放置方式見下方[格式規定](#格式規定)。依據中的「使用者未覆核」只標尚未覆核的代裁；已覆核時記下覆核結果。
 
 程式碼註解與記憶檔以 `ADR-NNNN` 引用本目錄；ADR 之間以 `[[NNNN]]` 互鏈。
