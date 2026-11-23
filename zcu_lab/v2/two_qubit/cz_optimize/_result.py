@@ -16,7 +16,7 @@ from zcu_tools.experiment.axes_spec import (
     VariableZSpec,
 )
 
-from ._shape import KNOTS, StartStyle, render_candidate
+from ._shape import GAIN_INDEX, KNOTS, StartStyle, render_candidate
 
 
 class _Parameter(NamedTuple):
@@ -70,6 +70,15 @@ class CZOptimizeResult:
     field_at_one: float
     start_asset_fingerprints: NDArray[np.uint8] | None = None
 
+    def candidate_raw_gains(self, index: int) -> tuple[float, float]:
+        """Return Qubit1 and Qubit2 arb gains for the row's physical multiplier g.
+
+        Index zero gives the CMA initial mean's gains, not the original pulse's
+        gains. The caller selects an available row; invalid indices raise.
+        """
+        gains = self.arb_gains * self.params[index, GAIN_INDEX]
+        return float(gains[0]), float(gains[1])
+
     def render_candidate(self, index: int) -> WaveformSamples:
         """Render the CMA sample grid at a finite parameter row (zero is the fit).
 
@@ -96,21 +105,18 @@ def _scalar(
     name: str, label: str, unit: str, *, dtype: type = np.float64
 ) -> VariableSpec:
     return VariableSpec(
-        name,
-        (),
-        VariableZSpec(name, label=label, unit=unit, dtype=dtype),
-        required=False,
+        name, (), VariableZSpec(name, label=label, unit=unit, dtype=dtype)
     )
 
 
+def _validate_evaluations(result: CZOptimizeResult) -> None:
+    rows = len(result.sums)
+    for field, actual in (("params", len(result.params)), ("peak", len(result.peak))):
+        if actual != rows:
+            raise ValueError(f"CZ {field} has {actual} evaluations; sums has {rows}")
+
+
 def _restore[CfgT: ConfigBase](data: GroupedLoadData[CfgT]) -> CZOptimizeResult:
-    # ADR-0069: reject the old result layout instead of guessing parameter
-    # units or manufacturing display samples from an earlier parameterization.
-    if PARAMETERS[0].name not in data.variables:
-        raise ValueError(
-            "CZ optimization result format has changed to fixed-duration arb. "
-            "Open an older run with the version that saved it."
-        )
     sums = data.variable("sums")
     fingerprints = data.variables.get(_START_ASSETS)
     return CZOptimizeResult(
@@ -155,8 +161,6 @@ def axes_spec[CfgT: ConfigBase](
             VariableSpec(
                 "peak", (_EVAL,), VariableZSpec("peak", label="Envelope peak", unit="")
             ),
-            # The builder requires these columns. Declaring them optional to
-            # the generic reader lets it report the experiment's format change.
             *(
                 VariableSpec(
                     param.name,
@@ -164,7 +168,6 @@ def axes_spec[CfgT: ConfigBase](
                     VariableZSpec(
                         "params", label=param.label, unit=param.unit, index=i
                     ),
-                    required=False,
                 )
                 for i, param in enumerate(PARAMETERS)
             ),
@@ -174,7 +177,6 @@ def axes_spec[CfgT: ConfigBase](
                 VariableZSpec(
                     "start_iq", label="Start display I/Q", unit="", dtype=np.complex128
                 ),
-                required=False,
             ),
             VariableSpec(
                 _START_ASSETS,
@@ -203,13 +205,13 @@ def axes_spec[CfgT: ConfigBase](
                     ),
                 ),
                 VariableZSpec("arb_gains", label="Raw arb gains at g=1", unit=""),
-                required=False,
             ),
         ),
         result_type=CZOptimizeResult,
         cfg_type=cfg_type,
         tag="two_qubit/cz_optimize",
         result_builder=_restore,
+        result_validator=_validate_evaluations,
         cfg_schema_version="4.0",
         labber_layout="independent",
         labber_variables=(*(param.name for param in PARAMETERS), "peak"),

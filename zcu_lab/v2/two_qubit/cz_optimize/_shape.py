@@ -11,19 +11,21 @@ from qick import QickConfig
 from qick.asm_v2 import QickProgramV2
 from scipy.interpolate import CubicSpline
 from zcu_tools.core.waveform_format import WaveformSamples
-from zcu_tools.program.v2 import pulse_output_scale
-from zcu_tools.program.v2.modules.waveform import (
-    ConstWaveformCfg,
-    FlatTopWaveformCfg,
-    InMemoryArbWaveformCfg,
-    WaveformCfg,
+from zcu_tools.program.v2 import (
+    Pulse,
+    PulseCfg,
+    TimelineBuilder,
+    flat_top_plateau_scale,
+    pulse_output_scale,
 )
+from zcu_tools.program.v2.modules.waveform import InMemoryArbWaveformCfg, WaveformCfg
 
 from .._drive import QubitDriveCfg
 
 KNOTS = 3
-GAIN_SCALE = 2 * KNOTS
-Z1 = GAIN_SCALE + 1
+KNOT_COLUMNS = 2 * KNOTS
+GAIN_INDEX = KNOT_COLUMNS
+Z1 = GAIN_INDEX + 1
 Z2 = Z1 + 1
 PARAM_COUNT = Z2 + 1
 
@@ -94,13 +96,6 @@ def _native_style(style: StartStyle) -> _NativeStyle:
     return "arb"
 
 
-def _length(wave: WaveformCfg) -> float:
-    length = wave.build("cz_start").length
-    if not isinstance(length, (float, int)):
-        raise ValueError("Two-line CZ drive waveform length must be scalar")
-    return float(length)
-
-
 def _starting_envelope(
     waveform: WaveformCfg, board: QickConfig, ch: int
 ) -> _StartingEnvelope:
@@ -108,44 +103,49 @@ def _starting_envelope(
     if isinstance(waveform, InMemoryArbWaveformCfg):
         raise ValueError("Two-line CZ drive requires a serializable starting waveform")
     spc = int(board["gens"][ch]["samps_per_clk"])
-    cycle_us = float(board.cycles2us(1, gen_ch=ch))
     style = StartStyle[waveform.style.upper()]
-    length = _length(waveform)
-    if isinstance(waveform, ConstWaveformCfg):
-        cycles = int(board.us2cycles(length, gen_ch=ch))
+    wave = waveform.build("cz_start")
+    native = wave.to_wav_kwargs()
+    native_style = native["style"]
+    dds_cycles = 0
+    if native_style != "arb":
+        # For flat_top, QICK's length keyword is only the DDS plateau.
+        length = native.get("length")
+        if not isinstance(length, (float, int)):
+            raise ValueError("Two-line CZ drive waveform length must be scalar")
+        dds_cycles = int(board.us2cycles(length, gen_ch=ch))
+    if native_style == "const":
         return _StartingEnvelope(
-            style, np.ones(cycles * spc, dtype=np.complex128), cycles * cycle_us
+            style,
+            np.ones(dds_cycles * spc, dtype=np.complex128),
+            float(board.cycles2us(dds_cycles, gen_ch=ch)),
         )
 
     prog = _EnvelopeEvaluator(board)
-    waveform.build("cz_start").create(prog, ch)
-    ramp = prog.iq / board.get_maxv(ch)
-    ramp_us = len(ramp) / spc * cycle_us
-    if not isinstance(waveform, FlatTopWaveformCfg):
-        return _StartingEnvelope(style, ramp, ramp_us)
-
-    plateau_cycles = int(
-        board.us2cycles(length - _length(waveform.raise_waveform), gen_ch=ch)
+    wave.create(prog, ch)
+    iq = prog.iq / board.get_maxv(ch)
+    if native_style == "flat_top":
+        iq = _flat_top_samples(iq, dds_cycles * spc, board, ch)
+    return _StartingEnvelope(
+        style, iq, float(board.cycles2us(len(iq) // spc, gen_ch=ch))
     )
-    if plateau_cycles < 0:
+
+
+def _flat_top_samples(
+    ramp: NDArray[np.complex128], plateau_samples: int, board: QickConfig, ch: int
+) -> NDArray[np.complex128]:
+    if plateau_samples < 0:
         raise ValueError(
             "Two-line CZ drive flat_top plateau duration must be nonnegative"
         )
-    plateau_us = plateau_cycles * cycle_us
-    # The ramp is product output like arb. The flat segment sets the native
-    # flat-top scale; do not normalize the DDS segment by the ramp midpoint.
-    ramp_ratio = pulse_output_scale(board, ch, "arb") / pulse_output_scale(
-        board, ch, "flat_top"
-    )
+    # Express each segment in units of the full-scale flat_top peak.
+    scale = pulse_output_scale(board, ch, "flat_top")
+    ramp = ramp * (pulse_output_scale(board, ch, "arb") / scale)
+    plateau = flat_top_plateau_scale(board, ch) / scale
     center = len(ramp) // 2
-    iq = np.concatenate(
-        (
-            ramp[:center] * ramp_ratio,
-            np.ones(plateau_cycles * spc, dtype=np.complex128),
-            ramp[center:] * ramp_ratio,
-        )
+    return np.concatenate(
+        (ramp[:center], np.full(plateau_samples, plateau), ramp[center:])
     )
-    return _StartingEnvelope(style, iq, ramp_us + plateau_us)
 
 
 def _same_start(first: _StartingEnvelope, second: _StartingEnvelope) -> bool:
@@ -154,6 +154,17 @@ def _same_start(first: _StartingEnvelope, second: _StartingEnvelope) -> bool:
         and first.duration_us == second.duration_us
         and np.array_equal(first.iq, second.iq)
     )
+
+
+def _compiled_cycles(pulse: PulseCfg, board: QickConfig) -> int:
+    builder = TimelineBuilder(board)
+    module = Pulse("cz_start", pulse)
+    builder.emit(module)
+    program = builder.build()
+    duration = program.get_pulse_param(module.pulse_name(program), "total_length")
+    if not isinstance(duration, (float, int)):
+        raise ValueError("Two-line CZ drive waveform length must be scalar")
+    return int(board.us2cycles(duration, gen_ch=pulse.ch))
 
 
 def _spline(knots: NDArray[np.float64], *, in_phase: bool) -> CubicSpline:
@@ -187,27 +198,43 @@ def prepare_start(
 ) -> StartShape:
     """Evaluate and fit aligned scalar pulses before acquiring any counts.
 
-    Compare both declared shapes on a common display grid, then fit the
-    symmetric and antisymmetric components on Qubit1's generator grid.
+    Compare shapes on Qubit1's display grid, then require equal played durations
+    on the two native generator grids before fitting on Qubit1's grid.
     """
     first, second = drive.qubit1, drive.qubit2
     start = _starting_envelope(first.waveform, board, first.ch)
-    if first.waveform != second.waveform and not _same_start(
-        start, _starting_envelope(second.waveform, board, first.ch)
-    ):
+    second_on_first_grid = (
+        start
+        if first.waveform == second.waveform
+        else _starting_envelope(second.waveform, board, first.ch)
+    )
+    if not _same_start(start, second_on_first_grid):
         raise ValueError(
             "drive.qubit1.waveform and drive.qubit2.waveform must have the same CZ shape and duration"
+        )
+    ch = first.ch
+    first_cycles = _compiled_cycles(first, board)
+    second_cycles = _compiled_cycles(second, board)
+    duration_us = float(board.cycles2us(first_cycles, gen_ch=ch))
+    second_duration = float(board.cycles2us(second_cycles, gen_ch=second.ch))
+    if duration_us != second_duration:
+        raise ValueError(
+            "Starting CZ pulses must have equal generator-quantized durations: "
+            f"Qubit1 {duration_us:.12g} µs, Qubit2 {second_duration:.12g} µs"
         )
     if len(start.iq) < 2:
         raise ValueError("Two-line CZ drive must contain at least two samples")
 
-    ch = first.ch
     cycle_us = float(board.cycles2us(1, gen_ch=ch))
     samples_per_cycle = int(board["gens"][ch]["samps_per_clk"])
-    knots = _fit_knots(start.iq)
+    # QICK can append a zero-gain FIR clearing segment to a flat-top pulse.
+    # Include the compiled support in T, but do not model the analog response.
+    tail_samples = first_cycles * samples_per_cycle - len(start.iq)
+    iq = np.pad(start.iq, (0, tail_samples)) if tail_samples else start.iq
+    knots = _fit_knots(iq)
     _, fit_i, fit_q = _sample_knots(
         knots,
-        duration_us=start.duration_us,
+        duration_us=duration_us,
         cycle_us=cycle_us,
         samples_per_cycle=samples_per_cycle,
     )
@@ -234,9 +261,9 @@ def prepare_start(
             )
         arb_gains.append(gain)
     return StartShape(
-        iq=start.iq * float(first.gain) * pulse_output_scale(board, ch, original),
+        iq=iq * float(first.gain) * pulse_output_scale(board, ch, original),
         style=start.style,
-        duration_us=start.duration_us,
+        duration_us=duration_us,
         cycle_us=cycle_us,
         samples_per_cycle=samples_per_cycle,
         carrier_mhz=float(first.freq),
@@ -279,7 +306,7 @@ def render_candidate(
     samples_per_cycle: int,
 ) -> WaveformSamples:
     """Sample a fixed-duration arb and normalize I and Q by one positive scale."""
-    knots = params[:GAIN_SCALE]
+    knots = params[:KNOT_COLUMNS]
     if not np.all(np.isfinite(knots)):
         raise ValueError("CZ envelope knots must be finite")
     scale = float(np.max(np.abs(knots)))
