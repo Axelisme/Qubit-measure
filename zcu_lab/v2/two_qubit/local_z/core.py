@@ -49,6 +49,7 @@ from .._phase import (
     count_quadratures,
     phase_display_sem,
     phase_variance,
+    quadrature_contrast_sem,
     quadrature_phase_sem,
 )
 from .._phase_plot import (
@@ -276,6 +277,29 @@ def _start_live_view(
     ax.legend(loc="upper center", bbox_to_anchor=(0.5, -0.12), ncols=2)
     fig.show()
 
+    contrast_fig, contrast_ax = plots.subplots(
+        num="local_z_contrast", layout="constrained"
+    )
+    contrast_fig.suptitle("Local Z · X/Y contrast")
+    contrast_ax.set(xlabel="CZ gates, n (count)", ylabel="Bloch vector length")
+    contrast_ax.xaxis.set_major_locator(MaxNLocator(integer=True))
+    contrast_ax.set_xlim(n[0] - 0.25, n[-1] + 0.25)
+    contrast = live_errorbar(contrast_ax, num_lines=2)
+    for line, label, marker in zip(
+        contrast_ax.lines, ("Qubit1", "Qubit2"), ("o", "s"), strict=True
+    ):
+        line.set(label=label, marker=marker)
+    contrast_ax.legend(loc="upper center", bbox_to_anchor=(0.5, -0.12), ncols=2)
+    contrast_fig.show()
+
+    @plots.on_plot_thread
+    def render_contrast(observed: CountQuadratures) -> tuple[Artist, ...]:
+        return contrast.set(
+            n.astype(np.float64),
+            np.hypot(observed.values[:, 0], observed.values[:, 1]),
+            quadrature_contrast_sem(observed),
+        )
+
     @plots.on_plot_thread
     def render(
         payload: tuple[NDArray[np.float64], NDArray[np.float64], str],
@@ -305,6 +329,7 @@ def _start_live_view(
                 f"{int(measured.min())}–{int(measured.max())} retained shots per projection"
             )
         render((phases, quadrature_phase_sem(observed), progress))
+        render_contrast(observed)
 
     return update_view
 
@@ -543,7 +568,7 @@ class LocalZExp(Experiment[LocalZResult, LocalZCfg]):
         _plot_diagnostics(
             plots,
             ns,
-            quadratures,
+            observed,
             _projection_sem(counts),
             list(zip(target_labels, fits, strict=True)),
         )
@@ -660,7 +685,7 @@ def _plot_local_z(
 def _plot_diagnostics(
     plots: Plots,
     ns: NDArray[np.int64],
-    xy: NDArray[np.float64],
+    observed: CountQuadratures,
     sem: NDArray[np.float64],
     fitted: list[tuple[str, PhaseLineFit]],
 ) -> None:
@@ -677,6 +702,7 @@ def _plot_diagnostics(
     )
     *projection_axes, contrast_ax, residual_ax = fig.axes
     fig.suptitle("Local Z · Diagnostics")
+    contrast_sem = quadrature_contrast_sem(observed)
     for t, (projection_ax, (label, fit)) in enumerate(
         zip(projection_axes, fitted, strict=True)
     ):
@@ -684,13 +710,20 @@ def _plot_diagnostics(
         for q, projection in enumerate(("X", "Y")):
             projection_ax.errorbar(
                 ns,
-                xy[t, q],
+                observed.values[t, q],
                 yerr=sem[t, q],
                 fmt=".-",
                 color=f"C{q}",
                 label=f"{projection} ± shot SEM",
             )
-        contrast_ax.plot(ns, np.hypot(*xy[t]), ".-", color=f"C{t}", label=label)
+        contrast_ax.errorbar(
+            ns,
+            np.hypot(*observed.values[t]),
+            yerr=contrast_sem[t],
+            fmt=".-",
+            color=f"C{t}",
+            label=label,
+        )
         if fit.unwrapped_deg is not None and fit.fit_curve is not None:
             quality = fit.fit_quality
             detail = label

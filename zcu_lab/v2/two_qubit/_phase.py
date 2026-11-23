@@ -9,6 +9,7 @@ from typing import Literal
 import numpy as np
 from numpy.typing import NDArray
 from zcu_tools.analysis.fitting.phase_slopes import PhaseSlopeFit, fit_phase_slopes
+from zcu_tools.analysis.shot_uncertainty import contrast_shot_sem
 
 from ._sums import qubit_marginal_probabilities, qubit_sigma
 
@@ -218,6 +219,19 @@ def phase_display_sem(
 ) -> NDArray[np.float64]:
     """Mask display bars unless both projections retain at least two shots."""
     return np.sqrt(np.where((x_shots >= 2) & (y_shots >= 2), variance, np.nan))
+
+
+def quadrature_contrast_sem(group: CountQuadratures) -> NDArray[np.float64]:
+    """Return shot SEM of contrast for series × X/Y × scan axes.
+
+    Return the series and scan axes, with NaN where either projection cannot
+    support an estimate. The group and its fit variances are unchanged.
+    """
+    return contrast_shot_sem(
+        np.moveaxis(group.values, 1, -1),
+        variances=np.moveaxis(group.variances, 1, -1),
+        shots=np.moveaxis(group.acquired, 1, -1),
+    )
 
 
 def quadrature_phase_sem(group: CountQuadratures) -> NDArray[np.float64]:
