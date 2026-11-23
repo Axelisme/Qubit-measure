@@ -17,7 +17,7 @@ The device stays at the last applied bias. Restore the working bias explicitly a
 
 ## Read the maps
 
-Run shows bias rows with data and the latest gain trace in blue, with up to three earlier traces in gray. Acquisition progress counts rounds. Blank cells have no displayed data.
+Run shows bias rows with data and the latest gain trace in blue, with up to three earlier traces in gray. Blank cells have no displayed data.
 Each row subtracts its own mean IQ over the first 5% of gain points (at least one) before taking the magnitude. The display caps displacement at ten times the median of its lower half, so the same top color can hide different responses. The maps have no per-cell error bars or fit.
 
 Analyze shows the same displacement with optional axis calibrations. The two flux values start from the source Run's qubit calibration for the scanned device. Set both **Half-flux bias** and **Flux period** for Φ₀ below and device units above; clear either for native units only. Set **Photon number / gain squared** only with an independent calibration: `n = coefficient × gain²`. **Full acquired range** uses the acquired endpoints.

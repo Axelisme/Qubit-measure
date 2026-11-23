@@ -226,7 +226,7 @@ class AcStarkExp(Experiment[AcStarkResult, AcStarkCfg]):
             figsize=(11, 4),
             layout="constrained",
         )
-        progress = figure.suptitle("AC Stark scan · qubit · classified populations")
+        figure.suptitle("AC Stark scan · qubit · classified populations")
         heatmaps = []
         for state, ax in zip(("g", "e", "other"), figure.axes, strict=True):
             ax.set(
@@ -241,20 +241,13 @@ class AcStarkExp(Experiment[AcStarkResult, AcStarkCfg]):
 
         @context.plots.on_plot_thread
         def plot_fn(counts: NDArray[np.float64]):
-            """Display the classified probability maps and completed cells."""
+            """Display the classified probability maps."""
             totals = counts.sum(axis=-1)
             populations = counts / totals[..., None]
-            progress.set_text(
-                "AC Stark scan · qubit · classified populations\n"
-                f"{np.count_nonzero(totals > 0)}/{totals.size} gain–frequency points acquired"
-            )
-            return (
-                progress,
-                *(
-                    artist
-                    for i, heatmap in enumerate(heatmaps)
-                    for artist in heatmap.set(gains, freqs, populations[..., i])
-                ),
+            return tuple(
+                artist
+                for i, heatmap in enumerate(heatmaps)
+                for artist in heatmap.set(gains, freqs, populations[..., i])
             )
 
         figure.show()

@@ -625,7 +625,6 @@ class MuxGEExp(Experiment[MuxGEResult, MuxGECfg]):
             ax.set(
                 xlabel="I per shot (a.u.)",
                 ylabel="Q per shot (a.u.)",
-                title="Acquired shots: 0 count",
             )
             ax.grid(False)
             _probe_iq_legend(ax)
@@ -638,8 +637,6 @@ class MuxGEExp(Experiment[MuxGEResult, MuxGECfg]):
             for row, (_, axes, image) in enumerate(live_frames):
                 off, on = data[:, :, row]
                 plot_ge_iq_density(axes, off, on, image=image)
-                count = np.count_nonzero(np.isfinite(data[:, :, row]))
-                axes.set_title(f"Acquired shots: {count} / {2 * cfg.shots} count")
             return tuple(fig for fig, _, _ in live_frames)
 
         buffer = SignalBuffer((2, cfg.shots, len(indices)), on_update=update)

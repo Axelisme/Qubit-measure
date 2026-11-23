@@ -568,7 +568,23 @@ class MultitoneRWAKernel:
     def prepare_keys(
         self, table: SegmentTable, rows: NDArray[np.int64], context: KernelContext
     ) -> NDArray[np.void]:
-        """Hash policy, budget, model level and complete active tone/envelope content."""
+        """Hash policy, budget and complete active tone/envelope content."""
+        return self._physics_keys(table, rows, context, canonical_ports=False)
+
+    def history_keys(
+        self, table: SegmentTable, rows: NDArray[np.int64], context: KernelContext
+    ) -> NDArray[np.void]:
+        """Hash the same physics using stable recipes for evolve-local ports."""
+        return self._physics_keys(table, rows, context, canonical_ports=True)
+
+    def _physics_keys(
+        self,
+        table: SegmentTable,
+        rows: NDArray[np.int64],
+        context: KernelContext,
+        *,
+        canonical_ports: bool,
+    ) -> NDArray[np.void]:
         keys = np.empty(len(rows), dtype="V32")
         for index, row in enumerate(rows):
             count = table.tones[row]
@@ -587,8 +603,13 @@ class MultitoneRWAKernel:
                     [table.start_ns[row], table.duration_ns[row]], dtype="<f8"
                 ).tobytes()
             )
+            ports = table.tone_port[row, :count].astype("<f8")
+            if canonical_ports:
+                for group in table.carrier_groups.get(int(row), ()):
+                    if group.folded_identity:
+                        ports[group.slots[0]] = -1
+            digest.update(ports.tobytes())
             for values in (
-                table.tone_port,
                 table.tone_frequency_ghz,
                 table.tone_amplitude,
                 table.tone_theta_rad,
@@ -597,6 +618,8 @@ class MultitoneRWAKernel:
                 digest.update(values[row, :count].astype("<f8").tobytes())
             for env in table.tone_envelope[row, :count]:
                 digest.update(table.envelopes[env].identity.encode("ascii"))
+            if canonical_ports:
+                digest.update(table.folded_channel_key(int(row)))
             keys[index] = np.void(digest.digest())
         return keys
 

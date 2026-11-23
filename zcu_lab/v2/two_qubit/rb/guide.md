@@ -16,7 +16,7 @@ Each shot runs **optional Reset → random Clifford prefix → inverse recovery 
 
 ## Interpreting the result
 
-- **Joint ground return**, Live and first Analyze, pools retained terminal P(g,g) by arm and depth. Live counts measured seed/arm/depth cells and total retained shots. Other counts in the denominator and does not identify a leakage state. Analyze uses the saved run's **Reps × Rounds**; this is not the retained count.
+- **Joint ground return**, Live and first Analyze, pools retained terminal P(g,g) by arm and depth. Other counts in the denominator and does not identify a leakage state. Analyze uses the saved run's **Reps × Rounds**; this is not the retained count.
 - **Paired decay fit** gives equal weight to each seed, using only those with return data at every depth for both arms. It needs at least four distinct depths and two complete paired seeds. Dots give the means and curves fit `A p^depth + B`.
 - Capped bars on pooled views are shot SEM: the 0/1 success sample SD divided by √N retained shots. Fewer than two shots gives no SEM bar. Pale pooled bars and fit point bars give across-seed sample SD, not shot SEM, fit SE or round variation. The fit view uses complete seed pairs; the pooled view uses available seeds at each point.
 - For each arm, 1/e depth and its ± fit SE are in Cliffords. Relative error is their ratio, SE/depth. R² measures explained variation; normalized RMS divides residual RMS by measured span. These metrics have no numeric acceptance threshold. Check both curves and the named arm's depth-window warning before using a fit.

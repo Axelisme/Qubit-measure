@@ -134,11 +134,7 @@ def _live_plot(
     @plots.on_plot_thread
     def update(data: NDArray[np.complex128]):
         projection = project_arm_means(data)
-        complete = int(np.isfinite(data).all(axis=(1, 2)).sum())
-        title = ax.set_title(
-            f"{experiment} · {complete}/{data.shape[0]} seeds complete"
-        )
-        return (*viewer.set(xs, projection.mean_signals, projection.seed_std), title)
+        return viewer.set(xs, projection.mean_signals, projection.seed_std)
 
     fig.show()
     return update

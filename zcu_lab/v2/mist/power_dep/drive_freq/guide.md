@@ -16,7 +16,7 @@ Each shot applies `optional reset → optional preparation → resonator probe �
 
 ## Read the maps
 
-Run shows how many frequency/gain pairs have data. Acquisition progress counts rounds. Blank cells have no displayed data.
+Blank cells have no displayed data.
 
 Run and Analyze subtract the complex reference averaged over all frequencies and the first 5% of gain points (at least one), then show the magnitude in a.u. Each map scales to its own data; compare colorbar values rather than colors across runs. There is no fit or per-cell error bar.
 

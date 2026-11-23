@@ -126,8 +126,7 @@ class CheckExp(Experiment[CheckResult, CheckCfg]):
             ax.set(
                 xlabel="IQ in-phase I (a.u.)",
                 ylabel="IQ quadrature Q (a.u.)",
-                title="Single-shot check · qubit · IQ cloud\n"
-                f"Accumulated shots = {np.count_nonzero(finite)} count",
+                title="Single-shot check · qubit · IQ cloud",
             )
             ax.set_aspect("equal", adjustable="datalim")
             return (figure,)

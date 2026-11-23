@@ -265,7 +265,6 @@ def _start_live_view(
     fig, ax = plots.subplots(num="local_z", figsize=(12, 9), layout="constrained")
     n = np.asarray(config.gate_count, dtype=np.int64)
     fig.suptitle("Local Z · Accumulated phase")
-    status = ax.set_title("Waiting for shots")
     ax.set(xlabel="CZ gates, n (count)", ylabel="Accumulated phase (deg)")
     format_accumulated_phase_axis(ax)
     ax.set_xlim(n[0] - 0.25, n[-1] + 0.25)
@@ -302,17 +301,13 @@ def _start_live_view(
 
     @plots.on_plot_thread
     def render(
-        payload: tuple[NDArray[np.float64], NDArray[np.float64], str],
+        payload: tuple[NDArray[np.float64], NDArray[np.float64]],
     ) -> tuple[Artist, ...]:
-        phases, sem, progress = payload
-        status.set_text(progress)
-        return (
-            status,
-            *(
-                artist
-                for t, viewer in enumerate(viewers)
-                for artist in viewer.set(*wrapped_phase_plot_data(n, phases[t], sem[t]))
-            ),
+        phases, sem = payload
+        return tuple(
+            artist
+            for t, viewer in enumerate(viewers)
+            for artist in viewer.set(*wrapped_phase_plot_data(n, phases[t], sem[t]))
         )
 
     def update_view(sums: NDArray[np.float64]) -> None:
@@ -320,15 +315,7 @@ def _start_live_view(
         phases = np.stack(
             [_unwrap_segments(_angles_deg(_phase_points(xy))) for xy in observed.values]
         )
-        totals = observed.acquired
-        measured = totals[np.isfinite(totals)]
-        progress = "Waiting for shots"
-        if measured.size:
-            progress = (
-                f"{measured.size}/{totals.size} projections measured\n"
-                f"{int(measured.min())}–{int(measured.max())} retained shots per projection"
-            )
-        render((phases, quadrature_phase_sem(observed), progress))
+        render((phases, quadrature_phase_sem(observed)))
         render_contrast(observed)
 
     return update_view

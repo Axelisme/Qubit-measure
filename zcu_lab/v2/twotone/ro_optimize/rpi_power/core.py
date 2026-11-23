@@ -207,22 +207,15 @@ class RPiPowerExp(Experiment[RPiPowerResult, RPiPowerCfg]):
         ax.lines[0].set_marker("o")
 
         @context.plots.on_plot_thread
-        def draw(payload: tuple[list[RPiAnalysis], int]) -> tuple[Artist, ...]:
+        def draw(analyses: list[RPiAnalysis]) -> tuple[Artist, ...]:
             """Refresh the measurement artists from the current acquired data."""
-            analyses, reads = payload
-            status = not_plotted_title(analyses, GAIN_AXIS.setting_name)
-            progress = (
-                f"{len(analyses)}/{len(gains)} settings acquired\n"
-                f"Minimum reads per acquired setting: {reads} count"
-            )
-            ax.set_title(f"{progress}\n{status}" if status else progress)
-            return (*viewer.set(gains, valid_values(analyses, "score")), ax.title)
+            status = ax.set_title(not_plotted_title(analyses, GAIN_AXIS.setting_name))
+            return (*viewer.set(gains, valid_values(analyses, "score")), status)
 
         def update(records: NDArray[np.float64]) -> None:
             # Analyze here, on the acquisition thread, so the GUI thread only draws.
             """Refresh the measurement artists from the current acquired data."""
-            reads = int(records[:, 1].min())
-            draw((analyze_records(records), reads))
+            draw(analyze_records(records))
 
         fig.show()
         record_sums = SignalBuffer(

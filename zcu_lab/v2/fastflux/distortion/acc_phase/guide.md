@@ -15,7 +15,7 @@ For tab setup, refreshing sources and saving, see [`zcu_lab/v2/operator-workflow
 
 ## Read the map and detuning
 
-Live and the first Analyze heatmap show first π/2 center (wait + half π/2 duration) versus Projection phase. Color is mean IQ projected along the scan's largest IQ variation, not population. The Live sample count measures coverage; completed rounds measure averaging.
+Live and the first Analyze heatmap show first π/2 center (wait + half π/2 duration) versus Projection phase. Color is mean IQ projected along the scan's largest IQ variation, not population.
 
 Analyze unwraps the sine/cosine fringe phase across time. The black line connects detuning estimates, not a fit. The points are `−(dφ/dt)/(2π)` in MHz for phase in rad and time in µs. A positive phase slope means negative detuning. The green rectangle uses the programmed flux edges and levels from the lowest and highest deciles of absolute detuning. Each gray band spans one π/2 duration centered on an edge. Each cell stores only mean IQ, without the shot covariance needed to estimate phase uncertainty and propagate it through the time derivative. The detuning points have no error bars. Analyze requires the source cfg for pulse timing.
 

@@ -14,7 +14,7 @@
 
 ## 讀圖與下一步
 
-Live 和 Analyze 的雙 gain 熱圖用全掃描 IQ 最大散布方向的投影（a.u.）。Run 分別顯示有 IQ 的點數和累積輪次。二維圖沒有逐點 shot SEM。舊檔若缺來源 cfg，有效 gain map 仍可分析。
+Live 和 Analyze 的雙 gain 熱圖用全掃描 IQ 最大散布方向的投影（a.u.）。二維圖沒有逐點 shot SEM。舊檔若缺來源 cfg，有效 gain map 仍可分析。
 
 **Probe power** 圖用同一份 IQ，將 MIST gain 改成 gain²；用單一 gain 符號掃描，否則一正一負會落在同一功率值。只有已獨立校準 photon number 對 gain² 時，才填 **Photon calibration coefficient**，圖上估計 photon number = 係數 × gain²。
 

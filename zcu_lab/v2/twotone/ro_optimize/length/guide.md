@@ -15,7 +15,7 @@ Optional **Reset** → omit or apply the calibrated **Qubit π pulse** → reado
 
 ## Read the figures and choose a setting
 
-Both plots show SNR versus ADC window (µs). Live counts scored settings; Analyze overlays the selection SNR if different and marks the chosen window. No shot SEM or pointwise SNR uncertainty is shown. Repeat nearby windows if small score differences would change the choice.
+Both plots show SNR versus ADC window (µs). Analyze overlays the selection SNR if different and marks the chosen window. No shot SEM or pointwise SNR uncertainty is shown. Repeat nearby windows if small score differences would change the choice.
 
 **Smooth method** and **Smooth strength** affect selection, not the raw measured values. Strength scales the wavelet threshold or sets Gaussian width in sample steps. Missing scores enter smoothing as zeros; check the measured points before using a result from an incomplete sweep.
 

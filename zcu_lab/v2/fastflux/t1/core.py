@@ -150,7 +150,6 @@ class T1Exp(Experiment[T1Result, T1Cfg]):
         fig, ax = context.plots.subplots(num="measurement", layout="constrained")
         fig.suptitle("Fast-flux relaxation · Qubit · Decay map")
         ax.set(xlabel="Flux pulse gain (a.u.)", ylabel="Flux pulse duration (µs)")
-        ax.set_title(f"0/{gains.size * lengths.size} scan points with IQ")
         ax.grid(False)
         viewer = live_heatmap(ax)
         (image,) = viewer.set(
@@ -161,9 +160,7 @@ class T1Exp(Experiment[T1Result, T1Cfg]):
         @context.plots.on_plot_thread
         def update(data: NDArray[np.complex128]) -> Iterable[Artist]:
             """Display available IQ on the scan grid without changing the buffer."""
-            count = np.count_nonzero(np.isfinite(data))
-            title = ax.set_title(f"{count}/{data.size} scan points with IQ")
-            return (*viewer.set(gains, lengths, t1_signal2real(data)), title)
+            return viewer.set(gains, lengths, t1_signal2real(data))
 
         fig.show()
         signals_buffer = SignalBuffer(
