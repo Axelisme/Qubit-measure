@@ -6,13 +6,7 @@ status: accepted
 
 ## 局部取代範圍
 
-**規則。** 欄位轉換與保存還原以 [ADR-0079](0079-form-field-transitions.md#決策狀態與問題) 為準。
-
-**例子。** 普通切換沒有 converter 時只改 selection，不補 fresh defaults。
-
-**邊界。** 局部取代也涵蓋改動 parent 的數值葉 command，以及只保存 input、丟棄不相容葉的舊規則。其餘 owner 邊界不變。
-
-**依據。** 取代項目與實作狀態由 [ADR-0079](0079-form-field-transitions.md#決策狀態與問題) 記錄。
+已由 [[0079]] 取代，見[〈決策狀態與問題〉](0079-form-field-transitions.md#決策狀態與問題)；[原文](retired/cfg-editing-replacement-scope.md#局部取代範圍)僅供追溯。
 
 ## 問題與決策
 

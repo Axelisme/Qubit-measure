@@ -1,6 +1,6 @@
 # Measure Qt views
 
-**Last updated:** 2026-11-23，Data 縮圖對齊
+**Last updated:** 2026-11-23，Data 縮圖對齊與錯誤通知
 
 **讀者：** framework-dev。量測 Qt views、對話框與呈現生命週期。
 
@@ -16,14 +16,7 @@ Inspect and ARB editing on control transfer, including windows already open.
 Run separately locks Entry and SoC submissions; Inspect, Devices and ARB keep
 their existing Run policy. Entry… and SoC… have separate toolbar entries; the named `soc`
 window participates in remote screenshots.
-Diagnostic errors under an online Remote holder show an eight-second notice
-with the title and first line; the complete message goes to the error log.
-Details… opens a full non-modal report that stays open until manually closed,
-independently of the notice timer. A later error replaces the notice and restarts
-its timer. Local and offline Remote holders receive the existing manual non-modal
-report. Info diagnostics still use the status bar. The main window retires the
-notice's lifetime scope and timer before deleting its children.
-Confirmations, choosers and writeback editing keep their modal protection. See the [Measure README](../README.md)
+See [錯誤通知](#錯誤通知) for diagnostic presentation and the [Measure README](../README.md)
 for pane ownership and operation lifecycles.
 
 `MainWindow` uses the More ▾ tab switch to show experiment tabs or workflow tabs in the
@@ -221,3 +214,12 @@ a failed retry leaves the notice and shows the current preparation error.
 `ArtifactSaveCenter` shows each output on two lines: the filename, status and
 actions above, and the secondary-colour path below. Failure messages appear
 below the path and use the shared `gui.widgets.error_colour` rule.
+
+## 錯誤通知
+
+Measure 的無需回答錯誤通知依[控制身份](../../../../../../docs/adr/0070-control-identity.md#rpc-與-gui-寫入)呈現。Remote holder 在線時，主視窗顯示約八秒後自動消失的摘要，內容為標題與首行，完整內容寫入 error log。
+Details… 開啟完整的非模態報告，報告不受摘要計時器影響，保持到手動關閉。後續錯誤取代摘要並重新計時。
+Local 操作或 Remote holder 離線時，非模態報告保持到手動關閉。Info diagnostics 仍顯示於狀態列。
+主視窗在刪除子元件前停止摘要的 lifetime scope 與計時器。
+
+2026-11-02，使用者問「1應該要根據是否處於online操作而決定是否自動關閉彈窗？」，並以「確認」採用上述分工。原始討論未入庫，裁決見 Git `a8c7eb66a5`。

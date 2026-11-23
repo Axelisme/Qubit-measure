@@ -313,13 +313,7 @@ FTF cavity drive 使相鄰態能量反轉時，原色散模型仍能算，不重
 
 ### t6 只保留 direct
 
-**規則。** `t6` 在 constant 單 tone 域只走 direct，保留原 guard、prepare-key 身份和失敗就 raise 的語意。不建 reusable channel，不做 Fourier playback，也不為 channel 收完整 acquire key inventory 或比價。
-
-**例子。** 每列 density 經共用的 endpoint solver 在 H0 旋轉座標積分，用完整 secular bath 與原 budget-scaled 局部容差。實作入口見 [Kernel summary](../../lib/zcu_tools/simulate/evolution/README.md#kernel-summary)與[共用數值 owner](../../lib/zcu_tools/simulate/evolution/README.md#algorithm-ownership-and-reuse)。
-
-**邊界。** 其他 family 的 period channel 不變。未來若出現高重用工作負載，再依新證據評估，不保留相容性分支。
-
-**依據。** 2026-11-15，使用者裁定 `t6` 只保留 direct，答「2B」。量測與方案比較見[移除 t6 channel 的討論](../discussions/2026-11-15-t6-channel-removal.md)。
+`t6` 的局部選路決定見 [Evolution README〈t6 只保留 direct〉](../../lib/zcu_tools/simulate/evolution/README.md#t6-只保留-direct)。
 
 ### 損耗漂移下的結構與 preparation lifetime
 

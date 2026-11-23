@@ -31,7 +31,7 @@ TimeBase 的頻率為約分後的有理數 `F = num / den`，單位為 ticks/μs
 - Num 必須能在 float64 精確表示。Request 的時間輸入與中間結果須在 int64 範圍內，另限制 `abs(ticks * 1000 * den) <= 2**53`。超出範圍報 `OverflowError`，不截斷、不溢位回繞。
 - Relax delay 沿用 QICK 真正編譯時的 tProc-cycle 捨入，再映射到公共整數時基。它不以 raw 作者參數套用手建 fixture 的格點限制。
 
-Mock 時鐘的公共頻率為 43008 MHz。對應的 tProc、fabric、ADC、envelope 週期為 100、112、140、7 ticks。ADC output 為 76.8 MHz 的 FTF 配置，其 ADC 週期為 560 ticks。
+固定 mock 時鐘與 FTF 取樣週期見 [Program simulation README](../../lib/zcu_tools/program/v2/simulation/README.md#mock-clock-example)。
 
 ### 模擬 round 時長
 

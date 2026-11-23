@@ -1,6 +1,6 @@
 # Segment evolution
 
-**Last updated:** 2026-11-23, sampled RWA probe lifetime
+**Last updated:** 2026-11-23, sampled RWA probe lifetime and t6 direct routing
 
 **讀者：** framework-dev、agent。Segment evolution 的公開輸入、路由與數值邊界。
 
@@ -1198,8 +1198,7 @@ inventory. Prepare keys still contain flux level, shift content, port, signed
 carrier, signed gain and duration; phase and start time are apply-only.
 `cost(table, rows)` supplies table-only chunk-interleaving weights.
 It does not determine candidate order.
-[ADR-0078](../../../../docs/adr/0078-evolution-module-boundary.md#t6-只保留-direct)
-records why the reusable-channel strategy was removed.
+See [t6 只保留 direct](#t6-只保留-direct) for the decision and its evidence.
 
 The matrix measures the maximum absolute difference over every complex density
 entry at readout, against an independent full-Hamiltonian Lindblad DOP853
@@ -1245,6 +1244,16 @@ controls do not establish a whole-sequence full-density bound. In particular,
 the slow-envelope population tolerance of `1e-2` above is not the matrix's
 `2e-3` full-density acceptance threshold. The matrix does not measure environment
 I/Q accuracy or model/basis convergence.
+
+### t6 只保留 direct
+
+**規則。** `t6` 在 constant 單 tone 域只走 direct，保留原 guard、prepare-key 身份和失敗就 raise 的語意。不建 reusable channel，不做 Fourier playback，也不為 channel 收完整 acquire key inventory 或比價。
+
+**例子。** 每列 density 經共用的 endpoint solver 在 H0 旋轉座標積分，用完整 secular bath 與原 budget-scaled 局部容差。實作入口見 [Kernel summary](#kernel-summary)與[共用數值 owner](#algorithm-ownership-and-reuse)。
+
+**邊界。** 其他 family 的 period channel 不變。未來若出現高重用工作負載，再依新證據評估，不保留相容性分支。
+
+**依據。** 2026-11-15，使用者裁定 `t6` 只保留 direct，答「2B」。量測與方案比較見[移除 t6 channel 的討論](../../../../docs/discussions/2026-11-15-t6-channel-removal.md)。
 
 ## Adding a family
 

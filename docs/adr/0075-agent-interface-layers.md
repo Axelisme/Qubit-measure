@@ -265,13 +265,7 @@ Measure、workflows、fluxdep 與 dispersive 的 MCP 各有工具。Agent 需要
 
 ### Fluxdep 的依賴模型不是跨 app 原則
 
-**規則。** Fluxdep 的流程依賴與品質判定是 app 的契約，不升成共用 MCP 原則。
-
-**例子。** Alignment → points → Filter → fit 決定下游失效；recorded quality、過期圖與匯出限制由 Fluxdep owner 管理，見 [[0068]] 與 [Fluxdep MCP README](../../lib/zcu_tools/mcp/fluxdep/README.md#fit-and-recorded-evidence)。
-
-**邊界。** 其他 app 按各自的需求決定失效模型，不套用 Fluxdep 的依賴鏈。
-
-**依據。** 2026-10-12，使用者對提升為通用範式裁定：「這點還不確定，先不進範式。」見 [Fluxdep MCP 設計](../discussions/2026-10-12-fluxdep-mcp-design.md#討論中使用者的判斷與修正)。
+Fluxdep 的流程依賴與品質判定見 [Fluxdep README](../../lib/zcu_tools/gui/app/fluxdep/README.md#fluxdep-的依賴模型不是跨-app-原則)。
 
 ## 現況與後續
 
