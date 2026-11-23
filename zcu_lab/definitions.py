@@ -94,6 +94,9 @@ from zcu_lab.v2.two_qubit.conditional_phase.gui_heralded import (
 from zcu_lab.v2.two_qubit.conditional_spectroscopy.gui import (
     DEFINITION as SPECTROSCOPY_DEFINITION,
 )
+from zcu_lab.v2.two_qubit.conditional_spectroscopy.gui_heralded import (
+    DEFINITION as SPECTROSCOPY_HERALDED_DEFINITION,
+)
 from zcu_lab.v2.two_qubit.constructive_phase.gui import (
     DEFINITION as CONSTRUCTIVE_PHASE_DEFINITION,
 )
@@ -313,6 +316,7 @@ def register_all(
         "jpa/check": JPA_CHECK_DEFINITION,
         "two_qubit/joint_readout": JOINT_READOUT_DEFINITION,
         "two_qubit/conditional_spectroscopy": SPECTROSCOPY_DEFINITION,
+        "two_qubit/conditional_spectroscopy_heralded": SPECTROSCOPY_HERALDED_DEFINITION,
         "two_qubit/chevron": CHEVRON_DEFINITION,
         "two_qubit/cz_amplitude": CZAMPLITUDE_DEFINITION,
         "two_qubit/cz_optimize": CZOPTIMIZE_DEFINITION,

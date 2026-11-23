@@ -11,7 +11,6 @@ from matplotlib.figure import Figure
 from matplotlib.ticker import MaxNLocator
 from numpy.typing import NDArray
 from pydantic import Field, model_validator
-from zcu_tools.analysis.shot_uncertainty import class_probability_covariance
 from zcu_tools.cfg_model import ConfigBase, DeviceName, FieldMeta
 from zcu_tools.experiment import (
     Experiment,
@@ -41,11 +40,8 @@ from zcu_lab.v2.support.device import set_flux
 
 from .._drive import QubitDriveCfg
 from .._readout import MuxResetCfg
-from .._sums import (
-    qubit_marginal_axis,
-    qubit_marginal_probabilities,
-    validate_qubit_tones,
-)
+from .._sums import qubit_marginal_probabilities, validate_qubit_tones
+from ._common import excitation_sem
 
 
 @dataclass(frozen=True)
@@ -272,15 +268,6 @@ _PREPARATIONS = ("g,g", "g,e", "e,g", "e,e")
 _QUBITS = ("Qubit1", "Qubit2")
 
 
-def _excitation_sem(counts: NDArray[np.float64]) -> NDArray[np.float64]:
-    # Sum over the other qubit's terminal classes; keep g, e and other in N.
-    errors = []
-    for target in ("qubit1", "qubit2"):
-        marginal = counts.sum(axis=qubit_marginal_axis(target))
-        errors.append(np.sqrt(class_probability_covariance(marginal)[..., 1, 1]))
-    return np.stack(errors, axis=-1)
-
-
 def _spectra_title(cfg: SpectroscopyCfg, index: int) -> str:
     """Name the measured population and active pulse-sequence variant."""
     title = "Conditional spectroscopy · Qubit1 / Qubit2 · Terminal P(e)"
@@ -396,7 +383,7 @@ class SpectroscopyExp(Experiment[SpectroscopyResult, SpectroscopyCfg]):
         @context.plots.on_plot_thread
         def update_view(sums: NDArray[np.float64]) -> tuple[Figure, ...]:
             answer = summarize_spectra(sums)
-            sem = _excitation_sem(sums)
+            sem = excitation_sem(sums)
             for index, (fig, panels, title) in enumerate(views):
                 for panel, (qubit1, qubit2) in zip(
                     panels, np.ndindex(2, 2), strict=True
@@ -518,7 +505,7 @@ class SpectroscopyExp(Experiment[SpectroscopyResult, SpectroscopyCfg]):
                 "Spectroscopy requires saved axes and sums (DC,2,2,frequency,3,3)"
             )
         answer = summarize_spectra(data.sums)
-        sem = _excitation_sem(data.sums)
+        sem = excitation_sem(data.sums)
         for index in range(len(dc)):
             fig, _ = plots.subplots(
                 num=f"spectra_{index}",
