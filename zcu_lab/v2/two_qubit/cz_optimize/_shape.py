@@ -67,7 +67,7 @@ class _StartingEnvelope:
 class StartShape:
     """Display and fit snapshot for the start; evaluation 0 plays the unmodified cfg.
 
-    iq is the Qubit1 field sampled uniformly in units of DDS const at gain 1.
+    iq is the played Qubit1 field sampled uniformly in DDS const units.
     style is the original shape identity. duration_us is its quantized support.
     cycle_us and samples_per_cycle are Qubit1's grid. carrier_mhz is the
     shared programmed carrier. knots hold the free I then Q values.
@@ -201,31 +201,74 @@ def prepare_start(
     if len(start.iq) < 2:
         raise ValueError("Two-line CZ drive must contain at least two samples")
 
+    ch = first.ch
+    cycle_us = float(board.cycles2us(1, gen_ch=ch))
+    samples_per_cycle = int(board["gens"][ch]["samps_per_clk"])
+    knots = _fit_knots(start.iq)
+    _, fit_i, fit_q = _sample_knots(
+        knots,
+        duration_us=start.duration_us,
+        cycle_us=cycle_us,
+        samples_per_cycle=samples_per_cycle,
+    )
+    p0 = float(np.max(np.hypot(fit_i, fit_q)))
+    if not np.isfinite(p0) or p0 == 0.0:
+        raise ValueError("CZ starting fit must have a finite nonzero complex peak")
+
+    # Only re-express the shape in the CMA box. Keep the original fit's
+    # physical field by absorbing its unscaled peak into both gains once.
+    knots /= max(1.0, float(np.max(np.abs(knots))))
     original = _native_style(start.style)
     arb_gains = []
     for name, pulse in (("qubit1", first), ("qubit2", second)):
         gain = (
             float(pulse.gain)
+            * p0
             * pulse_output_scale(board, pulse.ch, original)
             / pulse_output_scale(board, pulse.ch, "arb")
         )
-        if abs(gain) * g_max > 1.0:
+        max_raw_gain = abs(gain) * g_max
+        if max_raw_gain > 1.0:
             raise ValueError(
-                f"g_max with drive.{name}.gain produces |raw gain|={abs(gain) * g_max:.6g} > 1 for arb"
+                f"g_max with drive.{name}.gain produces |raw gain|={max_raw_gain} > 1 for arb"
             )
         arb_gains.append(gain)
-    ch = first.ch
     return StartShape(
         iq=start.iq * float(first.gain) * pulse_output_scale(board, ch, original),
         style=start.style,
         duration_us=start.duration_us,
-        cycle_us=float(board.cycles2us(1, gen_ch=ch)),
-        samples_per_cycle=int(board["gens"][ch]["samps_per_clk"]),
+        cycle_us=cycle_us,
+        samples_per_cycle=samples_per_cycle,
         carrier_mhz=float(first.freq),
-        knots=_fit_knots(start.iq),
+        knots=knots,
         arb_gains=np.array(arb_gains, dtype=np.float64),
         field_at_one=arb_gains[0] * pulse_output_scale(board, ch, "arb"),
     )
+
+
+def _sample_knots(
+    knots: NDArray[np.float64],
+    *,
+    duration_us: float,
+    cycle_us: float,
+    samples_per_cycle: int,
+) -> tuple[NDArray[np.float64], NDArray[np.float64], NDArray[np.float64]]:
+    if not np.all(np.isfinite(knots)):
+        raise ValueError("CZ envelope knots must be finite")
+    samples = round(duration_us / cycle_us) * samples_per_cycle
+    block = lcm(16, samples_per_cycle)
+    padded = ((samples + block - 1) // block) * block
+    step_us = cycle_us / samples_per_cycle
+    domain = np.arange(samples, dtype=np.float64) / samples
+    time = np.arange(padded + 1, dtype=np.float64) * step_us
+    i = np.zeros_like(time)
+    q = np.zeros_like(time)
+    i[:samples] = _spline(knots[:KNOTS], in_phase=True)(domain)
+    q[:samples] = _spline(knots[KNOTS:], in_phase=False)(domain)
+    if not (np.all(np.isfinite(i)) and np.all(np.isfinite(q))):
+        raise ValueError("CZ envelope samples must be finite")
+    # The last time point is the support boundary, not a DAC sample.
+    return time, i, q
 
 
 def render_candidate(
@@ -235,16 +278,28 @@ def render_candidate(
     cycle_us: float,
     samples_per_cycle: int,
 ) -> WaveformSamples:
-    """Sample a fixed-duration arb, appending zero samples on the DAC grid."""
-    samples = round(duration_us / cycle_us) * samples_per_cycle
-    block = lcm(16, samples_per_cycle)
-    padded = ((samples + block - 1) // block) * block
-    step_us = cycle_us / samples_per_cycle
-    domain = np.arange(samples, dtype=np.float64) / samples
-    time = np.arange(padded + 1, dtype=np.float64) * step_us
-    i = np.zeros_like(time)
-    q = np.zeros_like(time)
-    i[:samples] = _spline(params[:KNOTS], in_phase=True)(domain)
-    q[:samples] = _spline(params[KNOTS:GAIN_SCALE], in_phase=False)(domain)
-    # The last time point is the support boundary, not a DAC sample.
+    """Sample a fixed-duration arb and normalize I and Q by one positive scale."""
+    knots = params[:GAIN_SCALE]
+    if not np.all(np.isfinite(knots)):
+        raise ValueError("CZ envelope knots must be finite")
+    scale = float(np.max(np.abs(knots)))
+    # The spline is linear in the knots. Scaling before evaluation avoids
+    # losing subnormal shapes to floating-point underflow inside the spline.
+    time, i, q = _sample_knots(
+        knots / scale if scale else knots,
+        duration_us=duration_us,
+        cycle_us=cycle_us,
+        samples_per_cycle=samples_per_cycle,
+    )
+    peak = float(np.max(np.hypot(i, q)))
+    if peak:
+        i /= peak
+        q /= peak
+    measured = float(np.max(np.hypot(i, q)))
+    if measured > 1.0:
+        # The arb validator is strict. Correct roundoff with one scale for
+        # the entire envelope, not per-sample clipping.
+        factor = (1.0 - 4 * np.finfo(np.float64).eps) / measured
+        i *= factor
+        q *= factor
     return WaveformSamples(time, i, q if np.any(q) else None)

@@ -43,7 +43,8 @@ class CZOptimizeResult:
     parameter) in PARAMETERS order (I knots, Q knots, physical gain g,
     radians for Qubit1 and Qubit2). Row zero holds the CMA initial mean; the
     measured evaluation zero plays the original pulse instead. peak is float64
-    (evaluation,), the envelope magnitude which gates only CMA evaluations.
+    (evaluation,), the normalized candidate complex peak (near one, or zero
+    for a zero envelope). It is NaN for evaluation zero and unrendered rows.
     Unevaluated fields and unmeasured count tables are NaN.
 
     start_iq is the complex128 display envelope of evaluation zero in Qubit1

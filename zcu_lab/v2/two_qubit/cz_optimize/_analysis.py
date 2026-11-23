@@ -81,7 +81,6 @@ def _targets(result: CZOptimizeResult) -> NDArray[np.float64]:
     complete = np.all(np.isfinite(result.sums), axis=(1, 2, 3)) & np.all(
         np.isfinite(result.params), axis=1
     )
-    complete[1:] &= result.peak[1:] <= 1.0
     return np.where(
         complete, joint_probabilities(result.sums)[..., 0, 0].mean(axis=1), np.nan
     )
@@ -118,14 +117,14 @@ def _plot_selection(
         evaluations, targets, yerr=errors, fmt=".-", label="Measured ± shot SEM"
     )
     ax.plot(evaluations, np.fmax.accumulate(targets), "--", label="Best so far")
-    skipped = evaluations[1:][result.peak[1:] > 1.0]
+    skipped = evaluations[1:][result.peak[1:] == 0.0]
     if skipped.size:
         ax.plot(
             skipped,
             np.zeros_like(skipped),
             "x",
             color="0.45",
-            label="Envelope peak > 1",
+            label="Zero envelope",
         )
     ax.plot(
         best.best_evaluation,

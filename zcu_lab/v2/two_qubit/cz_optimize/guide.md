@@ -15,11 +15,11 @@
 
 | 欄位 | 控制的物理量 |
 | --- | --- |
-| Initial I/Q control-point spread | 半段各三個 I、Q 節點，每個節點的範圍為 −1 到 1。 |
-| Minimum / Maximum field multiplier g；Initial gain spread | `g` 同時乘上兩線物理場，不改兩線相對倍率。範圍須包含 1，spread 用 ln g。切換表示時按輸出尺度換算 raw gain。任一線的最大可達 raw gain 超出 ±1 時，Run 在取數前報錯。 |
+| Initial I/Q control-point spread | 半段各三個 I、Q 節點。每個節點的範圍為 −1 到 1，指定歸一前的形狀。 |
+| Minimum / Maximum field multiplier g；Initial gain spread | `g` 同時乘兩線的起始擬合複數峰。範圍須包含 1，spread 用 ln g。兩線的 raw gain 在起點換算一次，之後只乘 `g`。任一線的最大 raw gain 超出 ±1 時，Run 在取數前報錯。 |
 | Initial local Z spread | 每個 CZ 後套用的兩個 virtual Z 角，單位 deg。 |
 
-候選時長固定在起點總長。每個候選都用單一完整的記憶體 arb 包絡，尾端補零到 16 samples 的倍數。記憶體用量約等於整段樣本數。若超過容量，QICK 在上傳時報錯。
+非零候選的 I、Q 共同除以複數包絡峰，保持兩者比例。全零候選記零分，不取數，也不參與勝選。全零起始擬合則在取數前報錯。候選時長固定在起點總長。每個候選都用單一完整的記憶體 arb 包絡，尾端補零到 16 samples 的倍數。記憶體用量約等於整段樣本數。若超過容量，QICK 在上傳時報錯。
 
 總評估數為 `1 + Optimizer generations × Candidates per generation`。每個實測候選以相同的 seed 數與 Reps 取數。每個 seed 以保留 shots 為分母，包含 other。某個 seed 沒有保留 shots 時，Run 報出該 seed。
 
@@ -29,7 +29,7 @@
 - **Envelopes** 疊畫評估 0 的顯示包絡、CMA 初始均值和最佳 CMA 候選。圖用 Qubit1 的 DDS gain 等效尺度，包含原 `flat_top` ramp 與平台的相對幅度。
 - **Spectrum** 用複數 I/Q 比較評估 0 和最佳評估。0 MHz 是 CZ 載波，各曲線以自己的載波分量為 0 dB。避免頻率換算成相對載波偏移後以 ±0.5 MHz 帶標出。
 
-**Save All** 在 Native `data.h5` 儲存具名參數、峰值、分類計數和起點顯示包絡。時間用秒、角度用 rad。Labber 匯出同一組具名參數和峰值。從 Native 檔重開完整結果。舊格式需用當初寫檔的版本開啟。若 Load 報 cfg 無法還原，仍可看圖，但沒有避免頻率帶，也不能寫回。起點引用 `arb` 資產時，Native 檔也保存資產路徑和 SHA-256，包括 `flat_top` 的資產 ramp。若資產缺檔或內容已變更，Analyze 摘要會指出路徑和原因，圖仍從已存樣本繪製。
+**Save All** 在 Native `data.h5` 儲存具名參數、歸一後的複數峰、分類計數和起點顯示包絡。時間用秒、角度用 rad。Labber 匯出同一組具名參數和峰值。從 Native 檔重開完整結果。舊格式需用當初寫檔的版本開啟。若 Load 報 cfg 無法還原，仍可看圖，但沒有避免頻率帶，也不能寫回。起點引用 `arb` 資產時，Native 檔也保存資產路徑和 SHA-256，包括 `flat_top` 的資產 ramp。若資產缺檔或內容已變更，Analyze 摘要會指出路徑和原因，圖仍從已存樣本繪製。
 
 ## 審閱寫回並驗收
 

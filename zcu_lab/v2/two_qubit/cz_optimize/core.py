@@ -325,10 +325,14 @@ def _initial_coordinates(cfg: CZOptimizeCfg, start: StartShape) -> NDArray[np.fl
 
 
 def _physical_params(
-    coordinates: NDArray[np.float64], *, wrap_angles: bool
+    cfg: CZOptimizeCfg, coordinates: NDArray[np.float64], *, wrap_angles: bool
 ) -> NDArray[np.float64]:
+    if not np.all(np.isfinite(coordinates)):
+        raise ValueError("CZ optimizer coordinates must be finite")
     params = coordinates.copy()
-    params[GAIN_SCALE] = _gain_coordinate(coordinates[GAIN_SCALE], physical=True)
+    gain = _gain_coordinate(coordinates[GAIN_SCALE], physical=True)
+    # Preserve the physical endpoints despite ln/exp roundoff.
+    params[GAIN_SCALE] = min(cfg.g_max, max(cfg.g_min, gain))
     angles = coordinates[Z1:]
     if wrap_angles:
         angles = 180.0 - (180.0 - angles) % 360.0
@@ -425,9 +429,7 @@ def _start_live_view(
     viewer = live_errorbar(ax)
     ax.lines[0].set(label="Measured ± shot SEM")
     (best_line,) = ax.plot([], [], "--", color="C1", label="Best measured so far")
-    (skipped_line,) = ax.plot(
-        [], [], "x", color="0.45", label="Envelope exceeds DAC limit"
-    )
+    (skipped_line,) = ax.plot([], [], "x", color="0.45", label="Zero envelope")
     ax.legend(loc="upper center", bbox_to_anchor=(0.5, -0.22), ncols=2)
     title = "CZ optimization · Qubit1 / Qubit2"
     fig.suptitle(f"{title}\n0/{len(indices)} candidates processed · 0 retained shots")
@@ -438,7 +440,7 @@ def _start_live_view(
         """Refresh the measured objective and skipped evaluations without assigning skipped points an SEM."""
         data, retained_shots = frame
         values, best, errors, peaks = data
-        skipped = (indices > 0) & (peaks > 1.0)
+        skipped = (indices > 0) & (peaks == 0.0)
         best_line.set_data(indices, best)
         skipped_line.set_data(indices[skipped], values[skipped])
         count = int(np.count_nonzero(np.isfinite(values)))
@@ -510,7 +512,7 @@ class CZOptimizeExp(Experiment[CZOptimizeResult, CZOptimizeCfg]):
 
         # Measure the calibrated pair as provided. The saved row-zero parameters
         # describe the separate symmetric fit used to seed the optimizer.
-        result.params[0] = _physical_params(initial, wrap_angles=False)
+        result.params[0] = _physical_params(cfg, initial, wrap_angles=False)
         population: list[NDArray[np.float64]] = []
         losses: list[float] = []
         best_target = np.nan
@@ -526,13 +528,13 @@ class CZOptimizeExp(Experiment[CZOptimizeResult, CZOptimizeCfg]):
                     coordinates = initial.copy()
                     coordinates[active] = population[member]
                     result.params[index] = _physical_params(
-                        coordinates, wrap_angles=True
+                        cfg, coordinates, wrap_angles=True
                     )
                     samples = result.render_candidate(index)
                     result.peak[index] = samples.peak_abs
                     candidate = (
                         _candidate_cfg(cfg, samples, result, index)
-                        if result.peak[index] <= 1.0
+                        if result.peak[index] > 0.0
                         else None
                     )
                 target = 0.0
