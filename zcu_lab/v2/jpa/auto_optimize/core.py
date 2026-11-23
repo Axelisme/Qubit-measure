@@ -58,14 +58,6 @@ class JPAOptimizeResult:
 
 
 @dataclass(frozen=True)
-class _JPALiveSnapshot:
-    """Search result and current row copied together by the plot-thread dispatcher."""
-
-    result: JPAOptimizeResult  # Iteration-aligned candidate settings, phases and SNR.
-    retained_shots: int  # Total shots retained across both preparations so far.
-
-
-@dataclass(frozen=True)
 class JPAOptimizeAnalysis:
     best_flux: float
     best_freq: float
@@ -373,22 +365,25 @@ class AutoOptimizeExp(Experiment[JPAOptimizeResult, JPAOptCfg]):
         )
         params = np.full((num_points, 3), np.nan, dtype=np.float64)
         phases = np.zeros(num_points, dtype=np.int32)
-        retained_shots = np.zeros(num_points, dtype=np.int64)
         unit = "a.u." if cfg.flux_unit == "native" else cfg.flux_unit
         update = self._show_search_plot(context, unit)
 
         def plot_fn(data: NDArray[np.float64]) -> None:
             """Update the live JPA artists from the latest acquired signals."""
-            update(
-                _JPALiveSnapshot(
-                    JPAOptimizeResult(params=params, phases=phases, signals=data),
-                    int(retained_shots.sum()),
-                )
-            )
+            update(JPAOptimizeResult(params=params, phases=phases, signals=data))
 
         signals_buffer = SignalBuffer(
             (num_points,), dtype=np.float64, on_update=plot_fn
         )
+
+        def score(sums: NDArray[np.float64]) -> NDArray[np.float64]:
+            """Return the g/e separation score for one pump and bias setting.
+
+            Convert the two states' readout IQ sums through order three using
+            the configured skew penalty. Return a scalar float64 array, NaN
+            if either state has no shots.
+            """
+            return snr_as_signal(sums, skew_penalty=cfg.skew_penalty)
 
         # 2. Use the previous SNR to choose and apply the next pump/bias setting.
         with Schedule(signals_buffer, scope=context.scope) as sched:
@@ -436,13 +431,6 @@ class AutoOptimizeExp(Experiment[JPAOptimizeResult, JPAOptCfg]):
                 builder.emit(Readout("readout", cfg.readout))
                 prog = builder.build()
 
-                def score(
-                    sums: NDArray[np.float64], *, index: int = idx
-                ) -> NDArray[np.float64]:
-                    """Track cumulative retained shots from both preparations and return SNR."""
-                    retained_shots[index] = int(sums[..., 0].sum())
-                    return snr_as_signal(sums, skew_penalty=cfg.skew_penalty)
-
                 step.run_acquire_summed(
                     prog,
                     soc,
@@ -482,8 +470,8 @@ class AutoOptimizeExp(Experiment[JPAOptimizeResult, JPAOptCfg]):
 
     def _show_search_plot(
         self, context: RunContext, unit: str
-    ) -> Callable[[_JPALiveSnapshot], None]:
-        """Show acquired candidates and retained-shot progress on the plot owner."""
+    ) -> Callable[[JPAOptimizeResult], None]:
+        """Show measured candidate scores and their search stages."""
         figure, axes = self._search_panels(context.plots, "measurement", unit)
         progression = live_line(axes[0])
         axes[0].lines[0].set(marker="None", color="0.5", zorder=1)
@@ -493,23 +481,17 @@ class AutoOptimizeExp(Experiment[JPAOptimizeResult, JPAOptCfg]):
         )
 
         @context.plots.on_plot_thread
-        def update(snapshot: _JPALiveSnapshot) -> Iterable[Artist]:
-            """Update the progress and phase-colored scatter plots from the copied snapshot."""
-            result = snapshot.result
+        def update(result: JPAOptimizeResult) -> Iterable[Artist]:
+            """Update the score trace and stage-colored scatter plots from the copied result."""
             measured = np.isfinite(result.signals)
-            count = np.count_nonzero(measured)
-            progress = figure.suptitle(
-                "JPA joint search · pump and bias settings · g/e separation score\n"
-                f"{count}/{len(result.signals)} candidates sampled · {snapshot.retained_shots:,} retained shots"
-            )
-            if not count:
-                return (progress,)
+            if not measured.any():
+                return ()
 
             stages = result.phases[measured].astype(np.float64)
             colorbar.set_ticks(np.unique(stages).tolist())
             candidates = np.arange(1, len(measured) + 1, dtype=np.float64)
             scores = np.abs(result.signals)
-            artists: list[Artist] = [progress, *progression.set(candidates, scores)]
+            artists: list[Artist] = list(progression.set(candidates, scores))
             for viewer, xs in zip(
                 viewers,
                 (candidates[measured], *result.params[measured].T),

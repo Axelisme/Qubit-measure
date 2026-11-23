@@ -14,7 +14,7 @@ See [`zcu_lab/v2/operator-workflow.md`](../../operator-workflow.md) for the shar
 
 ## Read the plots
 
-Live connects measured evidence above the median background (σ) versus RF frequency. Each estimate pools IQ means, second moments and inter-read correlations; Run counts retained dwells per RF point. The dashed **5% false-mark level** means that in a noise-only scan the chance any point crosses it is about 5%. This is an evidence statistic, not population; there is no pointwise shot SEM.
+Live connects measured evidence above the median background (σ) versus RF frequency. Each estimate pools IQ means, second moments and inter-read correlations. The dashed **5% false-mark level** means that in a noise-only scan the chance any point crosses it is about 5%. This is an evidence statistic, not population; there is no pointwise shot SEM.
 
 Analyze fits the same statistic. Only a separate overview without the model connects the measured points. The fit panel shows measured points and a separate solid model curve. Gray triangles are other candidates; the dotted line marks **Peak center**. The fit window ends halfway to neighbors and needs at least six samples. If it spans at most half the scan, the overview shades it and a second panel zooms in. Candidate SNR is peak height above the median in noise σ, not fit quality. No candidate passing the gates fails Analyze, not Run.
 

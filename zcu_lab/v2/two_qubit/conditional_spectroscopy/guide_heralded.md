@@ -7,12 +7,12 @@
 ## 設定表單
 
 - 核對 [qubit 位置與 mux tone 次序](../guide.md#綁定位置與讀出-tones)，兩顆都要有校準的 Xπ 和同一讀出條件下的 GE Post 圓形分類器。Herald 與終端共用完整的 **Mux readout** 與 `post_delay`。從 `5/(2π·κ)` µs 開始，κ 取讀出 tones 中最小的 linewidth，詳見[等待的校準方法](../guide.md#herald-reset-與獨立-heralded-入口)。**Reset** 留空就略過，只接受一般 reset。不要再加一層 herald reset。
-- **Two-qubit spectroscopy probe** 不是準備用的 Xπ。兩線用各自的 qubit generator，包絡長度與 pre-delay 相同。若用 coupler 的 CZ slots 當初值，先降到探譜所需的 gain，不照搬 CZ 功率。**Common probe RF frequency** 同時覆蓋兩路 RF；若打開 **Double Xπ contrast**，probe 後依序翻轉 Qubit1、Qubit2，終端 P(e) 仍是讀出時的值。
+- **Two-qubit spectroscopy probe** 不是準備用的 Xπ。兩線用各自的 qubit generator，包絡長度與 pre-delay 相同。若表單引用 coupler 的 CZ slots，先用 **Convert to inline** 再降到探譜所需的 gain。**Common probe RF frequency** 同時設定兩路 RF，不使用 Library 裡保存的頻率。若打開 **Double Xπ contrast**，probe 後依序翻轉 Qubit1、Qubit2，終端 P(e) 仍是讀出時的值。
 - **Coupler DC source** 留空不動 bias，不要求 `coupler` alias。掃 bias 時填裝置、單位和掃描範圍。掃描只改選定來源，完成或 Stop 都不復原。
 
 ## 讀圖與選下一步
 
-- **Terminal P(e)** 每個 herald 分支各有兩顆 qubit 的曲線。每個 bias、頻點、分支先合計四種名目準備的 shots，再用終端 e 數除以終端 g、e、other 的總數。誤差棒是這批保留 shots 的逐點 shot SEM，只表示抽樣不確定度，不含讀出分類誤差或輪間漂移。少於兩發不畫棒。Live 顯示所有 herald 類別的累積 shots 和已取樣的準備／頻率格數。
+- **Terminal P(e)** 每個 herald 分支各有兩顆 qubit 的曲線。每個 bias、頻點、分支先合計四種名目準備的 shots，再用終端 e 數除以終端 g、e、other 的總數。誤差棒是這批保留 shots 的逐點 shot SEM，只表示抽樣不確定度，不含讀出分類誤差或輪間漂移。少於兩發不畫棒。
 - **Retained shots by herald** 顯示每個頻點各分支的保留數。0 是有取數但沒落在該 herald 類別，缺點是四種準備都未取數。判讀峰谷前，先比對該點與兩側頻點的保留數。若特徵只出現在保留數偏低的頻點，先增加取樣再判斷。任一 tone 判為 other 的 herald 不進四支曲線，但仍保存。
 - **Herald class fractions** 每列是一種名目準備。長條用該 bias 已取樣頻點的 shots 合計九種 herald 類別的比例。`0%` 表示有 shots，但沒有判到該類；`No shots` 表示該準備沒有 shots 可算比例。用這張圖看名目準備和實測分類如何對應；它不是純度、gate fidelity 或 leakage 的量測。
 - 多 bias 時，用每顆 qubit 的 **Terminal P(e) map** 追蹤 RF × DC 上的峰谷。四個 panel 共用該圖的色階。

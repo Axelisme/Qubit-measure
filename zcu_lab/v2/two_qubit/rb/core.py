@@ -383,6 +383,7 @@ class RBExp(Experiment[RBResult, RBCfg]):
         fig, ax = context.plots.subplots(num="measurement", layout="constrained")
         depths = np.array(config.depth, dtype=np.int64)
         fig.suptitle("Two-qubit RB · Qubit1/Qubit2 · Joint ground return")
+        fig.supxlabel("Capped: shot SEM · Pale: seed SD", fontsize=10)
         fig.show()
 
         @context.plots.on_plot_thread
@@ -391,13 +392,6 @@ class RBExp(Experiment[RBResult, RBCfg]):
                 bars.remove()
             ax.relim()
             _draw_pooled_survival(ax, depths, sums)
-            cells = np.isfinite(sums[..., 0, 0])
-            fig.supxlabel(
-                f"Measured seed/arm/depth cells: {cells.sum()}/{cells.size} count\n"
-                f"Total retained shots: {np.nansum(sums):,.0f} count\n"
-                "Capped: shot SEM · Pale: seed SD",
-                fontsize=10,
-            )
             return (fig,)
 
         # 2. Compile all arms before acquiring any shots.

@@ -14,7 +14,7 @@
 
 ## 讀圖與選谷
 
-Live 顯示 `|mean(I + iQ)|`（a.u.）與量化後的絕對 RF（MHz）。輪次與每點名義 shots 是累積平均資訊，沒有逐點 shot SEM。Stop 保留已完成 acquisition 的資料；Analyze 不接受部分或非有限曲線，需重掃完整頻窗。
+Live 顯示 `|mean(I + iQ)|`（a.u.）與量化後的絕對 RF（MHz）。曲線是累積平均，不畫逐點 shot SEM。Stop 保留已完成 acquisition 的資料；Analyze 不接受部分或非有限曲線，需重掃完整頻窗。
 
 **Resonators (JSON)** 在 Run／Load 後預設為 `["R1"]`，不是現用 alias。填非空、名稱非空白且不重複的字串清單。自動猜測最多取名稱數量的候選，再按頻率升冪配對。名稱改了須重開 Analyze。猜測不證明身分。
 

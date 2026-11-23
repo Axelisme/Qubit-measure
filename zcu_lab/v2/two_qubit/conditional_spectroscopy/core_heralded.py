@@ -39,7 +39,7 @@ from zcu_tools.program.v2.modules import MuxReadout
 from zcu_lab.v2.support import live_errorbar
 from zcu_lab.v2.support.device import set_flux
 
-from .._drive import QubitDriveCfg
+from .._drive import SweptQubitDriveCfg
 from .._sums import joint_probabilities, validate_qubit_tones
 from ._common import excitation_sem
 from .core import summarize_spectra
@@ -83,7 +83,7 @@ class HeraldedSpectroscopyCfg(ConfigBase):
         ),
     ]
     drive: Annotated[
-        QubitDriveCfg,
+        SweptQubitDriveCfg,
         FieldMeta(
             label="Two-qubit spectroscopy probe",
             description="Enter the two weak pulses applied together on the respective qubit drive lines at the shared RF sweep frequency.",
@@ -259,7 +259,7 @@ class HeraldedSpectroscopyExp(
         ),
         result_type=HeraldedSpectroscopyResult,
         cfg_type=HeraldedSpectroscopyCfg,
-        cfg_schema_version="3.0",
+        cfg_schema_version="3.1",
         tag="two_qubit/conditional_spectroscopy_heralded",
         result_builder=restore_result,
     )
@@ -507,40 +507,31 @@ def _live_spectra(
     dc: NDArray[np.float64],
     frequencies: NDArray[np.float64],
 ) -> Callable[[NDArray[np.float64]], None]:
-    """Show live spectra and return the plot-thread updater for counts and progress."""
+    """Show live spectra and return the plot-thread updater for measured counts."""
     views = []
     for index, bias in enumerate(dc):
         fig = _branch_figure(
             plots, f"spectra_{index}", frequencies, ylabel="Terminal P(e)"
         )
         panels = [live_errorbar(ax, num_lines=2) for ax in fig.axes]
-        title = f"{_title(cfg, float(bias))} · {_contrast(cfg)}"
-        fig.suptitle(
-            f"{title}\n0 acquired shots · 0/{4 * len(frequencies)} preparation-frequency points sampled"
-        )
+        fig.suptitle(f"{_title(cfg, float(bias))} · {_contrast(cfg)}")
         for ax in fig.axes:
             ax.legend(ax.get_lines(), _QUBITS, loc="upper left", bbox_to_anchor=(1, 1))
-        views.append((fig, panels, title))
+        views.append((fig, panels))
         fig.show()
 
     @plots.on_plot_thread
     def update(sums: NDArray[np.float64]) -> tuple[Figure, ...]:
         pooled = _pool_by_herald(sums)
         result, sem = summarize_spectra(pooled), excitation_sem(pooled)
-        for index, (fig, panels, title) in enumerate(views):
+        for index, (_, panels) in enumerate(views):
             for panel, (q1, q2) in zip(panels, np.ndindex(2, 2), strict=True):
                 panel.set(
                     frequencies,
                     result.excitation[index, q1, q2].T,
                     sem[index, q1, q2].T,
                 )
-            measured = np.count_nonzero(np.isfinite(sums[index, ..., 0, 0, 0, 0]))
-            shots = int(np.nansum(sums[index]))
-            fig.suptitle(
-                f"{title}\n{shots:,} acquired shots · "
-                f"{measured}/{4 * len(frequencies)} preparation-frequency points sampled"
-            )
-        return tuple(fig for fig, _, _ in views)
+        return tuple(fig for fig, _ in views)
 
     return update
 

@@ -91,6 +91,7 @@ def amp_rabi_initial_pulse(
     pi_len = _valid_pi_len(waveform)
     pi_gain = pulse.gain
     if not isfinite(pi_gain):
+        # An inline draft lets the operator supply gain and duration.
         return Slot(
             f"{qubit}.module.x180",
             copy=True,
@@ -107,6 +108,7 @@ def amp_rabi_initial_pulse(
         length = Expr(
             f"1.5 * {qubit}.module.x180.waveform.length * {qubit}.module.x180.gain"
         )
+    # Amplitude Rabi sweeps gain and keeps this duration.
     return Slot(f"{qubit}.module.x180", copy=True, set={"waveform.length": length})
 
 

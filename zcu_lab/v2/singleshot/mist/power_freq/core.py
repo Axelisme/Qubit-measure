@@ -201,9 +201,7 @@ class FreqPowerExp(Experiment[FreqPowerResult, FreqPowerCfg]):
             figsize=(11, 4),
             layout="constrained",
         )
-        progress = figure.suptitle(
-            "MIST gain–frequency map · qubit · classified populations"
-        )
+        figure.suptitle("MIST gain–frequency map · qubit · classified populations")
         viewers = []
         for state, ax in zip(("g", "e", "other"), figure.axes, strict=True):
             ax.set(
@@ -218,20 +216,13 @@ class FreqPowerExp(Experiment[FreqPowerResult, FreqPowerCfg]):
 
         @context.plots.on_plot_thread
         def plot_fn(counts: NDArray[np.float64]):
-            """Render class fractions and report acquired cells."""
+            """Render the class fraction maps."""
             totals = counts.sum(axis=-1)
             populations = counts / totals[..., None]
-            progress.set_text(
-                "MIST gain–frequency map · qubit · classified populations\n"
-                f"{np.count_nonzero(totals > 0)}/{totals.size} gain–frequency points acquired"
-            )
-            return (
-                progress,
-                *(
-                    artist
-                    for i, viewer in enumerate(viewers)
-                    for artist in viewer.set(gains, freqs, populations[..., i])
-                ),
+            return tuple(
+                artist
+                for i, viewer in enumerate(viewers)
+                for artist in viewer.set(gains, freqs, populations[..., i])
             )
 
         figure.show()

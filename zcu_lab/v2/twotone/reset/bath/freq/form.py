@@ -21,6 +21,7 @@ def make_form(ctx: FormContext) -> Form[FreqGainCfg]:
                     # Run replaces these scan coordinates; other reset inputs remain.
                     "cavity_tone_cfg.freq": Hidden(0.0),
                     "cavity_tone_cfg.gain": Hidden(0.0),
+                    # The Ramsey phase cycle is relative to this 90° starting phase.
                     "pi2_cfg": Slot(
                         "$qubit.module.x90", copy=True, set={"phase": 90.0}
                     ),

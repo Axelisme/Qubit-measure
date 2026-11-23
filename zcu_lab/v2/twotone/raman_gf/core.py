@@ -237,8 +237,7 @@ class RamanGFExp(Experiment[RamanGFResult, RamanGFCfg]):
             figsize=(11, 4.8) if grid else (7, 5),
             layout="constrained",
         )
-        title = "Raman spectroscopy · g → f · measured fractions"
-        headline = figure.suptitle(title)
+        figure.suptitle("Raman spectroscopy · g → f · measured fractions")
         shape = (len(detunings), len(gains))
         if grid:
             maps = [
@@ -260,18 +259,12 @@ class RamanGFExp(Experiment[RamanGFResult, RamanGFCfg]):
                 fractions = np.divide(
                     data, totals, out=np.full_like(data, np.nan), where=totals > 0
                 )
-                headline.set_text(
-                    f"{title}\nRetained shots: {int(np.nansum(totals)):,} count"
-                )
-                return (
-                    headline,
-                    *(
-                        artist
-                        for index, heatmap in enumerate(maps)
-                        for artist in heatmap.set(
-                            gains, detunings, fractions[:, index].reshape(shape).T
-                        )
-                    ),
+                return tuple(
+                    artist
+                    for index, heatmap in enumerate(maps)
+                    for artist in heatmap.set(
+                        gains, detunings, fractions[:, index].reshape(shape).T
+                    )
                 )
 
             update = update_grid
@@ -298,10 +291,7 @@ class RamanGFExp(Experiment[RamanGFResult, RamanGFCfg]):
                 )
                 covariance = class_probability_covariance(data)
                 sem = np.sqrt(np.diagonal(covariance, axis1=-2, axis2=-1))
-                headline.set_text(
-                    f"{title}\nRetained shots: {int(np.nansum(totals)):,} count"
-                )
-                return (headline, *lines.set(xs, fractions.T, sem.T))
+                return lines.set(xs, fractions.T, sem.T)
 
             update = update_trace
         figure.show()

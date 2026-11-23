@@ -11,7 +11,7 @@ Optional **Reset** → optional **Preparation pulse** → simultaneous fixed-gai
 
 ## Read the figures and choose carriers
 
-Live and Analyze show the magnitude of mean IQ minus median background IQ, not population or reset fidelity. Live counts acquired cells; a host-stepped notebook Run also shows the latest acquired tone 2 row. No per-cell shot SEM is shown.
+Live and Analyze show the magnitude of mean IQ minus median background IQ, not population or reset fidelity. A host-stepped notebook Run also shows the latest acquired tone 2 row. No per-cell shot SEM is shown.
 
 Analyze marks the RF pair picked after smoothing on the raw map. **Peak selection filter** chooses wavelet or Gaussian; **Filter strength** scales the wavelet threshold or sets Gaussian width in sample steps. If the star hits a boundary, shift that axis. If it is interior, tighten both windows until several cells resolve the peak.
 

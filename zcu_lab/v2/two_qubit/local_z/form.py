@@ -30,12 +30,12 @@ def make_form(ctx: FormContext) -> Form[LocalZCfg]:
             "qubit1_tone": Hidden(qubits.qubit1_tone),
             "qubit2_tone": Hidden(qubits.qubit2_tone),
             "reset": None,
-            "x90_qubit1": Slot("$qubit1.module.x90", copy=True),
-            "x90_qubit2": Slot("$qubit2.module.x90", copy=True),
+            "x90_qubit1": Slot("$qubit1.module.x90"),
+            "x90_qubit2": Slot("$qubit2.module.x90"),
             "readout": readout,
             "drive": {
-                "qubit1": Slot("$coupler.module.cz_qubit1", copy=True),
-                "qubit2": Slot("$coupler.module.cz_qubit2", copy=True),
+                "qubit1": Slot("$coupler.module.cz_qubit1"),
+                "qubit2": Slot("$coupler.module.cz_qubit2"),
             },
         },
     )

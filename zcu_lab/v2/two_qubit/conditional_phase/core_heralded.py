@@ -2,7 +2,7 @@
 
 import logging
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from textwrap import fill
 from typing import ClassVar
 
@@ -41,17 +41,18 @@ from zcu_lab.v2.support import live_errorbar
 
 from .._phase import (
     CountQuadratures,
-    QuadraturePhase,
     complete_projections,
     conditional_phase_deg,
     count_quadratures,
     fit_count_phase_slopes,
+    phase_near,
     quadrature_contrast_sem,
     quadrature_phase_sem,
     reference_frequency_index,
     update_complete_frequency_phases,
 )
 from .._phase_plot import (
+    AccumulatedPhaseSeries,
     BlochSeries,
     conditional_phase_plot_data,
     format_conditional_phase_axis,
@@ -66,7 +67,6 @@ from .core import (
     ConditionalPhaseAnalysis,
     ConditionalPhaseCfg,
     fitted_crossings,
-    phase_points,
     started_trains,
 )
 
@@ -178,12 +178,20 @@ def _correct_ee(
 
 
 def _fit_groups(
-    sums: NDArray[np.float64], cfg: ConditionalPhaseHeraldedCfg
+    sums: NDArray[np.float64],
+    cfg: ConditionalPhaseHeraldedCfg,
+    *,
+    complete: NDArray[np.bool_] | None = None,
 ) -> tuple[CountQuadratures, CountQuadratures]:
-    """Return complete gg and corrected ee projections in actual spectator order."""
-    complete = complete_projections(
-        sums.sum(axis=(-4, -3, -2, -1)), cfg.reps * cfg.rounds
-    )
+    """Return complete gg and corrected ee projections in actual spectator order.
+
+    Reuse a supplied completion mask in nominal spectator order, or compute it
+    from the input sums and expected shots.
+    """
+    if complete is None:
+        complete = complete_projections(
+            sums.sum(axis=(-4, -3, -2, -1)), cfg.reps * cfg.rounds
+        )
     gg = terminal_counts(sums, ("g", "g"))
     ee = count_quadratures(terminal_counts(sums, ("e", "e")), cfg.target)
     ee = ee.for_fit(complete)
@@ -192,6 +200,21 @@ def _fit_groups(
         count_quadratures(gg, cfg.target).for_fit(complete),
         CountQuadratures(values, variances, acquired),
     )
+
+
+def _pooled_quadratures(
+    sums: NDArray[np.float64],
+    cfg: ConditionalPhaseHeraldedCfg,
+    complete: NDArray[np.bool_],
+) -> CountQuadratures:
+    """Pool each group's completed counts in actual spectator order."""
+    gg = terminal_counts(sums, ("g", "g"))
+    ee = terminal_counts(sums, ("e", "e"))[::-1]
+    gg = np.where(complete[..., None, None], gg, 0)
+    ee = np.where(complete[::-1, ..., None, None], ee, 0)
+    target_axis = -2 if cfg.target == "qubit1" else -1
+    # Swap target g/e but keep target "other" in the denominator.
+    return count_quadratures(gg + np.take(ee, [1, 0, 2], axis=target_axis), cfg.target)
 
 
 def _start_live_view(
@@ -208,7 +231,6 @@ def _start_live_view(
     ax.set(xlabel="Common CZ frequency (MHz)", ylabel="Conditional phase per CZ (deg)")
     format_conditional_phase_axis(ax, frequencies)
     (curve,) = ax.plot([], [], ".-", color="C0", label="Spectator e minus g")
-    status = ax.set_title("Waiting for shots")
     ax.legend(loc="upper center", bbox_to_anchor=(0.5, -0.16), ncols=2)
     fig.show()
 
@@ -216,7 +238,8 @@ def _start_live_view(
         num="conditional_phase_contrast", layout="constrained"
     )
     contrast_fig.suptitle(
-        f"Heralded conditional phase · {config.target.capitalize()} · X/Y contrast"
+        f"Heralded conditional phase · {config.target.capitalize()}\n"
+        "X/Y contrast · pooled gg/ee"
     )
     contrast_ax.set(xlabel="Common CZ frequency (MHz)", ylabel="Classified contrast")
     low, high = float(frequencies[0]), float(frequencies[-1])
@@ -224,37 +247,26 @@ def _start_live_view(
     contrast_ax.set_xlim(low - padding, high + padding)
     contrast_ax.xaxis.set_major_locator(MaxNLocator(nbins=5))
     contrast_ax.ticklabel_format(useOffset=False)
-    contrast_status = contrast_ax.set_title("Waiting for shots")
-    contrast_ax.set_prop_cycle(color=[to_rgba("C0"), to_rgba("C1")] * 2)
-    contrast = live_errorbar(contrast_ax, num_lines=4)
-    for k, (line, (herald, state)) in enumerate(
-        zip(
-            contrast_ax.lines,
-            (("(g,g)", "g"), ("(g,g)", "e"), ("(e,e)", "g"), ("(e,e)", "e")),
-            strict=True,
-        )
-    ):
-        line.set(label=f"{herald} spectator {state}", marker="." if k < 2 else "x")
+    contrast_title = contrast_ax.title
+    contrast_ax.set_prop_cycle(color=[to_rgba("C0"), to_rgba("C1")])
+    contrast = live_errorbar(contrast_ax, num_lines=2)
+    for line, state in zip(contrast_ax.lines, ("g", "e"), strict=True):
+        line.set(label=f"Spectator {state}", marker=".")
     contrast_ax.legend(loc="upper center", bbox_to_anchor=(0.5, -0.12), ncols=2)
     contrast_fig.show()
 
     @plots.on_plot_thread
     def render_contrast(
-        payload: tuple[int, tuple[CountQuadratures, CountQuadratures]],
+        payload: tuple[int, CountQuadratures],
     ) -> tuple[Artist, ...]:
-        n, groups = payload
-        contrast_status.set_text(f"{n} CZ gates")
+        n, pooled = payload
+        contrast_title.set_text(f"{n} CZ gates")
         return (
-            contrast_status,
+            contrast_title,
             *contrast.set(
                 frequencies,
-                np.concatenate(
-                    [
-                        np.hypot(group.values[:, 0], group.values[:, 1])
-                        for group in groups
-                    ]
-                ),
-                np.concatenate([quadrature_contrast_sem(group) for group in groups]),
+                np.hypot(pooled.values[:, 0], pooled.values[:, 1]),
+                quadrature_contrast_sem(pooled),
             ),
         )
 
@@ -263,11 +275,9 @@ def _start_live_view(
     phase_deg = np.full_like(frequencies, np.nan)
 
     @plots.on_plot_thread
-    def render(payload: tuple[NDArray[np.float64], str]) -> tuple[Artist, ...]:
-        angles_deg, progress = payload
+    def render(angles_deg: NDArray[np.float64]) -> tuple[Artist, ...]:
         curve.set_data(*conditional_phase_plot_data(frequencies, angles_deg))
-        status.set_text(progress)
-        return curve, status
+        return (curve,)
 
     def update_view(sums: NDArray[np.float64]) -> None:
         complete = update_complete_frequency_phases(
@@ -279,16 +289,13 @@ def _start_live_view(
                 gate_counts, *_fit_groups(sums, config)
             ),
         )
-        progress = (
-            f"{np.count_nonzero(processed)}/{len(frequencies)} frequencies acquired\n"
-            f"{np.count_nonzero(complete)}/{complete.size} projections at {expected_shots} shots"
-        )
-        render((phase_deg, progress))
+        render(phase_deg)
         # Show the latest train with a complete X/Y pair, without another slope fit.
         trains = np.flatnonzero(np.any(np.all(complete, axis=2), axis=(1, 2)))
         if trains.size:
             j = trains[-1]
-            render_contrast((int(gate_counts[j]), _fit_groups(sums[j], config)))
+            pooled = _pooled_quadratures(sums[j], config, complete[j])
+            render_contrast((int(gate_counts[j]), pooled))
 
     return update_view
 
@@ -345,7 +352,7 @@ class ConditionalPhaseHeraldedExp(
         ),
         result_type=ConditionalPhaseHeraldedResult,
         cfg_type=ConditionalPhaseHeraldedCfg,
-        cfg_schema_version="4.0",
+        cfg_schema_version="4.1",
         tag="two_qubit/conditional_phase_heralded",
         result_builder=restore_result,
     )
@@ -482,18 +489,19 @@ class ConditionalPhaseHeraldedExp(
             raise ValueError(
                 "Expected spectator × quadrature × n × frequency × 3 × 3 counts"
             )
-        gg_group, ee_group = _fit_groups(data.sums, cfg)
+        complete = complete_projections(
+            data.sums.sum(axis=(-4, -3, -2, -1)), cfg.reps * cfg.rounds
+        )
+        gg_group, ee_group = _fit_groups(data.sums, cfg, complete=complete)
         groups = (gg_group, ee_group)
-        phases = tuple(phase_points(group.values) for group in groups)
-        phase_sem = np.stack([quadrature_phase_sem(group) for group in groups])
-        contrast_sem = np.stack([quadrature_contrast_sem(group) for group in groups])
+        pooled = _pooled_quadratures(data.sums, cfg, complete)
         # 2. Share the two groups' slopes and find the joint π crossing; keep the gg-only diagnostic.
         fitted = fit_count_phase_slopes(data.gate_counts, *groups)
         gg_fitted = fit_count_phase_slopes(data.gate_counts, gg_group)
         conditional_deg = conditional_phase_deg(fitted)
         crossings = fitted_crossings(data.frequencies, conditional_deg, fitted)
 
-        # 3. Use gg observations as the phase reference, with joint slopes and crossing.
+        # 3. Show pooled observations and predictions without changing the joint fit.
         fig, _ = plots.subplots(
             num="conditional_phase",
             ncols=3,
@@ -508,9 +516,9 @@ class ConditionalPhaseHeraldedExp(
             f"Heralded conditional phase · {cfg.target.capitalize()}\n"
             f"Measured sample: {sample:.3f} MHz for panels 1–2"
         )
-        xy = gg_group.values[..., idx]
+        xy = pooled.values[..., idx]
         bloch_ax.set(
-            title="1 · Bloch vectors\nHerald gg measurements",
+            title="1 · Bloch vectors\nPooled gg/ee measurements",
             xlabel="Target Bloch X",
             ylabel="Target Bloch Y",
         )
@@ -520,14 +528,16 @@ class ConditionalPhaseHeraldedExp(
             [BlochSeries("Spectator g", *xy[0]), BlochSeries("Spectator e", *xy[1])],
         )
         phase_ax.set(
-            title="2 · Accumulated phase\nJoint slopes; gg offsets",
+            title="2 · Accumulated phase\nPooled gg/ee",
             xlabel="CZ gates, n (count)",
             ylabel="Accumulated phase (deg)",
         )
-        phase_series = reference_phase_series(
-            data.gate_counts, fitted, xy, phase_sem[0, ..., idx], idx
+        phase_series = _pooled_phase_series(
+            data.gate_counts, fitted, gg_group, pooled, idx
         )
-        plot_accumulated_phase(phase_ax, data.gate_counts, phase_series)
+        plot_accumulated_phase(
+            phase_ax, data.gate_counts, phase_series, connect_unfitted=True
+        )
         roots = crossings.frequencies_mhz
         status = (
             f"π crossing = {roots[0]:.3f} MHz\nWriteback proposal available"
@@ -544,6 +554,12 @@ class ConditionalPhaseHeraldedExp(
         )
         for ax in fig.axes:
             ax.legend(loc="upper center", bbox_to_anchor=(0.5, -0.13))
+        for j, n in enumerate(data.gate_counts):
+            _plot_phase_points(
+                plots, cfg, int(n), (_train_quadratures(pooled, j),), diagnostic=False
+            )
+
+        # Keep the separated observations and fit offsets in diagnostics.
         gg = terminal_counts(data.sums, ("g", "g"))
         ee = terminal_counts(data.sums, ("e", "e"))
         active = set(started_trains(np.moveaxis(data.sums, 2, 0)))
@@ -569,15 +585,14 @@ class ConditionalPhaseHeraldedExp(
                     sign_corrected_ee=sign_corrected,
                 )
         _plot_slopes(plots, frequencies, cfg.target.capitalize(), fitted, gg_fitted)
-        # Compare wrapped phase and contrast for each train, without pooling spectator preparations.
+        _plot_accumulated_phase_diagnostics(plots, data, cfg, fitted, groups, idx)
         for j, n in enumerate(data.gate_counts):
-            _plot_phase_diagnostics(
+            _plot_phase_points(
                 plots,
                 cfg,
                 int(n),
-                tuple(tuple(row[j] for row in group) for group in phases),
-                phase_sem[:, :, j],
-                contrast_sem[:, :, j],
+                tuple(_train_quadratures(group, j) for group in groups),
+                diagnostic=True,
             )
 
         _plot_herald_map(
@@ -587,6 +602,153 @@ class ConditionalPhaseHeraldedExp(
         return ConditionalPhaseHeraldedAnalysis(
             crossings.frequencies_mhz[0] if crossings.reason is None else None,
             crossings.reason,
+        )
+
+
+def _interpolated_gg_fraction(
+    ns: NDArray[np.int64],
+    grid: NDArray[np.float64],
+    gg_shots: NDArray[np.float64],
+    pooled_shots: NDArray[np.float64],
+) -> NDArray[np.float64]:
+    """Interpolate per-projection gg fractions only across acquired CZ counts."""
+    order = np.argsort(ns)
+    usable = order[pooled_shots[order] > 0]
+    return np.interp(
+        grid,
+        ns[usable],
+        gg_shots[usable] / pooled_shots[usable],
+        left=np.nan,
+        right=np.nan,
+    )
+
+
+def _pooled_phase_series(
+    ns: NDArray[np.int64],
+    fit: PhaseSlopeFit,
+    gg: CountQuadratures,
+    pooled: CountQuadratures,
+    idx: int,
+) -> list[AccumulatedPhaseSeries]:
+    """Prepare per-spectator phase series at frequency index idx.
+
+    Use the pooled X/Y for measurements and phase SEM. Use the CZ counts and
+    gg/pooled projection totals to weight the joint fit's vectors, and lift the
+    measured angles onto the predicted branch where available. Return the
+    measurements and any prediction without fitting or drawing.
+    """
+    grid = np.union1d(np.linspace(ns.min(), ns.max(), 201), ns.astype(np.float64))
+    sem = quadrature_phase_sem(pooled)[..., idx]
+    series = []
+    for b, state in enumerate(("g", "e")):
+        x, y = pooled.values[b, ..., idx]
+        measured = _wrapped_phase(x, y)
+        prediction = None
+        result = fit.fits[b][idx]
+        if result is not None:
+            weights = np.stack(
+                [
+                    _interpolated_gg_fraction(ns, grid, gg_n, total_n)
+                    for gg_n, total_n in zip(
+                        gg.acquired[b, ..., idx],
+                        pooled.acquired[b, ..., idx],
+                        strict=True,
+                    )
+                ]
+            )
+            slope_deg = grid * fit.slopes_deg[b, idx]
+            phases = np.deg2rad(
+                slope_deg
+                + np.array([[result.values["phase_0"]], [result.values["phase_1"]]])
+            )
+            amplitudes = np.array(
+                [[result.values["amplitude_0"]], [result.values["amplitude_1"]]]
+            )
+            gg_xy = amplitudes[0] * np.stack((np.cos(phases[0]), np.sin(phases[0])))
+            ee_xy = amplitudes[1] * np.stack((np.cos(phases[1]), np.sin(phases[1])))
+            # Match point weights to show the joint-fit residual without refitting.
+            predicted_xy = weights * gg_xy + (1 - weights) * ee_xy
+            prediction = _unwrap_about_slope(_wrapped_phase(*predicted_xy), slope_deg)
+            at_sample = prediction[np.searchsorted(grid, ns)]
+            measured = np.where(
+                np.isfinite(at_sample), phase_near(measured, at_sample), measured
+            )
+        series.append(
+            AccumulatedPhaseSeries(
+                f"Spectator {state}",
+                measured,
+                sem[b],
+                grid,
+                prediction,
+                f"{state} · joint fit, pooled",
+            )
+        )
+    return series
+
+
+def _wrapped_phase(
+    x: NDArray[np.float64], y: NDArray[np.float64]
+) -> NDArray[np.float64]:
+    """Use [-180, 180) degrees, omitting undefined zero or missing X/Y."""
+    return np.where(
+        np.hypot(x, y) > 0, phase_near(np.rad2deg(np.arctan2(y, x)), 0), np.nan
+    )
+
+
+def _unwrap_about_slope(
+    wrapped: NDArray[np.float64], slope_deg: NDArray[np.float64]
+) -> NDArray[np.float64]:
+    """Follow joint phase turns and unwrap only the residual from pooling."""
+    valid = np.isfinite(wrapped)
+    lifted = wrapped.copy()
+    residual = phase_near(wrapped[valid] - slope_deg[valid], 0)
+    lifted[valid] = slope_deg[valid] + np.rad2deg(np.unwrap(np.deg2rad(residual)))
+    return lifted
+
+
+def _plot_accumulated_phase_diagnostics(
+    plots: Plots,
+    data: ConditionalPhaseHeraldedResult,
+    cfg: ConditionalPhaseHeraldedCfg,
+    fit: PhaseSlopeFit,
+    groups: tuple[CountQuadratures, CountQuadratures],
+    idx: int,
+) -> None:
+    """Keep separate gg/ee measurements and their original joint-fit offsets."""
+    fig, _ = plots.subplots(
+        num="accumulated_phase_diagnostics", ncols=2, layout="constrained"
+    )
+    fig.suptitle(
+        f"Heralded conditional phase · {cfg.target.capitalize()} · Accumulated phase diagnostics\n"
+        f"Measured sample: {data.frequencies[idx]:.3f} MHz"
+    )
+    for herald_index, (ax, group) in enumerate(zip(fig.axes, groups, strict=True)):
+        herald = ("gg", "ee")[herald_index]
+        ax.set(
+            title=("Herald gg", "Herald ee, sign corrected")[herald_index],
+            xlabel="CZ gates, n (count)",
+            ylabel="Accumulated phase (deg)",
+        )
+        series = reference_phase_series(
+            data.gate_counts,
+            fit,
+            group.values[..., idx],
+            quadrature_phase_sem(group)[..., idx],
+            idx,
+            herald_index=herald_index,
+        )
+        display_series = [
+            replace(item, fit_label=f"{state} · joint fit, {herald} offset")
+            for state, item in zip(("g", "e"), series, strict=True)
+        ]
+        plot_accumulated_phase(
+            ax, data.gate_counts, display_series, connect_unfitted=True
+        )
+        ax.legend(
+            loc="upper center",
+            bbox_to_anchor=(0.5, -0.12),
+            ncols=2,
+            title=f"{herald} offsets",
         )
 
 
@@ -724,41 +886,56 @@ def _plot_slopes(
     fig.suptitle(f"Heralded conditional phase · {target} · fit diagnostics")
 
 
-def _plot_phase_diagnostics(
+def _train_quadratures(group: CountQuadratures, j: int) -> CountQuadratures:
+    """Select one CZ train, keeping actual spectator, X/Y and frequency axes."""
+    return CountQuadratures(
+        group.values[:, :, j], group.variances[:, :, j], group.acquired[:, :, j]
+    )
+
+
+def _plot_phase_points(
     plots: Plots,
     cfg: ConditionalPhaseHeraldedCfg,
     n: int,
-    phases: tuple[tuple[tuple[QuadraturePhase, ...], ...], ...],
-    phase_sem: NDArray[np.float64],
-    contrast_sem: NDArray[np.float64],
+    groups: tuple[CountQuadratures, ...],
+    *,
+    diagnostic: bool,
 ) -> None:
-    """Show contrast and phase before gate-count slope fitting, by spectator."""
+    """Show pooled or split single-train contrast and wrapped phase by spectator."""
+    # Persistent figure prefixes: phase_diagnostics_n_, phase_points_n_.
+    view = "phase_diagnostics" if diagnostic else "phase_points"
     xs = sweep2array(cfg.frequency)
     target = cfg.target.capitalize()
     fig, _ = plots.subplots(
-        num=f"phase_points_n_{n}",
+        num=f"{view}_n_{n}",
         nrows=2,
         sharex=True,
         figsize=(7, 5.8),
         layout="constrained",
     )
     contrast_ax, phase_ax = fig.axes
-    for b, state in enumerate(("g", "e")):
-        for h, (herald, marker) in enumerate((("(g,g)", ".-"), ("(e,e)", "x-"))):
-            points = phases[h][b]
+    any_contrast = False
+    heralds = ("(g,g)", "(e,e)") if diagnostic else ("Pooled gg/ee",)
+    for herald_index, (group, herald) in enumerate(zip(groups, heralds, strict=True)):
+        contrast = np.hypot(group.values[:, 0], group.values[:, 1])
+        contrast_sem = quadrature_contrast_sem(group)
+        phase_sem = quadrature_phase_sem(group)
+        any_contrast |= bool(np.isfinite(contrast).any())
+        for b, state in enumerate(("g", "e")):
+            label = (
+                f"{herald} spectator {state}" if diagnostic else f"Spectator {state}"
+            )
+            marker = ".-" if herald_index == 0 else "x-"
             contrast_ax.errorbar(
                 xs,
-                [p.contrast for p in points],
-                yerr=contrast_sem[h, b],
+                contrast[b],
+                yerr=contrast_sem[b],
                 fmt=marker,
                 color=f"C{b}",
-                label=f"{herald} spectator {state}",
+                label=label,
             )
-            phase_deg = [
-                np.nan if p.logical_phase_deg is None else p.logical_phase_deg
-                for p in points
-            ]
-            sem = phase_sem[h, b]
+            phase_deg = _wrapped_phase(*group.values[b])
+            sem = phase_sem[b]
             unavailable = ~np.isfinite(sem)
             if unavailable.any():
                 logger.warning(
@@ -783,13 +960,13 @@ def _plot_phase_diagnostics(
     )
     phase_ax.xaxis.set_major_locator(MaxNLocator(nbins=5))
     phase_ax.ticklabel_format(useOffset=False)
-    title = f"Heralded conditional phase · {target} · {n} CZ gates"
-    if not any(
-        np.isfinite(point.contrast)
-        for group in phases
-        for row in group
-        for point in row
-    ):
+    detail = (
+        "Phase diagnostics · separate gg and sign-corrected ee"
+        if diagnostic
+        else "Phase points · pooled gg/ee"
+    )
+    title = f"Heralded conditional phase · {target} · {n} CZ gates\n{detail}"
+    if not any_contrast:
         phase_ax.set_xlim(xs[0], xs[-1])
         title += "\nNo retained contrast data"
     fig.suptitle(title)

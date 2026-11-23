@@ -168,11 +168,10 @@ class DriveFreqExp(Experiment[DriveFreqResult, DriveFreqCfg]):
         )
 
         fig, ax = context.plots.subplots(num="measurement", figsize=(8, 4))
-        total = len(freqs) * len(gains)
         ax.set(
             xlabel=_FREQ_LABEL,
             ylabel=_GAIN_LABEL,
-            title=f"{_TITLE}\n0/{total} points with IQ",
+            title=_TITLE,
         )
         ax.xaxis.set_major_locator(MaxNLocator(nbins=5))
         ax.grid(False)
@@ -188,9 +187,7 @@ class DriveFreqExp(Experiment[DriveFreqResult, DriveFreqCfg]):
             Read the scan-shaped data without changing it. Update the live
             artists over the prepared coordinates; plot errors propagate.
             """
-            acquired = np.count_nonzero(np.isfinite(data))
-            title = ax.set_title(f"{_TITLE}\n{acquired}/{total} points with IQ")
-            return (*viewer.set(freqs, gains, drivefreq_signal2real(data)), title)
+            return viewer.set(freqs, gains, drivefreq_signal2real(data))
 
         fig.show()
         signals_buffer = SignalBuffer(

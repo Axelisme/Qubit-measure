@@ -1,5 +1,6 @@
 """Paired RB with gg/ee herald groups and shared return-survival decays."""
 
+from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import ClassVar
 
@@ -156,17 +157,16 @@ def bootstrap_joint_error(
     return float(low), float(high), len(errors)
 
 
-def _draw_pooled_survival(
-    ax: Axes, depths: NDArray[np.int64], sums: NDArray[np.float64], herald: int
+def _draw_count_bars(
+    ax: Axes,
+    depths: NDArray[np.int64],
+    survival: NDArray[np.float64],
+    sem: NDArray[np.float64],
+    seed_std: NDArray[np.float64],
+    *,
+    fit_overlay: bool = False,
 ) -> None:
-    """Draw pooled conditional returns with kept-shot SEM and seed spread."""
-    counts = sums[..., herald, herald, :, :]
-    pooled = np.nansum(counts, axis=0)
-    successes = pooled[..., herald, herald]
-    binary = np.stack((successes, pooled.sum(axis=(-2, -1)) - successes), axis=-1)
-    sem = np.sqrt(class_probability_covariance(binary)[..., 0, 0])
-    survival = joint_probabilities(pooled)[..., herald, herald]
-    seed_std = seed_standard_deviation(joint_probabilities(counts)[..., herald, herald])
+    """Draw each arm's shot SEM and seed SD; omit connecting lines over a fit."""
     for arm, label in enumerate(("Reference", "CZ interleaved")):
         color = f"C{arm}"
         ax.errorbar(
@@ -182,14 +182,81 @@ def _draw_pooled_survival(
             depths,
             survival[arm],
             sem[arm],
-            fmt=".-",
+            fmt="." if fit_overlay else ".-",
             color=color,
             capsize=3,
-            label=label,
+            label=f"{label} data" if fit_overlay else label,
         )
-    state = ("gg", "ee")[herald]
-    ax.set(ylabel=f"P({state} return | {state} herald)")
     ax.xaxis.set_major_locator(MaxNLocator(nbins=5, integer=True))
+
+
+def _group_decay_curve(
+    params: Mapping[str, float],
+    decay: NDArray[np.float64],
+    *,
+    herald_index: int,
+    arm: int,
+) -> NDArray[np.float64]:
+    """Apply the group's amplitude and offset to the arm's precomputed p**depth."""
+    return params[f"A_{herald_index}_{arm}"] * decay + params[f"B_{herald_index}_{arm}"]
+
+
+def _draw_pooled_survival(
+    ax: Axes,
+    depths: NDArray[np.int64],
+    sums: NDArray[np.float64],
+    fit: RBJointDecayFit | None = None,
+) -> None:
+    """Draw pooled gg/ee returns, shot SEM, seed SD and optional joint fit."""
+    gg = terminal_counts(sums, ("g", "g"))
+    ee = terminal_counts(sums, ("e", "e"))
+    gg_trials = gg.sum(axis=(-2, -1))
+    ee_trials = ee.sum(axis=(-2, -1))
+    returns = gg[..., 0, 0] + ee[..., 1, 1]
+    trials = gg_trials + ee_trials
+    seed_survival = np.divide(
+        returns, trials, out=np.full_like(returns, np.nan), where=trials > 0
+    )
+    seed_std = seed_standard_deviation(seed_survival)
+
+    pooled_gg = np.nansum(gg_trials, axis=0)
+    pooled_trials = pooled_gg + np.nansum(ee_trials, axis=0)
+    pooled_returns = np.nansum(returns, axis=0)
+    survival = np.divide(
+        pooled_returns,
+        pooled_trials,
+        out=np.full_like(pooled_returns, np.nan),
+        where=pooled_trials > 0,
+    )
+    binary = np.stack((pooled_returns, pooled_trials - pooled_returns), axis=-1)
+    sem = np.sqrt(class_probability_covariance(binary)[..., 0, 0])
+    _draw_count_bars(ax, depths, survival, sem, seed_std, fit_overlay=fit is not None)
+
+    if fit is not None:
+        xs = np.asarray(
+            np.union1d(depths, np.linspace(depths.min(), depths.max(), 201)),
+            dtype=np.float64,
+        )
+        params = fit.fit.values
+        for arm, label in enumerate(("Reference", "CZ interleaved")):
+            measured = pooled_trials[arm] > 0
+            # Match point weights to show the joint-fit residual without refitting.
+            gg_fraction = pooled_gg[arm, measured] / pooled_trials[arm, measured]
+            weight = np.interp(xs, depths[measured], gg_fraction)
+            decay = params[f"p_{arm}"] ** xs
+            gg_curve = _group_decay_curve(params, decay, herald_index=0, arm=arm)
+            ee_curve = _group_decay_curve(params, decay, herald_index=1, arm=arm)
+            ax.plot(
+                xs,
+                weight * gg_curve + (1 - weight) * ee_curve,
+                color=f"C{arm}",
+                label=f"{label} fit",
+            )
+    ax.set(
+        xlabel="Random Clifford depth (count)",
+        ylabel="P(return to herald state | gg or ee herald)",
+    )
+    ax.legend(loc="lower center", bbox_to_anchor=(0.5, 1), ncols=2)
 
 
 def _draw_return_survival(
@@ -215,9 +282,8 @@ def _draw_return_survival(
         )
         if fit is not None:
             params = fit.fit.values
-            curve = (
-                params[f"A_{herald}_{arm}"] * params[f"p_{arm}"] ** xs
-                + params[f"B_{herald}_{arm}"]
+            curve = _group_decay_curve(
+                params, params[f"p_{arm}"] ** xs, herald_index=herald, arm=arm
             )
             ax.plot(xs, curve, color=color, label=f"{label} fit")
     state = ("gg", "ee")[herald]
@@ -229,20 +295,67 @@ def _draw_return_survival(
     ax.legend(loc="lower center", bbox_to_anchor=(0.5, 1), ncols=2)
 
 
-def _plot_pooled_survival(plots: Plots, data: RBHeraldedResult) -> None:
-    """Show the last live return view without acquisition progress."""
-    fig, _ = plots.subplots(
-        2,
-        1,
-        num="pooled_survival",
-        sharex=True,
-        figsize=(7, 6),
-        layout="constrained",
+def _plot_pooled_survival(
+    plots: Plots,
+    data: RBHeraldedResult,
+    fit: RBJointDecayFit | None,
+    analysis: RBHeraldedAnalysis,
+) -> None:
+    """Show the pooled live return view with the joint fit and result."""
+    fig, ax = plots.subplots(
+        num="pooled_survival", figsize=(7, 5), layout="constrained"
     )
+    _draw_pooled_survival(ax, data.depths, data.sums, fit)
     fig.suptitle("Heralded RB · Qubit1/Qubit2 · Conditional return")
+    report = ["Pooled counts · Capped: shot SEM · Pale: seed SD"]
+    estimate = analysis.estimate
+    if estimate is not None:
+        report.extend(
+            (
+                f"CZ error estimate = {estimate.gate_error:.3g}; 95% seed CI "
+                f"[{estimate.error_ci_low:.3g}, {estimate.error_ci_high:.3g}]",
+                f"Joint decay p: Reference {estimate.p_reference:.4g} · "
+                f"CZ interleaved {estimate.p_interleaved:.4g}",
+            )
+        )
+        if analysis.fit_quality is not None:
+            rms = [
+                "unavailable"
+                if item.normalized_residual_rms is None
+                else f"{item.normalized_residual_rms:.3g}"
+                for item in analysis.fit_quality
+            ]
+            report.extend(
+                (
+                    "Grouped fit normalized residual RMS (Reference / CZ interleaved)",
+                    f"gg: {rms[0]} / {rms[1]} · ee: {rms[2]} / {rms[3]}",
+                )
+            )
+    elif analysis.reason is not None:
+        report.append(f"No RB estimate: {analysis.reason}")
+    fig.supxlabel("\n".join(report), fontsize=10)
+
+
+def _plot_grouped_survival(plots: Plots, data: RBHeraldedResult) -> None:
+    """Show separate shot-pooled gg/ee returns, including incomplete seeds."""
+    fig, _ = plots.subplots(
+        2, 1, num="grouped_survival", sharex=True, figsize=(7, 6), layout="constrained"
+    )
+    fig.suptitle("Heralded RB · Qubit1/Qubit2 · Conditional return by herald")
     fig.supxlabel("Pooled counts · Capped: shot SEM · Pale: seed SD", fontsize=10)
     for herald, ax in enumerate(fig.axes):
-        _draw_pooled_survival(ax, data.depths, data.sums, herald)
+        counts = data.sums[..., herald, herald, :, :]
+        pooled = np.nansum(counts, axis=0)
+        successes = pooled[..., herald, herald]
+        binary = np.stack((successes, pooled.sum(axis=(-2, -1)) - successes), axis=-1)
+        sem = np.sqrt(class_probability_covariance(binary)[..., 0, 0])
+        survival = joint_probabilities(pooled)[..., herald, herald]
+        seed_std = seed_standard_deviation(
+            joint_probabilities(counts)[..., herald, herald]
+        )
+        _draw_count_bars(ax, data.depths, survival, sem, seed_std)
+        state = ("gg", "ee")[herald]
+        ax.set_ylabel(f"P({state} return | {state} herald)")
     fig.axes[0].legend(loc="lower center", bbox_to_anchor=(0.5, 1), ncols=2)
     fig.axes[-1].set_xlabel("Random Clifford depth (count)")
 
@@ -296,7 +409,7 @@ def _plot_decay_fits(
             num=f"fit_{label}", figsize=(7, 5), layout="constrained"
         )
         _draw_return_survival(ax, depths, means[herald], seed_std[herald], fit, herald)
-        fig.suptitle(f"Heralded RB · Qubit1/Qubit2 · {label} decay fit")
+        fig.suptitle(f"Heralded RB · Qubit1/Qubit2 · {label} decay fit diagnostic")
         report = ["Equal-seed means · Bars: seed SD"]
         if estimate is not None and quality is not None and fit is not None:
             report.append(
@@ -415,30 +528,21 @@ class RBHeraldedExp(Experiment[RBHeraldedResult, RBHeraldedCfg]):
         round acquires reps shots at every depth in the program. Save all 81
         counts per cell summed across finished rounds; unacquired cells stay NaN.
         """
-        # 1. Compare gg/ee return-to-herald survival for reference and CZ-interleaved arms across depth.
-        fig, _ = context.plots.subplots(
-            2, 1, num="measurement", sharex=True, figsize=(7, 6), layout="constrained"
+        # 1. Compare pooled gg/ee return for reference and CZ-interleaved arms across depth.
+        fig, ax = context.plots.subplots(
+            num="measurement", figsize=(7, 5), layout="constrained"
         )
         depths = np.array(config.depth, dtype=np.int64)
         fig.suptitle("Heralded RB · Qubit1/Qubit2 · Conditional return")
+        fig.supxlabel("Capped: shot SEM · Pale: seed SD", fontsize=10)
         fig.show()
 
         @context.plots.on_plot_thread
         def update_view(sums: NDArray[np.float64]):
-            for herald, ax in enumerate(fig.axes):
-                for bars in tuple(ax.containers):
-                    bars.remove()
-                ax.relim()
-                _draw_pooled_survival(ax, depths, sums, herald)
-            fig.axes[0].legend(loc="lower center", bbox_to_anchor=(0.5, 1), ncols=2)
-            fig.axes[-1].set_xlabel("Random Clifford depth (count)")
-            cells = np.isfinite(sums[..., 0, 0, 0, 0])
-            fig.supxlabel(
-                f"Measured seed/arm/depth cells: {cells.sum()}/{cells.size} count\n"
-                f"Total heralded shots (all outcomes): {np.nansum(sums):,.0f} count\n"
-                "Capped: shot SEM · Pale: seed SD",
-                fontsize=10,
-            )
+            for bars in tuple(ax.containers):
+                bars.remove()
+            ax.relim()
+            _draw_pooled_survival(ax, depths, sums)
             return (fig,)
 
         # 2. Compile all arms before acquiring any shots.
@@ -561,19 +665,19 @@ class RBHeraldedExp(Experiment[RBHeraldedResult, RBHeraldedCfg]):
                 bounds = decay_time_bounds(data.depths.astype(np.float64))
                 quality = tuple(
                     compute_fit_quality(
-                        means[h, arm],
-                        joint_fit.curves[h, arm],
+                        means[herald_index, arm],
+                        joint_fit.curves[herald_index, arm],
                         {"decay_time": tau},
                         np.array([[variance]]),
                         decay_bounds=bounds,
                     )
-                    for h in range(2)
+                    for herald_index in range(2)
                     for arm, (tau, variance) in enumerate(decays)
                 )
-        # 3. Show the live pooled view first, then fits and herald fractions.
-        _plot_pooled_survival(plots, data)
-
+        # 3. Show the pooled return and joint-fit overlay before the group diagnostics.
         analysis = RBHeraldedAnalysis(estimate, quality, reason)
+        _plot_pooled_survival(plots, data, rendered_fit, analysis)
+        _plot_grouped_survival(plots, data)
         _plot_decay_fits(plots, data.depths, means, seed_std, rendered_fit, analysis)
         _plot_herald_fractions(plots, data.depths, np.nansum(data.sums, axis=0))
         # 4. Keep the shared-decay d=4 estimate and seed-bootstrap interval, or its numerical failure reason.

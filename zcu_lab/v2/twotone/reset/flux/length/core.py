@@ -259,14 +259,7 @@ class LengthExp(Experiment[LengthResult, LengthCfg]):
             direction = principal_iq_direction(signals[0, 0])
             projected = direction[0] * signals.real + direction[1] * signals.imag
             sem = iq_shot_sem(moments, direction=direction)
-            shots = int(np.nan_to_num(moments[..., 0]).max())
-            title = ax.set_title(
-                f"{_TITLE} · IQ projection\nRetained shots per point and branch: {shots} count"
-            )
-            return (
-                *viewer.set(lengths, projected.reshape(4, -1), sem.reshape(4, -1)),
-                title,
-            )
+            return viewer.set(lengths, projected.reshape(4, -1), sem.reshape(4, -1))
 
         fig.show()
         buffer = SignalBuffer(

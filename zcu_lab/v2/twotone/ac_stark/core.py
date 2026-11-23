@@ -293,14 +293,11 @@ class AcStarkExp(Experiment[AcStarkResult, AcStarkCfg]):
                 history[-offset - 1] = real[current - offset]
             artists = heatmap.set(gains, freqs, real)
             artists = (*artists, *lines.set(freqs, history))
-            progress = heat_ax.set_title(
-                f"Gain rows with data: {len(valid)}/{len(gains)}"
-            )
             if current >= 0:
                 current_snr = snr_now()
                 snr = f" · SNR {current_snr:.1f}" if current_snr else ""
                 line_ax.set_title(f"Latest gain: {gains[current]:.4g} a.u.{snr}")
-            return (*artists, progress)
+            return artists
 
         fig.show()
         return SignalBuffer(

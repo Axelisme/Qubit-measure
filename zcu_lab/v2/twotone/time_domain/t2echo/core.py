@@ -234,7 +234,7 @@ class T2EchoExp(Experiment[T2EchoResult, T2EchoCfg]):
         # 2. Display the IQ projection while averaging the total-delay sweep.
         fig, ax = context.plots.subplots(num="measurement")
         ax.set(
-            title="Spin echo · 0 shots/point",
+            title="Spin echo",
             xlabel=_DELAY_LABEL,
             ylabel=_IQ_LABEL,
         )
@@ -243,13 +243,11 @@ class T2EchoExp(Experiment[T2EchoResult, T2EchoCfg]):
 
         @context.plots.on_plot_thread
         def update(moments: NDArray[np.float64]) -> tuple[Artist, ...]:
-            """Refresh the projected mean, shot SEM and completed shot count."""
-            counts, mean = split_sums(moments)
+            """Refresh the projected mean and shot SEM."""
+            _, mean = split_sums(moments)
             i, q = _iq_direction(mean)
             sem = iq_shot_sem(moments, direction=(i, q))
-            count = np.nanmax(counts, initial=0)
-            title = ax.set_title(f"Spin echo · {count:.0f} shots/point")
-            return (*viewer.set(lengths, mean.real * i + mean.imag * q, sem), title)
+            return viewer.set(lengths, mean.real * i + mean.imag * q, sem)
 
         fig.show()
         moments_buffer = SignalBuffer(

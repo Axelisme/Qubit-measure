@@ -404,11 +404,10 @@ class AmpRabiExp(Experiment[AmpRabiResult, AmpRabiCfg]):
         # 2. Preview populations from complete shot columns without losing raw IQ.
 
         viewer = None
-        progress = None
         if classifier is not None:
             figure, ax = context.plots.subplots(num="measurement")
             ax.set(xlabel="Qubit drive gain (a.u.)", ylabel="Outcome probability")
-            progress = figure.suptitle(
+            figure.suptitle(
                 "Single-shot amplitude Rabi · qubit · classified populations"
             )
             viewer = live_errorbar(ax, num_lines=3)
@@ -448,18 +447,11 @@ class AmpRabiExp(Experiment[AmpRabiResult, AmpRabiCfg]):
                 populations = counts[:, :2] / n_shots
             covariance = class_probability_covariance(counts)
             sem = np.sqrt(np.diagonal(covariance, axis1=-2, axis2=-1))
-            artists = viewer.set(
+            return viewer.set(
                 gains,
                 np.column_stack((populations, 1 - populations.sum(axis=1))).T,
                 sem.T,
             )
-            if progress is None:
-                return artists
-            progress.set_text(
-                "Single-shot amplitude Rabi · qubit · classified populations\n"
-                f"Accumulated shots per gain: {n_shots} count"
-            )
-            return (progress, *artists)
 
         buffer = SignalBuffer(
             (rounds, gains.size, cfg.reps),

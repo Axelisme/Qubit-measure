@@ -16,7 +16,7 @@
 本頁的 recipes 都需要 `$coupler`。實驗入口 `joint_readout`、`idle_zz` 與[兩個 conditional spectroscopy 入口](../v2/README.md#two-qubit-實驗清單)不需要。
 使用舊 point 時，依[重綁步驟](../v2/two_qubit/guide.md#重綁舊-point)更新 aliases、CZ pulse library keys、module slots 和 `ext.cz_phase` keys，再開新 tab 或在 Run 頁按 Defaults。Notebook 內建的 `qubit1`、`qubit2` 與 GUI aliases 分開，不會自動互綁。
 
-Reset 後先套具名欄位，再依序套用 `overrides`。例如 `drive.qubit1.gain` 是脈衝 gain 的邏輯路徑。
+Reset 後先套具名欄位，再依序套用 `overrides`。要改引用脈衝的子欄位，先對脈衝路徑下 `command: to_inline`，再改子欄位。例如先轉換 `drive.qubit1`，再填 `drive.qubit1.gain`。
 欄位仍有錯誤時，`check_ready` 回報要修正的路徑，recipe 不啟動 Run。
 
 ## 選用 mux herald

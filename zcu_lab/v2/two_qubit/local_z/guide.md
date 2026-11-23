@@ -14,7 +14,7 @@
 ## 怎麼讀圖
 
 - **Local Z · Bloch rotation and phase per CZ**：左格用帶 n 標籤的向量顯示兩顆 target 的旋轉。虛線是單位圓，箭頭端點是實測 X/Y，沒有把向量拉到圓周上。右格把兩顆的 `atan2(σ_Y, σ_X)` 沿 n 展開並疊上計數加權直線。圖例列出斜率（每次 CZ 的相位）、斜率標準誤（SE）與反號的 correction。缺點、半圈歧義或無正值 phase variance 時不給該 target 的 correction。
-- **Local Z · Accumulated phase（Live）**：兩個投影都有保留 shots 且 contrast 非零才顯示該點。不跨缺點或半圈歧義連線，也不做擬合。標題列出已量的投影數和各投影的保留 shot 數範圍。
+- **Local Z · Accumulated phase（Live）**：兩個投影都有保留 shots 且 contrast 非零才顯示該點。不跨缺點或半圈歧義連線，也不做擬合。
 - **Local Z · X/Y contrast（Live）**：顯示兩顆 qubit 的 X/Y 向量長度，隨 `n` 更新。Live 和 Diagnostics 的 contrast 棒都是 ±1 shot SEM。將獨立 X/Y 投影平均的抽樣誤差沿向量方向傳遞；長度恰為零時取兩個投影中較大的 SEM。任一投影少於兩發保留 shots 或缺變異數時，能算出的長度仍畫點，不畫棒。棒不含 classifier 或擬合參數的誤差。
 - **Local Z · Diagnostics**：上排按 target 顯示 X/Y 的 `σ = (N_e − N_g) / N_total`，other 記零並留在分母。下排比較兩顆向量的長度（contrast）和有號殘差（實測相位減擬合相位）。用殘差對 n 檢查線性模型是否有系統偏差。R² 是直線解釋的相位變異比例，Normalized RMS 是殘差 RMS 除以實測相位範圍。摘要的 relative SE 是參數 SE／參數絕對值。Contrast 微弱時，先對照 X/Y 棒再解讀相位。
 

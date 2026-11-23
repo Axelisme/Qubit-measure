@@ -97,6 +97,7 @@ Form 預設按 cfg 宣告順序顯示，adapter 有獨立輸入型別時按該�
 `tree` 的寫入順序與畫面排序無關。未知或重複欄位在 Form 建構時 raise ValueError。
 持久 Spec 的 Form 只接受空 `field_order`。
 GUI 作者依 [表單設計與預演](measure-authoring.md#表單設計與預演) 核對實際順序。
+選擇 `Slot` 初值時，依 [ADR-0073〈表單預設引用 library，只在改了 Run 不覆寫的欄位時複製〉](../../docs/adr/0073-measure-form-derivation.md#表單預設引用-library只在改了-run-不覆寫的欄位時複製) 判斷是否保留 library 引用。
 
 時間掃描需選取樣方式時用 `sampling: Literal["linear", "decay"]`。
 Linear 是線性格點，decay 將同一時間窗的點集中在衰減段，這類時間掃描只接受這兩種模式。
@@ -193,6 +194,8 @@ Live artists 與多面板格式依 [v2 README](README.md#即時圖工具)。
 建立非均勻熱圖（`uniform=False`）時，用 [`live_heatmap`](support/live.py) 的 `cmap` 選色盤，例如 `live_heatmap(ax, uniform=False, cmap="viridis")`。
 `cmap` 接受 Matplotlib 已註冊的色盤名稱，省略時用 `RdBu_r`。熱圖掛載到 axes 後就不能更換色盤。
 實驗自行決定座標、labels 與圖名。show 前可填資料，show 後的修改也經 plot-thread callback。
+取數進度由 GUI progress bar 顯示。Live 圖不畫輪次、累積 shots、完成比例或階段序號，也不為這些計數建立 artist。
+例如，拿掉副標題 `Averaging round 3 / 10`，保留 `One-tone spectrum · Resonator · IQ magnitude` 和持續更新的曲線。
 選 y 軸要畫的物理量時看 [R12：y 軸畫物理 observable](figure-style.md#r12y-軸畫物理-observable)，標示方式見[〈單位〉](figure-style.md#單位)。
 一維建圖與 update 見 [`AmpRabiExp.run`](twotone/rabi/amp_rabi/core.py)，熱圖與最近兩條切線見 [PowerExp 的 live plot](twotone/power_dep/core.py)。
 

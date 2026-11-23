@@ -260,10 +260,7 @@ class ChainExp(Experiment[SweepSums, ChainCfg]):
             curve = sweep_curve(sums)
             level_line.set_data([freqs[0], freqs[-1]], [curve.level, curve.level])
             # Set the level first: the curve update rescales the axes to both lines.
-            progress = ax.set_title(
-                f"{title}\nRetained dwells per RF point: {int(curve.dwell_count.min())} count"
-            )
-            return (progress, level_line, *curve_line.set(freqs, curve.sigma))
+            return (level_line, *curve_line.set(freqs, curve.sigma))
 
         fig.show()
         augmented_sums = SignalBuffer(

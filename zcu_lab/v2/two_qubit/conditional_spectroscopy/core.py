@@ -38,7 +38,7 @@ from zcu_tools.program.v2.modules import MuxReadout
 from zcu_lab.v2.support import live_errorbar
 from zcu_lab.v2.support.device import set_flux
 
-from .._drive import QubitDriveCfg
+from .._drive import SweptQubitDriveCfg
 from .._readout import MuxResetCfg
 from .._sums import qubit_marginal_probabilities, validate_qubit_tones
 from ._common import excitation_sem
@@ -108,7 +108,7 @@ class SpectroscopyCfg(ConfigBase):
         ),
     ]
     drive: Annotated[
-        QubitDriveCfg,
+        SweptQubitDriveCfg,
         FieldMeta(
             label="Two-qubit spectroscopy probe",
             description="Enter the two weak pulses applied together on the respective qubit drive lines at the shared RF sweep frequency.",
@@ -338,7 +338,7 @@ class SpectroscopyExp(Experiment[SpectroscopyResult, SpectroscopyCfg]):
             ),
             result_type=SpectroscopyResult,
             cfg_type=SpectroscopyCfg,
-            cfg_schema_version="7.0",
+            cfg_schema_version="7.1",
             tag="two_qubit/conditional_spectroscopy",
             result_builder=restore_result,
         )
@@ -373,18 +373,15 @@ class SpectroscopyExp(Experiment[SpectroscopyResult, SpectroscopyCfg]):
             fig.legend(
                 fig.axes[0].get_lines(), _QUBITS, loc="outside lower center", ncols=2
             )
-            title = _spectra_title(config, index)
-            fig.suptitle(
-                f"{title}\n0/{4 * len(frequencies)} preparation-frequency points sampled"
-            )
-            views.append((fig, panels, title))
+            fig.suptitle(_spectra_title(config, index))
+            views.append((fig, panels))
             fig.show()
 
         @context.plots.on_plot_thread
         def update_view(sums: NDArray[np.float64]) -> tuple[Figure, ...]:
             answer = summarize_spectra(sums)
             sem = excitation_sem(sums)
-            for index, (fig, panels, title) in enumerate(views):
+            for index, (_, panels) in enumerate(views):
                 for panel, (qubit1, qubit2) in zip(
                     panels, np.ndindex(2, 2), strict=True
                 ):
@@ -393,12 +390,7 @@ class SpectroscopyExp(Experiment[SpectroscopyResult, SpectroscopyCfg]):
                         answer.excitation[index, qubit1, qubit2].T,
                         sem[index, qubit1, qubit2].T,
                     )
-                shots = answer.acquired_shots[index]
-                fig.suptitle(
-                    f"{title}\n{np.isfinite(shots).sum()}/{shots.size} preparation-frequency points sampled"
-                    f" · {np.nansum(shots):,.0f} retained shots (count)"
-                )
-            return tuple(fig for fig, _, _ in views)
+            return tuple(fig for fig, _ in views)
 
         # 2. Set DC on the host; scan preparations and common probe frequency in hardware before contrast/readout.
         buffer = SignalBuffer(
