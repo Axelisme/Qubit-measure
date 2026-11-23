@@ -88,16 +88,17 @@ def _domains(geometry: Geometry) -> dict[str, NDArray[np.bool_]]:
     Each domain's classifier owns its named candidate choices.
     """
     table = geometry.table
-    flux = geometry.flux_drive & (table.tones > 0)
-    ordinary = ~flux
+    secular_only = ~table.has_collapse_operators
+    flux = geometry.flux_drive & (table.tones > 0) & secular_only
+    ordinary = ~flux & secular_only
     constant = table.constant_envelopes(np.arange(len(table.timeline), dtype=np.int64))
     single = ordinary & (table.tones == 1)
     slow = single & constant
     if table.tone_frequency_ghz.shape[1]:
         slow &= low_carrier(table.tone_frequency_ghz[:, 0])
-    adiabatic = geometry.flux_drive & (table.tones == 0)
+    adiabatic = geometry.flux_drive & (table.tones == 0) & secular_only
     return {
-        "idle": (table.tones == 0) & ~adiabatic,
+        "idle": (table.tones == 0) & ~adiabatic & secular_only,
         "adiabatic": adiabatic,
         "flux": flux,
         "slow": slow,
@@ -629,10 +630,14 @@ class Classifier:
         self, domain: str, rows: NDArray[np.int64], attempted: tuple[str, ...]
     ) -> None:
         """Raise the domain and point failure for nonempty exhausted rows."""
+        reason = {
+            "full_loss": "; collapse operators require CPU dop853",
+            "full_loss_flux": "; collapse operators require fixed flux and no supplied flux waveform",
+        }.get(domain, "")
         points = np.unique(self.geometry.points[self.table.timeline[rows]]).tolist()
         raise NoValidKernel(
             f"no valid kernel for segment {rows[0]}; domain {domain}: "
-            f"points {points}, segments {rows.tolist()}",
+            f"points {points}, segments {rows.tolist()}{reason}",
             domain=domain,
             points=tuple(points),
             segments=tuple(int(row) for row in rows),
@@ -698,6 +703,9 @@ class Classifier:
 
     def classify(self) -> Dispatch:
         rows = np.flatnonzero(self.scope)
+        with_jumps = rows[self.table.has_collapse_operators[rows]]
+        self.accept("full_loss_flux", rows[self.geometry.reject_jump_flux[rows]], ())
+        self.accept("full_loss", with_jumps, ("dop853",))
         self.accept("idle", rows[self.domains["idle"][rows]], ("t4",))
         self.accept(
             "adiabatic", rows[self.domains["adiabatic"][rows]], ("adiabatic_map",)

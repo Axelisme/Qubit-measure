@@ -1,6 +1,6 @@
 # Physical simulator models
 
-**Last updated:** 2026-11-22, acquire telemetry provenance
+**Last updated:** 2026-11-23, telemetry provenance and physical v2 capture
 
 **Readers:** framework-dev, lab-author, agent. Locate physical model configuration, numerics and environment builders.
 
@@ -168,8 +168,8 @@ without the key have no associated capture; the routing analyzer does not use it
 The binding has already measured `wall_s` before either writer runs.
 
 Use `zcu_tools.simulate.evolution.capture_directory()` to locate files.
-It returns `<user-cache-root>/simulator-debug/v1`, shared across worktrees and
-tasks. `ZCU_TOOLS_CACHE_DIR` overrides the shared root with a non-empty absolute
+It returns `<user-cache-root>/simulator-debug/v2`, shared across worktrees and
+tasks using the same physical codec. `ZCU_TOOLS_CACHE_DIR` overrides the shared root with a non-empty absolute
 path. The [capture writer](../simulate/evolution/README.md#capture-persistence)
 defines atomic publication, codec failures and retention.
 

@@ -12,16 +12,17 @@ status: accepted
 
 ### 黑盒邊界是 simulate.evolution
 
-**規則。** 外部只透過 `simulate.evolution` 的 package root 呼叫引擎及使用資料型別。呼叫端提供 numeric model source、timeline、初態與誤差預算。引擎回傳 readout 起點的量子態與 family 診斷。Environment 明示組合 population 轉換與 ADC，讀出樣本的加總歸 `simulate.adc`。
+**規則。** 外部只透過 `simulate.evolution` 的 package root 呼叫引擎及使用資料型別。呼叫端提供 numeric model source、timeline、初態與誤差預算。引擎回傳 readout 起點的量子態與 family 診斷。Environment 明示組合 population 轉換與 ADC，讀出樣本的加總歸 `simulate.adc`。`ModelSource` 可提供完整的 collapse operators。`Engine` 在求解座標以 `D[L]ρ = LρL† − {L†L,ρ}/2` 計算每個 jump，不把同一個矩陣拆成獨立方向率。
 
-**例子。** 要查一列選到哪個 family，用 `Engine.inspect_dispatch`，不直接呼叫 dispatcher。查詢與 evolve 共用分類、guard 和完整 inventory 的計價，不演化呼叫端的 density。已決定的路由與相同初始 history 下的 evolve 一致。`scheduling_cost` 是交錯排程用的相對工作量，不是秒數或候選排序用的冷攤提估價。逐列回報、未決原因及查詢的快取行為見 [Dispatch inspection](../../lib/zcu_tools/simulate/evolution/README.md#dispatch-inspection)。
+**例子。** 要查一列選到哪個 family，用 `Engine.inspect_dispatch`，不直接呼叫 dispatcher。查詢與 evolve 共用分類、guard 和完整 inventory 的計價，不演化呼叫端的 density。已決定的路由與相同初始 history 下的 evolve 一致。`scheduling_cost` 是交錯排程用的相對工作量，不是秒數或候選排序用的冷攤提估價。逐列回報、未決原因及查詢的快取行為見 [Dispatch inspection](../../lib/zcu_tools/simulate/evolution/README.md#dispatch-inspection)。例如呼叫端可把固定 Hamiltonian 下的腔衰減組成一個矩陣交給 `ModelSource`，由引擎保留該矩陣各分量間的相干轉移。
 
-**邊界。** Kernel、dispatch、scheduler 與 cache 都是內部實作。查詢不寫 routing history 或登記重用事實，也不改變下一次 evolve 的路由或 density。Guard preparation 在查詢返回時釋放，source 仍可填入模型快取與 shift registration。量測層可借出 `RoutingHistory`，也可指定整次 acquire 的候選白名單；逐段仍由 dispatch 選路及驗證。這兩個控制不進物理 YAML、`AcquireRequest`、實驗 cfg 或 program binding。沒有逐段 family 對照、callback、偏好順序或公開 kernel registry。固定單一候選可以略過成本捷徑。白名單或 pin 都不能略過前置條件或 guard；`multitone_gate` 的建構後例外見[效率和驗證規則](#先求效率正確性事後補)。借用、清除及無可用候選時的錯誤契約見 [Accuracy, failures and lifecycle](../../lib/zcu_tools/simulate/evolution/README.md#accuracy-failures-and-lifecycle)。
+**邊界。** Kernel、dispatch、scheduler 與 cache 都是內部實作。查詢不寫 routing history 或登記重用事實，也不改變下一次 evolve 的路由或 density。Guard preparation 在查詢返回時釋放，source 仍可填入模型快取與 shift registration。量測層可借出 `RoutingHistory`，也可指定整次 acquire 的候選白名單；逐段仍由 dispatch 選路及驗證。這兩個控制不進物理 YAML、`AcquireRequest`、實驗 cfg 或 program binding。沒有逐段 family 對照、callback、偏好順序或公開 kernel registry。固定單一候選可以略過成本捷徑。白名單或 pin 都不能略過前置條件或 guard；`multitone_gate` 的建構後例外見[效率和驗證規則](#先求效率正確性事後補)。借用、清除及無可用候選時的錯誤契約見 [Accuracy, failures and lifecycle](../../lib/zcu_tools/simulate/evolution/README.md#accuracy-failures-and-lifecycle)。完整 collapse operators 只由固定 Hamiltonian 的 CPU `dop853` 求解。其他 family 和 backend 不接受帶完整 jump 的列，現有 guards 不放寬；不帶 jump 的路徑行為不變。FTF、Fock 排列及模型組成留在呼叫端，不為完整 jump 增設第二套 model-source API。
 
 **依據。**
 - 2026-10-18，使用者定案：「Q1A，是的，演化引擎黑盒子就是指simulate.evolution。」原裁決未附入庫討論，見 Git `ee1eeaa8d`。
 - 2026-11-12，使用者對具名歷史與整次 acquire 的 family 白名單答「可以」。原裁決未附入庫討論，見 Git `a95315c32`。
 - 2026-11-16，使用者核可公開 dispatch 查詢的實作計畫：「1核可」。Floquet guard 保留一週期 propagator 計算，使用者答「B」。對「查詢不改 routing history」與「欄位只回報既有排程工作量」答「追認」。原裁決未附入庫討論，核可與追認分別見 Git `2c59fcdec`、`0a81af3c7`。測試與量測的背景見[模擬器測試與量測的分層](../discussions/2026-11-15-simulator-test-measurement-layering.md)。
+- 2026-11-22，designer 在使用者「我要离开一段时间，你继续代采」授權下代裁完整 jump 的公開數值契約。使用者覆核答「其他两个是接受。」見[完整 collapse operators 的取捨](../discussions/2026-11-23-evolution-full-collapse-operators.md)。
 
 ### `Engine` 的 GPU backend
 
@@ -35,13 +36,15 @@ status: accepted
 
 ### 凍結數值輸入與參考解交接
 
-**規則。** `simulate.evolution` 公開凍結數值的 codec、容器、identity 與 solver-free reference I/O。Tools 擁有場景與 metadata 的解讀，tests 擁有獨立 solver 與參考解 producer。凍結數值不入庫，codec 只接顯式路徑，不解析 Git 位置。存放、場景 producer 與跨 process 計時的分工見 [[0072]]。
+**規則。** `simulate.evolution` 公開凍結數值的 codec、容器、identity 與 solver-free reference I/O。Tools 擁有場景與 metadata 的解讀，tests 擁有獨立 solver 與參考解 producer。凍結數值不入庫，codec 只接顯式路徑，不解析 Git 位置。存放、場景 producer 與跨 process 計時的分工見 [[0072]]。`FROZEN_PHYSICAL_VERSION=2`。Model row 缺 `collapse_operators` 表示沒有 jump；有 jump 時，依原順序保存完整複數矩陣，單位為 `ns⁻½`。顯式空集合不是缺欄位。沒有 jump 的模型保留原 identity、pin 和 reference key。
 
-**例子。** 成對計時只讀已備妥的參考解。即使 cache miss 也不就地求解，由 tests 側 producer 按顯式的 manifest-to-solver 對應補出。只補一個場景時，producer 須先找到唯一同名列才讀 payload 或求解。沒有同名列就列出合法名稱；多筆同名則列出來源並報錯。容器欄位、hash 與 key、cache I/O 和單列選取的錯誤契約見 [Frozen numeric inputs and references](../../lib/zcu_tools/simulate/evolution/README.md#frozen-numeric-inputs-and-references)。
+**例子。** 成對計時只讀已備妥的參考解。即使 cache miss 也不就地求解，由 tests 側 producer 按顯式的 manifest-to-solver 對應補出。只補一個場景時，producer 須先找到唯一同名列才讀 payload 或求解。沒有同名列就列出合法名稱；多筆同名則列出來源並報錯。容器欄位、hash 與 key、cache I/O 和單列選取的錯誤契約見 [Frozen numeric inputs and references](../../lib/zcu_tools/simulate/evolution/README.md#frozen-numeric-inputs-and-references)。例如重建原有無 jump 場景時，producer 在預設根 `scenes/v1-physical-v2` 寫入 v2 payload，沿用原 pin，對應的既有參考解仍可讀取。新 capture 寫到 `simulator-debug/v2`。
 
-**邊界。** 讀回的是有限的數值模型，不是 Python builder、裝置佈局、routing history 或私有 preparation。容器不解讀 caller metadata，也沒有 solver 欄位。Producer 不 import tools，不從 metadata 或場景名稱猜 solver，失敗不換 solver。Physical 解碼契約變更由 producer 遷移；成對工具核對 physical、scene cache 兩個格式版本與完整 record 身份，不把算法數值版次當作相容性門檻。搬移 owner 不改既有 reference key。
+**邊界。** 讀回的是有限的數值模型，不是 Python builder、裝置佈局、routing history 或私有 preparation。容器不解讀 caller metadata，也沒有 solver 欄位。Producer 不 import tools，不從 metadata 或場景名稱猜 solver，失敗不換 solver。Physical 解碼契約變更由 producer 遷移；成對工具核對 physical、scene cache 兩個格式版本與完整 record 身份，不把算法數值版次當作相容性門檻。搬移 owner 不改既有 reference key。v2 readers 拒絕 v1 容器；新預設根不覆寫舊場景或 capture。遇到帶完整 jump 的 cache miss，不支援完整 L 的 solver 必須拒絕，producer 不得發布結果。正式 full-L 參考只由獨立、已驗證相同物理與完整 density 收斂的 solver 產生。
 
-**依據。** 2026-11-16，使用者以「1核可」核可分層實作計畫。格式與缺資料時的驗證方式見[凍結輸入討論](../discussions/2026-11-16-frozen-simulator-inputs.md)，單列準備見[共用清單與 Pareto 選集討論](../discussions/2026-11-17-pareto-selection-and-scene-append.md)。
+**依據。**
+- 2026-11-16，使用者以「1核可」核可分層實作計畫。格式與缺資料時的驗證方式見[凍結輸入討論](../discussions/2026-11-16-frozen-simulator-inputs.md)，單列準備見[共用清單與 Pareto 選集討論](../discussions/2026-11-17-pareto-selection-and-scene-append.md)。
+- 2026-11-22，designer 在代裁授權下選擇隔離 v2 容器並保留無 jump 的身份。使用者覆核答「其他两个是接受。」見 [physical v2 的取捨](../discussions/2026-11-23-frozen-physical-v2.md)。
 
 ### 模擬器的測試與量測分層，不做 e2e
 

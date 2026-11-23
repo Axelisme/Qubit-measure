@@ -503,8 +503,8 @@ the default selection does not read their payloads or references.
 `--scenario NAME` selects exactly one row from the supplied index or both default
 indexes, including rows outside the Pareto set. Adding a Pareto scene requires
 both its index row and an explicit addition to the name set. Profile rows do
-not provide evidence for family retention or removal. Numeric records live
-in the repository-shared `<git common dir parent>/.agent_state/benchmark/family_pareto/scenes/v1`.
+not provide evidence for family retention or removal. See
+[Freeze numeric scenes](#freeze-numeric-scenes) for the shared scene root.
 `--scene-cache DIR` requires an absolute override. Tools resolve Git locations;
 simulate only receives explicit paths. No caller should infer scene identity
 from an index location or file hash. Cross-index duplicate names always fail.
@@ -1182,9 +1182,10 @@ or reference keys. Numeric gzip files are no longer tracked at the tip.
 The old gzip files are not reachable from the landed history. The migration did not validate a complete cold builder rebuild.
 
 Without `--scene-cache`, [`scene_cache_directory`](family_pareto_storage.py)
-resolves `.agent_state/benchmark/family_pareto/scenes/v<SCENE_CACHE_VERSION>`
-relative to the parent of Git's common directory. An explicit override must be
-absolute.
+resolves `.agent_state/benchmark/family_pareto/scenes/v1-physical-v2`
+relative to the parent of Git's common directory. An absolute override selects
+that path unchanged. The v2 readers reject v1 payloads; the producer leaves any
+matching v1 file in place.
 
 Run model construction only with approved compute and the current runner/lock
 policy. This command rebuilds and checks the pinned inventory, outside measurement
@@ -1192,8 +1193,15 @@ preflight:
 
 ```bash
 uv run --directory "$PWD" --no-sync -- python -m tools.family_pareto_scenarios \
-  --index-dir tools/data/family_pareto --scene-cache /absolute/scene-cache
+  --index-dir tools/data/family_pareto --scene-cache /absolute/scenes/v1-physical-v2
 ```
+
+Use a new directory for v2 and omit `--update-index` during migration. Use
+`--scenario NAME` to rebuild only one indexed row. A pin mismatch stops the
+producer; do not move old v1 gzip files or change pins to make the check pass.
+Leave the old directory and existing reference files in place. References for
+unchanged no-jump inputs retain their keys. Reference solving needs its own
+compute approval.
 
 `main(argv, *, inputs=...)` retains explicit producer declarations. Its default
 inventory includes the [DOP853 profile catalogue](#dedicated-dop853-segments).
@@ -1275,9 +1283,10 @@ reference key. An intermediate checkpoint is not a reference-cache entry.
 The reference producer reads names and physics; metadata never selects a solver.
 All selected numeric files must load before any solver runs. Missing scene files
 list the name, hashes and scene-producer command, then fail without rebuilding.
-Existing reference keys are read cache-only. Missing reference keys are solved
-only by that separately approved producer. Measurement never writes references
-or copies selected records. Its `main(argv)` accepts only CLI arguments.
+The producer reads existing keys without solving. On a miss it calls the selected
+solver. Both built-in solvers reject explicit collapse operators in a selected
+bath. The producer reports that error without publishing an NPZ.
+Measurement never writes references or copies selected records. Its `main(argv)` accepts only CLI arguments.
 Small tests write temporary indexes and scene files through the public codec.
 `read_inputs(indexes, scene_cache)` also accepts explicit paths and returns
 declarations whose fresh sources belong to the caller.
@@ -1407,7 +1416,10 @@ uv run --directory <worktree> --no-sync -- python tools/inspect_simulator_captur
 
 The inspector prints JSON from recorded manifests and telemetry JSONL. It does
 not construct models, run evolution, inspect dispatch or evaluate guards.
-Omitting `path` calls `simulate.evolution.capture_directory()`. A directory
+Omitting `path` scans the directory returned by
+[`simulate.evolution.capture_directory()`](../lib/zcu_tools/simulate/evolution/README.md#capture-persistence).
+To inspect a v1 capture, run this tool from a v1 checkout and pass the old file
+and its telemetry directory. A directory
 selects only its immediate `capture-*.json.gz` files, sorted by filename. An
 explicit file selects that file alone. The default telemetry directory is
 `.sim_telemetry` under the tool's own worktree root, regardless of the caller's
