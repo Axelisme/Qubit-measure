@@ -153,7 +153,7 @@ def _headless_inputs(directory: Path, *adapters: str) -> None:
                 "point": "initial",
                 "unpinned": {"form": "current Form", "point": "fixture point"},
                 "scenes": [
-                    {"scene_id": key, "adapter": key, "basis": "test workload"}
+                    {"scene_id": key, "adapter": key, "metric": {"kind": "shots"}}
                     for key in adapters or ("fake/frequency",)
                 ],
             }
@@ -303,10 +303,16 @@ def test_main_applies_selected_overrides_without_reading_review_notes(
             "point": "initial",
             **notes,
             "scenes": [
-                {"scene_id": "other", "adapter": "fake/power", **basis},
+                {
+                    "scene_id": "other",
+                    "adapter": "fake/power",
+                    "metric": {"kind": "shots"},
+                    **basis,
+                },
                 {
                     "scene_id": "scout",
                     "adapter": "fake/frequency",
+                    "metric": {"kind": "shots"},
                     **basis,
                     "overrides": [
                         {"path": ["delay", "stop"], "value": 3, **basis},
@@ -591,7 +597,7 @@ def test_timeout_continues_only_when_terminal_and_idle_are_observed_in_grace(
         "missing_breakdown" if expected_exit == 0 else "not_run"
     )
     summary = (output / "summary.md").read_text()
-    assert "Core >180 s: —\n" in summary
+    assert "Core 超標（實測）: —\n" in summary
     assert ">180.0" in summary
     assert f"Runs: {int(expected_exit == 0)} timed, 1 timeout, 0 run_failed." in summary
 
@@ -681,7 +687,7 @@ def test_timeout_judges_only_the_measured_core_lower_bound(
     assert row["materialize_s"] == (1.5 if evolve_s is not None else None)
     assert row["acquires"] == (2 if evolve_s is not None else 1)
     summary = (output / "summary.md").read_text()
-    assert "Core >180 s: —" in summary
+    assert "Core 超標（實測）: —" in summary
     assert f"Core 已知至少超標: {'`fake/frequency`' if over_target else '—'}" in summary
     assert f"Core 未判定: {'—' if over_target else '`fake/frequency`'}" in summary
     if lower_bound is not None:

@@ -28,7 +28,7 @@
 - 2026-11-22 [FTF 樣板的 projective floor](2026-11-22-ftf-projection-weight-floor.md)：精度取捨。FTF 樣板 floor 改為 `1e-5`；舊 history 模型下原設定第一點的 1,800 s 參考缺口，在 Markov 同模型驗收後不再適用。
 - 2026-11-22 [ADC raw plan 由誰持有](2026-11-22-adc-raw-plan-acquire-owner.md)：快取歸屬。FTF 與 standalone single 的 acquire session 持有 ADC plan；換 batch 或結束就退役，舊 raw 可冷重算。
 - 2026-11-22 [FTF projective 從真空續演化並改用 Markov chain](2026-11-22-ftf-projective-markov.md)：表示與資料格式。投影後逐 DC 態續演化，raw 保留單發配對，compact 只給逐事件邊際；獨立參考兩 floor 驗過 41／75 個 key。
-- 2026-11-22 [模擬器的時間門檻與驗證成本](2026-11-22-simulator-speed-first-verification.md)：取捨原則。正常參數先守 180 秒，精度以 `1e-2` 為目標；優化先做局部對照，獨立參考與全表不再是每次落地關卡。
+- 2026-11-22 [模擬器的時間門檻與驗證成本](2026-11-22-simulator-speed-first-verification.md)：取捨原則。當時使用 180 秒目標，精度以 `1e-2` 為目標；優化先做局部對照，獨立參考與全表不再是每次落地關卡。
 - 2026-11-22 [牆鐘工具的 worker 數與量測範圍](2026-11-22-wall-time-worker-policy.md)：量測條件。預設保留單 worker；非排他慢實驗子集按 CPU slot 明示 worker 數，以收據核對。
 
 - 2026-11-21 [Projective 腔場改走 ADC flat span 合併解](2026-11-21-projective-span-reuse.md)：快取歸屬。Projective 與 MIST 都向 ADC 取 flat 二階矩與各 state 端點場，只在 exact key 命中時重用，FTF 仍逐 history 選態與建 shift；兩路共用 512 MiB，`CavityDrive` 只留 `cache=`；三個固定前綴同 seed density 相等、獨立端點解歸零。
@@ -117,7 +117,8 @@
 - 2026-11-21 [牆鐘報表如何重建中斷列](2026-11-21-wall-time-interrupted-rows.md)：刪除或收窄。派送前 journal 不能證明 Run 耗時，重建不填秒數或下限。
 - 2026-11-22 [固定 FTF fixture 缺路由的十列](2026-11-22-wall-time-fixture-flux-routing.md)：量測邊界。固定 fixture 缺快磁通與共用 coil 的十列明示未量，不借示意係數或其他場景的 coil。
 - 2026-11-23 [牆鐘工具量手選場景](2026-11-23-curated-wall-time-scenes.md)：資料與量測邊界。工具自備 FTF 設定和乾淨 point，由維護者選場景，派送現行實驗，不掃描 guide。
-- 2026-11-21 [模擬器核心耗時：從完整 Run 讀，不建凍結場景](2026-11-21-simulator-core-time.md)：量測指標。3 分鐘目標讀完整 Run 中的編譯、演化、讀出與 raw materialize；延後的 raw 以 acquire 身分補列；不完整列只報下限，下限嚴格大於 180 秒才判超標；錄製重播與手寫場景因維護成本否決。
+- 2026-11-21 [模擬器核心耗時：從完整 Run 讀，不建凍結場景](2026-11-21-simulator-core-time.md)：量測指標。從完整 Run 讀編譯、演化、讀出與 raw materialize；不完整列只報下限。記錄當時使用的 180 秒判定，以及不採錄製重播或手寫場景的理由。
+- 2026-11-23 [模擬器速度改按每格點](2026-11-23-simulator-speed-per-point.md)：量測指標。掃描與逐次評估用平均每點 0.1 秒，無軸 shots 保留 180 秒；縮減場景的外推與實測分欄。
 
 - 2026-11-15 [模擬器測試與量測的分層](2026-11-15-simulator-test-measurement-layering.md)：分層。Kernel、dispatch、序列、前端與 environment 分開驗，退休 acquire e2e 量測，決策見 [ADR-0078](../adr/0078-evolution-module-boundary.md#模擬器的測試與量測分層不做-e2e)。
 

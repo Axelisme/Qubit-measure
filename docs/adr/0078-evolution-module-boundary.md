@@ -55,7 +55,7 @@ status: accepted
 
 **例子。** 比較兩個 checkout 的序列總耗時時，成對計時直接呼叫 `Engine.evolve`，不經 acquire。精度案例與指標見[測試文件](../../tests/README.md#evolution-精度矩陣)。
 
-**邊界。** 各層都重現不了使用者回報的錯時，可以跑一次 e2e 定位。腳本不入庫，不當驗收門檻。整實驗只允許 [`tools.experiment_wall_time`](../../tools/README.md#實驗-run-牆鐘) 入庫：它只量 [manifest](../../tools/data/experiment_wall_time/case-inputs.json) 中由維護者選入的場景，不以註冊清單決定列數。每個場景使用工具自持的 FTF 設定和乾淨 point，開現行 Form，套用場景覆寫，再跑完整 Run。它記錄 Run 牆鐘與分項，不當測試、gate 或精度證據。優化指標是模擬器核心耗時，即該 Run 各次 acquire 的編譯、演化、讀出與 raw materialize 四項之和。Controller、表單、Qt、繪圖、Analyze、Save 與 `ShotReducer` 等 host 處理不計入核心。Raw materialize 由呼叫它的模擬 binding 計時，寫進 [acquire telemetry](../../lib/zcu_tools/simulators/README.md#acquire-telemetry)，工具只彙總。不另建凍結的核心場景：改了實驗就重跑那一列；比較模擬器改動時，前後兩次在同一版實驗上跑。完整核心、下限與 180 秒判定的規則見[工具說明](../../tools/README.md#實驗-run-牆鐘)。工具在 `time_scale=0` 下只計送出 Run 到終態，不呼叫 Analyze 或 Save，也不做整庫 guide 盤點。180 秒判定只涵蓋已選場景；如果引用的 adapter 已不存在，該場景保留未量列。
+**邊界。** 各層都重現不了使用者回報的錯時，可以跑一次 e2e 定位。腳本不入庫，不當驗收門檻。整實驗只允許 [`tools.experiment_wall_time`](../../tools/README.md#實驗-run-牆鐘) 入庫：它只量 [manifest](../../tools/data/experiment_wall_time/case-inputs.json) 中由維護者選入的場景，不以註冊清單決定列數。每個場景使用工具自持的 FTF 設定和乾淨 point，開現行 Form，套用場景覆寫，再跑完整 Run。它記錄 Run 牆鐘與分項，不當測試、gate 或精度證據。優化指標是模擬器核心耗時，即該 Run 各次 acquire 的編譯、演化、讀出與 raw materialize 四項之和。Controller、表單、Qt、繪圖、Analyze、Save 與 `ShotReducer` 等 host 處理不計入核心。Raw materialize 由呼叫它的模擬 binding 計時，寫進 [acquire telemetry](../../lib/zcu_tools/simulators/README.md#acquire-telemetry)，工具只彙總。不另建凍結的核心場景：改了實驗就重跑那一列；比較模擬器改動時，前後兩次在同一版實驗上跑。完整核心、下限與報表格式見[工具說明](../../tools/README.md#實驗-run-牆鐘)。速度判定依[模擬器速度目標](#模擬器速度目標)。工具在 `time_scale=0` 下只計送出 Run 到終態，不呼叫 Analyze 或 Save，也不做整庫 guide 盤點。速度判定只涵蓋已選場景；如果引用的 adapter 已不存在，該場景保留未量列。
 
 **依據。**
 - 2026-11-15，使用者：「我會預期模擬器測試腳本只會依賴模擬器模塊，後端與前端分開測，kernel與dispatch也分開測，不該有e2e的測試需求」。對「整條序列的最終誤差放哪一層」答「A」，即加序列層；同意只為定位而跑一次 e2e，答「我選B」。見[模擬器測試與量測的分層](../discussions/2026-11-15-simulator-test-measurement-layering.md)。
@@ -83,11 +83,21 @@ status: accepted
 
 **依據。** 2026-11-14，使用者：「实验场景非常多，要完整覆盖是相当困难的，无脑扩充测试场景只会拖慢开发速度，你应该约化不同场景，系统性的覆盖可能情况」。對整理後的原則答「符合，我預期不會加專屬實驗場景」。`multitone_rwa` 的原始量測範圍討論未入庫；序列取樣見 [RB 型相位序列作為固定量表輸入](../discussions/2026-11-14-random-gate-sequence-workloads.md)。
 
+### 模擬器速度目標
+
+**規則。** 正常參數下，有掃描軸的 Run 以模擬核心耗時除以 Result 的掃描格點數，目標是平均不超過 0.1 秒。格點數是各掃描軸長度的乘積，不乘 software rounds 或每點 reps。無掃描軸、只取 shots 的實驗如 singleshot GE，仍以整個 Run 的核心耗時不超過 180 秒為目標。逐次評估型實驗也用 0.1 秒，但只計有 acquire 的評估。像 CZ optimize 一次候選可量多個 seed，仍只算一點。拒幅候選和還沒走到的候選各報數量，不進分母。
+
+**例子。** 101 點的 onetone 目標為 10.1 秒，31×31 點的二維掃描為 96.1 秒。若將 31×31 的外層軸縮到 11 點，外推核心耗時是 11×31 實測值乘以 31/11。
+
+**邊界。** 正常場景用現行表單預設的 reps 和 rounds。等距掃描用每軸至少 31 點攤平固定成本，離散掃描仍按其 Result 實際軸長計數。為減少量測成本，場景可明示縮減外層軸或 rounds。維護者在 manifest 記下縮減的 Form path 與完整點數或 rounds，工具不推導完整 Form 預設。只有完整核心耗時可按完整對實測的外層軸點數與 rounds 比率線性外推。表分欄報實測與外推的核心耗時、每點平均及判定。不將逾時的前綴外推，也不把估值當成完整 Run 的實測。下限只能在分母已知且已超過目標時證明超標。核心計時分項與 paired kernel 比較不變。
+
+**依據。** 2026-11-23，使用者：「我意識到優化器評測時間依賴於點數，那應該改成平均每點0.1s，每軸至少會有31點來攤平固定成本」。對格點定義及無掃描軸的例外，使用者答：「都對，但我接受場景使用外插來減少測量時間成本」。這推翻 2026-11-21 的有掃描軸實驗整次 180 秒目標，保留只取 shots 的例外。比較過的方案見[模擬器速度改按每格點](../discussions/2026-11-23-simulator-speed-per-point.md)。
+
 ### 歷史控制與精度驗收
 
-**規則。** 優先讓每個實驗在正常參數下的模擬 core time 不超過 180 秒。完整序列的最終 density 與逐讀出 population 對獨立參考解的最大絕對差均在 `1e-2` 以內時，視為一樣準，選耗時較短的做法。只有為了守 180 秒而無法避免時，才接受超過 `1e-2`，並記錄誤差。任一誤差達 `1e-1` 時，寧可超時也不採用。
+**規則。** 優先守[模擬器速度目標](#模擬器速度目標)。完整序列的最終 density 與逐讀出 population 對獨立參考解的最大絕對差均在 `1e-2` 以內時，視為一樣準，選耗時較短的做法。只有為了守速度目標而無法避免時，才接受超過 `1e-2`，並記錄誤差。任一誤差達 `1e-1` 時，寧可超時也不採用。
 
-**例子。** 一個做法跑 5 分鐘、誤差 `2e-3`，另一個跑 2.5 分鐘、誤差 `3e-2`。選後者並記錄 `3e-2`；若後者誤差達 `1e-1`，改選前者。
+**例子。** 31 點場景的一個做法要 5 秒、誤差 `2e-3`，另一個要 2.5 秒、誤差 `3e-2`。選後者並記錄 `3e-2`。若後者誤差達 `1e-1`，改選前者。
 
 **邊界。** Dispatch 仍可依量測歷史選不同 kernel。固定歷史或 family 是比較手段，不讓舊路徑成為真值。獨立精度以完整 Hamiltonian 參考解或對同一模型有誤差界的替代解判定；遷移比較只量前後差異。補驗時點見[效率和驗證規則](#先求效率正確性事後補)。既有 `2e-3` guard、驗收與 family 比較仍有效；原有 strict xfail 不放寬。新增或放寬容差時按本節驗；既有逐段 budget 不因此改值。見[精度矩陣](../../tests/README.md#evolution-精度矩陣)。
 

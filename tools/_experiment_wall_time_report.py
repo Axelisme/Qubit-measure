@@ -9,7 +9,11 @@ from typing import Annotated, Literal, NotRequired, TypedDict
 
 from pydantic import Field, StrictFloat, TypeAdapter
 
-CORE_TARGET_S = 180.0
+_SHOTS_TARGET_S = 180.0
+_POINT_TARGET_S = 0.1
+
+
+type MetricKind = Literal["shots", "scan", "evaluation"]
 
 
 class PlannedScene(TypedDict):
@@ -17,12 +21,13 @@ class PlannedScene(TypedDict):
 
     adapter: str
     directory: str
+    metric_kind: MetricKind
 
 
 class BatchPlan(TypedDict):
     """Revision, input identities and planned scene journals."""
 
-    format_version: Literal[2]
+    format_version: Literal[3]
     commit: str
     inputs: dict[str, str]
     manifest_scenes: int
@@ -50,6 +55,14 @@ type RowStatus = Literal[
 ]
 
 
+class ExtrapolationFactors(TypedDict):
+    """Full-to-measured workload ratios and full point count, if applicable."""
+
+    axis_scale: Annotated[float, Field(ge=1, allow_inf_nan=False)]
+    rounds_scale: Annotated[float, Field(ge=1, allow_inf_nan=False)]
+    point_count: Annotated[int, Field(strict=True, ge=0)] | None
+
+
 class Row(TypedDict):
     """One report row and its measured or unavailable Run facts.
 
@@ -64,7 +77,13 @@ class Row(TypedDict):
     remainder is acquire wall minus the stages inside it. core_s is the
     sum of the four stages for a complete Run breakdown. For an incomplete
     breakdown, core_s_lower_bound sums only acquires with all stages measured
-    and their matched deferred work, or is None if none qualify.
+    and their matched deferred work, or is None if none qualify. point_count
+    holds the number of acquired evaluations or Result grid points, or None
+    when no per-point denominator is available. rejected_evaluations did not
+    acquire; unreached_evaluations were not visited. Both are None when unknown
+    or inapplicable. extrapolation records the separate workload ratios only
+    for complete measured core durations with a declared reduction.
+    workload_issue explains why the denominator could not be established.
     Status distinguishes complete, missing
     data/defaults, unsupported, failed, timed-out and uncompleted rows. Reason
     explains an exclusion, unresolved defaults or a failure, when applicable.
@@ -89,12 +108,38 @@ class Row(TypedDict):
     materialize_s: StrictFloat | None
     core_s: StrictFloat | None
     core_s_lower_bound: StrictFloat | None
+    point_count: Annotated[int, Field(strict=True, ge=0)] | None
+    rejected_evaluations: Annotated[int, Field(strict=True, ge=0)] | None
+    unreached_evaluations: Annotated[int, Field(strict=True, ge=0)] | None
+    extrapolation: ExtrapolationFactors | None
+    workload_issue: str | None
     remainder_s: float | None
     status: RowStatus
     reason: str | None
     failure_record: NotRequired[str]
     cold_start: bool | None
     reused: bool
+
+
+type CoreJudgement = Literal[
+    "pass", "over_target", "lower_bound_over_target", "undetermined"
+]
+
+
+class ReportRow(Row):
+    """Journal facts with measured and extrapolated speeds and verdicts.
+
+    The measured metric uses 180 s per shots Run or 0.1 s per point. Extrapolated
+    values are separate; each is None when there is no complete estimate.
+    """
+
+    metric_kind: MetricKind
+    core_s_per_point: float | None
+    core_judgement: CoreJudgement
+    extrapolated_point_count: int | None
+    extrapolated_core_s: float | None
+    extrapolated_core_s_per_point: float | None
+    extrapolated_core_judgement: CoreJudgement | None
 
 
 def new_row(
@@ -121,6 +166,11 @@ def new_row(
         "materialize_s": None,
         "core_s": None,
         "core_s_lower_bound": None,
+        "point_count": None,
+        "rejected_evaluations": None,
+        "unreached_evaluations": None,
+        "extrapolation": None,
+        "workload_issue": None,
         "remainder_s": None,
         "status": status,
         "reason": reason,
@@ -133,7 +183,11 @@ def _seconds(seconds: float | None) -> str:
     return "—" if seconds is None else f"{seconds:.3f}"
 
 
-def _summary_row(row: Row) -> str:
+def _count(count: int | None) -> str:
+    return "—" if count is None else str(count)
+
+
+def _summary_row(row: ReportRow) -> str:
     stages = " | ".join(
         _seconds(seconds)
         for seconds in (
@@ -163,7 +217,7 @@ def _summary_row(row: Row) -> str:
     if row["reason"] is not None:
         reason = " ".join(row["reason"].splitlines()).replace("|", r"\|")
         status = f"{status}: {reason}"
-    acquires = "—" if row["acquires"] is None else str(row["acquires"])
+    acquires = _count(row["acquires"])
     lower_bound = row["wall_s_lower_bound"]
     wall = _seconds(row["wall_s"])
     if lower_bound is not None:
@@ -179,21 +233,73 @@ def _summary_row(row: Row) -> str:
         )
         or "—"
     )
+    points = _count(row["point_count"])
     return (
         f"| {row['scene_id']} | {row['adapter']} | {wall} | {stages} | {core} | "
-        f"{remainder} | {acquires} | {status} | {source} |\n"
+        f"{remainder} | {acquires} | {status} | {source} | {row['metric_kind']} | "
+        f"{points} | {_seconds(row['core_s_per_point'])} | {row['core_judgement']} | "
+        f"{_count(row['rejected_evaluations'])} | {_count(row['unreached_evaluations'])} | "
+        f"{_count(row['extrapolated_point_count'])} | {_seconds(row['extrapolated_core_s'])} | "
+        f"{_seconds(row['extrapolated_core_s_per_point'])} | {row['extrapolated_core_judgement'] or '—'} | "
+        f"{row['workload_issue'] or '—'} |\n"
     )
+
+
+def _core_judgement(
+    core: float | None, bound: float | None, target: float
+) -> CoreJudgement:
+    if core is not None:
+        return "over_target" if core > target else "pass"
+    if bound is not None and bound > target:
+        return "lower_bound_over_target"
+    return "undetermined"
+
+
+def _report_row(row: Row, metric_kind: MetricKind) -> ReportRow:
+    core, bound = row["core_s"], row["core_s_lower_bound"]
+    points = row["point_count"]
+    average = core / points if core is not None and points else None
+    if metric_kind == "shots":
+        judgement = _core_judgement(core, bound, _SHOTS_TARGET_S)
+    else:
+        per_point_bound = bound / points if bound is not None and points else None
+        judgement = _core_judgement(average, per_point_bound, _POINT_TARGET_S)
+    projected_core = projected_average = projected_judgement = projected_points = None
+    if (factors := row["extrapolation"]) is not None and core is not None:
+        projected_core = core * factors["axis_scale"] * factors["rounds_scale"]
+        projected_points = factors["point_count"]
+        if projected_points:
+            projected_average = projected_core / projected_points
+        if metric_kind == "shots":
+            projected_judgement = _core_judgement(projected_core, None, _SHOTS_TARGET_S)
+        else:
+            projected_judgement = _core_judgement(
+                projected_average, None, _POINT_TARGET_S
+            )
+    return {
+        **row,
+        "metric_kind": metric_kind,
+        "core_s_per_point": average,
+        "core_judgement": judgement,
+        "extrapolated_point_count": projected_points,
+        "extrapolated_core_s": projected_core,
+        "extrapolated_core_s_per_point": projected_average,
+        "extrapolated_core_judgement": projected_judgement,
+    }
 
 
 def _write_report(
     output: Path, rows: list[Row], plan: BatchPlan, resolved: int
 ) -> None:
+    reported = [
+        _report_row(row, plan["scenes"][row["scene_id"]]["metric_kind"]) for row in rows
+    ]
     write_json(
         output / "report.json",
         {
             "commit": plan["commit"],
             "inputs": plan["inputs"],
-            "rows": rows,
+            "rows": reported,
             "coverage": {
                 "resolved": resolved,
                 "selected": len(rows),
@@ -205,30 +311,32 @@ def _write_report(
         f"Coverage: {resolved}/{len(rows)} selected scenes resolved; "
         f"{plan['manifest_scenes']} manifest scenes.\n\n"
         + _run_summary(rows)
-        + "| Scene | Adapter | Run (s) | Compile (s) | Evolve (s) | Readout (s) | Materialize (s) | Core (s) | Remainder (s) | Acquires | Status | Source |\n"
-        "| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- | --- |\n"
-        + "".join(map(_summary_row, rows))
-        + _core_summary(rows)
+        + "| Scene | Adapter | Run (s) | Compile (s) | Evolve (s) | Readout (s) | Materialize (s) | Measured core (s) | Remainder (s) | Acquires | Status | Source | Metric | Points | Measured core (s/point) | Measured judgement | Rejected evaluations | Unreached evaluations | Extrapolated points | Extrapolated core (s) | Extrapolated core (s/point) | Extrapolated judgement | Workload issue |\n"
+        "| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- | --- | --- | ---: | ---: | --- | ---: | ---: | ---: | ---: | ---: | --- | --- |\n"
+        + "".join(map(_summary_row, reported))
+        + _core_summary(reported)
         + _failure_list(rows),
         encoding="utf-8",
     )
 
 
-def _core_summary(rows: list[Row]) -> str:
+def _core_summary(rows: list[ReportRow]) -> str:
     over_target: list[str] = []
     lower_bound_over_target: list[str] = []
     undetermined: list[str] = []
     for row in rows:
         scene_id = row["scene_id"]
-        if (core := row["core_s"]) is not None:
-            if core > CORE_TARGET_S:
+        match row["core_judgement"]:
+            case "over_target":
                 over_target.append(scene_id)
-        elif (bound := row["core_s_lower_bound"]) is not None and bound > CORE_TARGET_S:
-            lower_bound_over_target.append(scene_id)
-        else:
-            undetermined.append(scene_id)
+            case "lower_bound_over_target":
+                lower_bound_over_target.append(scene_id)
+            case "undetermined":
+                undetermined.append(scene_id)
+            case "pass":
+                pass
     return (
-        f"\nCore >{CORE_TARGET_S:g} s: {_format_names(over_target)}\n"
+        f"\nCore 超標（實測）: {_format_names(over_target)}\n"
         f"Core 已知至少超標: {_format_names(lower_bound_over_target)}\n"
         f"Core 未判定: {_format_names(undetermined)}\n"
     )
@@ -275,10 +383,9 @@ def read_plan(output: Path) -> BatchPlan:
     """Load a wall-time journal's plan, raising on absent or malformed data."""
     raw = (output / "batch.json").read_bytes()
     document = json.loads(raw)
-    if (
-        isinstance(document, dict)
-        and "format_version" not in document
-        and "cases" in document
+    if isinstance(document, dict) and (
+        ("format_version" not in document and "cases" in document)
+        or document.get("format_version") == 2
     ):
         commit = document.get("commit")
         original = f" ({commit})" if isinstance(commit, str) else ""

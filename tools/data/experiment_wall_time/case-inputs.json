@@ -9,24 +9,28 @@
     {
       "scene_id": "chain/amp_rabi",
       "adapter": "chain/amp_rabi",
+      "metric": {"kind": "scan", "axes": [{"field": "axis"}]},
       "basis": "The earlier slow-workload selection identified this adapter as slow; keep it in the curated table.",
       "overrides": []
     },
     {
       "scene_id": "chain/len_rabi",
       "adapter": "chain/len_rabi",
+      "metric": {"kind": "scan", "axes": [{"field": "axis"}]},
       "basis": "The earlier slow-workload selection identified this adapter as slow; keep it in the curated table.",
       "overrides": []
     },
     {
       "scene_id": "chain/t1",
       "adapter": "chain/t1",
+      "metric": {"kind": "scan", "axes": [{"field": "axis"}]},
       "basis": "The earlier slow-workload selection identified this adapter as slow; keep it in the curated table.",
       "overrides": []
     },
     {
       "scene_id": "chain/t2echo",
       "adapter": "chain/t2echo",
+      "metric": {"kind": "scan", "axes": [{"field": "axis"}]},
       "basis": "The earlier workload selection retained this adapter to exercise its bounded setup or a named prerequisite.",
       "overrides": [
         {
@@ -39,6 +43,7 @@
     {
       "scene_id": "chain/t2ramsey",
       "adapter": "chain/t2ramsey",
+      "metric": {"kind": "scan", "axes": [{"field": "axis"}]},
       "basis": "The earlier workload selection retained this adapter to exercise its bounded setup or a named prerequisite.",
       "overrides": [
         {
@@ -56,48 +61,56 @@
     {
       "scene_id": "fastflux/distortion/acc_phase",
       "adapter": "fastflux/distortion/acc_phase",
+      "metric": {"kind": "scan", "axes": [{"field": "lengths"}, {"field": "phases"}]},
       "basis": "Recheck Open and Run dispatch with the shared DC coil or pulsed-flux route in the clean FTF fixture.",
       "overrides": []
     },
     {
       "scene_id": "fastflux/distortion/freq",
       "adapter": "fastflux/distortion/freq",
+      "metric": {"kind": "scan", "axes": [{"field": "lengths"}, {"field": "freqs"}]},
       "basis": "Recheck Open and Run dispatch with the shared DC coil or pulsed-flux route in the clean FTF fixture.",
       "overrides": []
     },
     {
       "scene_id": "fastflux/distortion/phase",
       "adapter": "fastflux/distortion/phase",
+      "metric": {"kind": "scan", "axes": [{"field": "lengths"}, {"field": "phases"}]},
       "basis": "Recheck Open and Run dispatch with the shared DC coil or pulsed-flux route in the clean FTF fixture.",
       "overrides": []
     },
     {
       "scene_id": "fastflux/mist",
       "adapter": "fastflux/mist",
+      "metric": {"kind": "scan", "axes": [{"field": "flux_gains"}, {"field": "mist_gains"}]},
       "basis": "Recheck Open and Run dispatch with the shared DC coil or pulsed-flux route in the clean FTF fixture.",
       "overrides": []
     },
     {
       "scene_id": "fastflux/t1",
       "adapter": "fastflux/t1",
+      "metric": {"kind": "scan", "axes": [{"field": "gains"}, {"field": "lengths"}]},
       "basis": "Recheck Open and Run dispatch with the shared DC coil or pulsed-flux route in the clean FTF fixture.",
       "overrides": []
     },
     {
       "scene_id": "fastflux/twotone",
       "adapter": "fastflux/twotone",
+      "metric": {"kind": "scan", "axes": [{"field": "gains"}, {"field": "freqs"}]},
       "basis": "Recheck Open and Run dispatch with the shared DC coil or pulsed-flux route in the clean FTF fixture.",
       "overrides": []
     },
     {
       "scene_id": "mist/flux_dep",
       "adapter": "mist/flux_dep",
+      "metric": {"kind": "scan", "axes": [{"field": "values"}, {"field": "gains"}]},
       "basis": "The earlier slow-workload selection identified this adapter as slow; keep it in the curated table.",
       "overrides": []
     },
     {
       "scene_id": "mux/amp_rabi",
       "adapter": "mux/amp_rabi",
+      "metric": {"kind": "scan", "axes": [{"field": "coordinates", "dimension": 1}]},
       "basis": "The earlier workload selection retained this adapter to exercise its bounded setup or a named prerequisite.",
       "overrides": [
         {
@@ -110,6 +123,7 @@
     {
       "scene_id": "mux/len_rabi",
       "adapter": "mux/len_rabi",
+      "metric": {"kind": "scan", "axes": [{"field": "coordinates", "dimension": 1}]},
       "basis": "The earlier workload selection retained this adapter to exercise its bounded setup or a named prerequisite.",
       "overrides": [
         {
@@ -127,24 +141,28 @@
     {
       "scene_id": "mux/onetone_flux_global",
       "adapter": "mux/onetone_flux_global",
+      "metric": {"kind": "scan", "axes": [{"field": "flux_values", "dimension": 1}, {"field": "frequencies", "dimension": 1}]},
       "basis": "Recheck Open and Run dispatch with the shared DC coil or pulsed-flux route in the clean FTF fixture.",
       "overrides": []
     },
     {
       "scene_id": "mux/onetone_flux_local",
       "adapter": "mux/onetone_flux_local",
+      "metric": {"kind": "scan", "axes": [{"field": "flux_values", "dimension": 1}, {"field": "frequencies", "dimension": 1}]},
       "basis": "The earlier slow-workload selection identified this adapter as slow; keep it in the curated table.",
       "overrides": []
     },
     {
       "scene_id": "mux/twotone_flux_global",
       "adapter": "mux/twotone_flux_global",
+      "metric": {"kind": "scan", "axes": [{"field": "flux_values", "dimension": 1}, {"field": "frequencies", "dimension": 1}]},
       "basis": "Recheck Open and Run dispatch with the shared DC coil or pulsed-flux route in the clean FTF fixture.",
       "overrides": []
     },
     {
       "scene_id": "mux/twotone_flux_local",
       "adapter": "mux/twotone_flux_local",
+      "metric": {"kind": "scan", "axes": [{"field": "flux_values", "dimension": 1}, {"field": "frequencies", "dimension": 1}]},
       "basis": "The earlier workload selection retained this adapter to exercise its bounded setup or a named prerequisite.",
       "overrides": [
         {
@@ -172,6 +190,7 @@
     {
       "scene_id": "mux/twotone_spectrum",
       "adapter": "mux/twotone_spectrum",
+      "metric": {"kind": "scan", "axes": [{"field": "coordinates", "dimension": 1}]},
       "basis": "The earlier workload selection retained this adapter to exercise its bounded setup or a named prerequisite.",
       "overrides": [
         {
@@ -199,6 +218,7 @@
     {
       "scene_id": "onetone/range_find",
       "adapter": "onetone/range_find",
+      "metric": {"kind": "scan", "axes": [{"field": "freqs"}]},
       "basis": "The earlier workload selection retained this adapter to exercise its bounded setup or a named prerequisite.",
       "overrides": [
         {
@@ -216,6 +236,7 @@
     {
       "scene_id": "singleshot/ac_stark",
       "adapter": "singleshot/ac_stark",
+      "metric": {"kind": "scan", "axes": [{"field": "gains"}, {"field": "freqs"}]},
       "basis": "The earlier workload selection retained this adapter to exercise its bounded setup or a named prerequisite.",
       "overrides": [
         {
@@ -228,6 +249,7 @@
     {
       "scene_id": "singleshot/len_rabi",
       "adapter": "singleshot/len_rabi",
+      "metric": {"kind": "scan", "axes": [{"field": "lengths"}]},
       "basis": "The earlier workload selection retained this adapter to exercise its bounded setup or a named prerequisite.",
       "overrides": [
         {
@@ -240,6 +262,7 @@
     {
       "scene_id": "singleshot/mist/pre_freq",
       "adapter": "singleshot/mist/pre_freq",
+      "metric": {"kind": "scan", "axes": [{"field": "freqs"}]},
       "basis": "The earlier workload selection retained this adapter to exercise its bounded setup or a named prerequisite.",
       "overrides": [
         {
@@ -257,6 +280,7 @@
     {
       "scene_id": "singleshot/t1_tone",
       "adapter": "singleshot/t1_tone",
+      "metric": {"kind": "scan", "axes": [{"field": "lengths"}]},
       "basis": "The earlier workload selection retained this adapter to exercise its bounded setup or a named prerequisite.",
       "overrides": [
         {
@@ -269,6 +293,7 @@
     {
       "scene_id": "singleshot/t1_tone_sweep_freq",
       "adapter": "singleshot/t1_tone_sweep_freq",
+      "metric": {"kind": "scan", "axes": [{"field": "xs"}, {"field": "lengths"}]},
       "basis": "The earlier workload selection retained this adapter to exercise its bounded setup or a named prerequisite.",
       "overrides": [
         {
@@ -286,6 +311,7 @@
     {
       "scene_id": "singleshot/t1_tone_sweep_gain",
       "adapter": "singleshot/t1_tone_sweep_gain",
+      "metric": {"kind": "scan", "axes": [{"field": "xs"}, {"field": "lengths"}]},
       "basis": "The earlier workload selection retained this adapter to exercise its bounded setup or a named prerequisite.",
       "overrides": [
         {
@@ -303,6 +329,7 @@
     {
       "scene_id": "two_qubit/chevron",
       "adapter": "two_qubit/chevron",
+      "metric": {"kind": "scan", "axes": [{"field": "durations"}, {"field": "coordinates"}]},
       "basis": "The earlier workload selection retained this adapter to exercise its bounded setup or a named prerequisite.",
       "overrides": [
         {
@@ -330,6 +357,7 @@
     {
       "scene_id": "two_qubit/conditional_phase",
       "adapter": "two_qubit/conditional_phase",
+      "metric": {"kind": "scan", "axes": [{"field": "gate_counts"}, {"field": "frequencies"}]},
       "basis": "The earlier workload selection retained this adapter to exercise its bounded setup or a named prerequisite.",
       "overrides": [
         {
@@ -347,6 +375,7 @@
     {
       "scene_id": "two_qubit/conditional_phase_heralded",
       "adapter": "two_qubit/conditional_phase_heralded",
+      "metric": {"kind": "scan", "axes": [{"field": "gate_counts"}, {"field": "frequencies"}]},
       "basis": "The earlier workload selection retained this adapter to exercise its bounded setup or a named prerequisite.",
       "overrides": [
         {
@@ -364,6 +393,7 @@
     {
       "scene_id": "two_qubit/conditional_spectroscopy",
       "adapter": "two_qubit/conditional_spectroscopy",
+      "metric": {"kind": "scan", "axes": [{"field": "dc_values"}, {"field": "frequencies"}]},
       "basis": "The earlier workload selection retained this adapter to exercise its bounded setup or a named prerequisite.",
       "overrides": [
         {
@@ -381,6 +411,7 @@
     {
       "scene_id": "two_qubit/constructive_phase",
       "adapter": "two_qubit/constructive_phase",
+      "metric": {"kind": "scan", "axes": [{"field": "durations"}, {"field": "coordinates"}]},
       "basis": "The earlier workload selection retained this adapter to exercise its bounded setup or a named prerequisite.",
       "overrides": [
         {
@@ -398,6 +429,7 @@
     {
       "scene_id": "two_qubit/cz_amplitude",
       "adapter": "two_qubit/cz_amplitude",
+      "metric": {"kind": "scan", "axes": [{"field": "scales"}]},
       "basis": "The earlier workload selection retained this adapter to exercise its bounded setup or a named prerequisite.",
       "overrides": [
         {
@@ -415,6 +447,7 @@
     {
       "scene_id": "two_qubit/idle_zz",
       "adapter": "two_qubit/idle_zz",
+      "metric": {"kind": "scan", "axes": [{"field": "dc_values"}, {"field": "delays"}]},
       "basis": "The earlier workload selection retained this adapter to exercise its bounded setup or a named prerequisite.",
       "overrides": [
         {
@@ -427,6 +460,7 @@
     {
       "scene_id": "two_qubit/rb",
       "adapter": "two_qubit/rb",
+      "metric": {"kind": "scan", "axes": [{"field": "seeds"}, {"field": "depths"}]},
       "basis": "The earlier workload selection retained this adapter to exercise its bounded setup or a named prerequisite.",
       "overrides": [],
       "ftf_exclusion": "Requires upstream calibration; not measured: fixed ftf-demo/initial lacks the ordered Q1/Q2 Local Z pair at $coupler.ext.cz_phase."
@@ -434,6 +468,7 @@
     {
       "scene_id": "two_qubit/rb_heralded",
       "adapter": "two_qubit/rb_heralded",
+      "metric": {"kind": "scan", "axes": [{"field": "seeds"}, {"field": "depths"}]},
       "basis": "The earlier workload selection retained this adapter to exercise its bounded setup or a named prerequisite.",
       "overrides": [],
       "ftf_exclusion": "Requires upstream calibration; not measured: fixed ftf-demo/initial lacks the ordered Q1/Q2 Local Z pair at $coupler.ext.cz_phase."
@@ -441,6 +476,7 @@
     {
       "scene_id": "twotone/ac_stark",
       "adapter": "twotone/ac_stark",
+      "metric": {"kind": "scan", "axes": [{"field": "gains"}, {"field": "freqs"}]},
       "basis": "The earlier workload selection retained this adapter to exercise its bounded setup or a named prerequisite.",
       "overrides": [
         {
@@ -458,6 +494,7 @@
     {
       "scene_id": "twotone/chain",
       "adapter": "twotone/chain",
+      "metric": {"kind": "scan", "axes": [{"field": "axis"}]},
       "basis": "The earlier workload selection retained this adapter to exercise its bounded setup or a named prerequisite.",
       "overrides": [
         {
@@ -475,12 +512,14 @@
     {
       "scene_id": "twotone/ckp",
       "adapter": "twotone/ckp",
+      "metric": {"kind": "scan", "axes": [{"field": "res_freqs"}, {"field": "qub_freqs"}]},
       "basis": "The earlier slow-workload selection identified this adapter as slow; keep it in the curated table.",
       "overrides": []
     },
     {
       "scene_id": "twotone/flux_dep",
       "adapter": "twotone/flux_dep",
+      "metric": {"kind": "scan", "axes": [{"field": "values"}, {"field": "freqs"}]},
       "basis": "The earlier workload selection retained this adapter to exercise its bounded setup or a named prerequisite.",
       "overrides": [
         {
@@ -498,6 +537,7 @@
     {
       "scene_id": "twotone/freq",
       "adapter": "twotone/freq",
+      "metric": {"kind": "scan", "axes": [{"field": "freqs"}]},
       "basis": "The earlier workload selection retained this adapter to exercise its bounded setup or a named prerequisite.",
       "overrides": [
         {
@@ -515,6 +555,7 @@
     {
       "scene_id": "twotone/power_dep",
       "adapter": "twotone/power_dep",
+      "metric": {"kind": "scan", "axes": [{"field": "gains"}, {"field": "freqs"}]},
       "basis": "The earlier workload selection retained this adapter to exercise its bounded setup or a named prerequisite.",
       "overrides": [
         {
@@ -532,6 +573,7 @@
     {
       "scene_id": "twotone/rabi/len_rabi",
       "adapter": "twotone/rabi/len_rabi",
+      "metric": {"kind": "scan", "axes": [{"field": "lengths"}]},
       "basis": "The earlier workload selection retained this adapter to exercise its bounded setup or a named prerequisite.",
       "overrides": [
         {
@@ -544,18 +586,21 @@
     {
       "scene_id": "twotone/reset/flux/gain",
       "adapter": "twotone/reset/flux/gain",
+      "metric": {"kind": "scan", "axes": [{"field": "gains"}]},
       "basis": "Recheck Open and Run dispatch with the shared DC coil or pulsed-flux route in the clean FTF fixture.",
       "overrides": []
     },
     {
       "scene_id": "twotone/reset/flux/length",
       "adapter": "twotone/reset/flux/length",
+      "metric": {"kind": "scan", "axes": [{"field": "lengths"}]},
       "basis": "Recheck Open and Run dispatch with the shared DC coil or pulsed-flux route in the clean FTF fixture.",
       "overrides": []
     },
     {
       "scene_id": "twotone/reset/single_tone/freq",
       "adapter": "twotone/reset/single_tone/freq",
+      "metric": {"kind": "scan", "axes": [{"field": "freqs"}]},
       "basis": "The earlier workload selection retained this adapter to exercise its bounded setup or a named prerequisite.",
       "overrides": [
         {
@@ -573,78 +618,91 @@
     {
       "scene_id": "twotone/ro_optimize/auto",
       "adapter": "twotone/ro_optimize/auto",
+      "metric": {"kind": "evaluation", "single_acquire_candidate_field": "params"},
       "basis": "The earlier slow-workload selection identified this adapter as slow; keep it in the curated table.",
       "overrides": []
     },
     {
       "scene_id": "twotone/ro_optimize/chain_freq",
       "adapter": "twotone/ro_optimize/chain_freq",
+      "metric": {"kind": "scan", "axes": [{"field": "axis"}]},
       "basis": "The earlier slow-workload selection identified this adapter as slow; keep it in the curated table.",
       "overrides": []
     },
     {
       "scene_id": "twotone/ro_optimize/chain_power",
       "adapter": "twotone/ro_optimize/chain_power",
+      "metric": {"kind": "scan", "axes": [{"field": "axis"}]},
       "basis": "The earlier slow-workload selection identified this adapter as slow; keep it in the curated table.",
       "overrides": []
     },
     {
       "scene_id": "twotone/ro_optimize/power",
       "adapter": "twotone/ro_optimize/power",
+      "metric": {"kind": "scan", "axes": [{"field": "gains"}]},
       "basis": "The earlier slow-workload selection identified this adapter as slow; keep it in the curated table.",
       "overrides": []
     },
     {
       "scene_id": "twotone/ro_optimize/rpi_freq",
       "adapter": "twotone/ro_optimize/rpi_freq",
+      "metric": {"kind": "scan", "axes": [{"field": "freqs"}]},
       "basis": "The earlier workload selection named this previously unmeasured twotone workload.",
       "overrides": []
     },
     {
       "scene_id": "twotone/ro_optimize/rpi_length",
       "adapter": "twotone/ro_optimize/rpi_length",
+      "metric": {"kind": "scan", "axes": [{"field": "lengths"}]},
       "basis": "The earlier workload selection named this previously unmeasured twotone workload.",
       "overrides": []
     },
     {
       "scene_id": "twotone/ro_optimize/rpi_power",
       "adapter": "twotone/ro_optimize/rpi_power",
+      "metric": {"kind": "scan", "axes": [{"field": "gains"}]},
       "basis": "The earlier workload selection named this previously unmeasured twotone workload.",
       "overrides": []
     },
     {
       "scene_id": "twotone/stirap/amplitude",
       "adapter": "twotone/stirap/amplitude",
+      "metric": {"kind": "scan", "axes": [{"field": "pump_gains"}, {"field": "stokes_gains"}]},
       "basis": "The earlier workload selection named this previously unmeasured twotone workload.",
       "overrides": []
     },
     {
       "scene_id": "twotone/stirap/delay",
       "adapter": "twotone/stirap/delay",
+      "metric": {"kind": "scan", "axes": [{"field": "stokes_leads"}]},
       "basis": "The earlier workload selection named this previously unmeasured twotone workload.",
       "overrides": []
     },
     {
       "scene_id": "twotone/stirap/detuning",
       "adapter": "twotone/stirap/detuning",
+      "metric": {"kind": "scan", "axes": [{"field": "y_values"}, {"field": "x_values"}]},
       "basis": "The earlier workload selection named this previously unmeasured twotone workload.",
       "overrides": []
     },
     {
       "scene_id": "twotone/t1",
       "adapter": "twotone/t1",
+      "metric": {"kind": "scan", "axes": [{"field": "times"}]},
       "basis": "The earlier workload selection named this previously unmeasured twotone workload.",
       "overrides": []
     },
     {
       "scene_id": "twotone/t1_cov",
       "adapter": "twotone/t1_cov",
+      "metric": {"kind": "scan", "axes": [{"field": "times"}]},
       "basis": "The earlier workload selection named this previously unmeasured twotone workload.",
       "overrides": []
     },
     {
       "scene_id": "twotone/t2echo",
       "adapter": "twotone/t2echo",
+      "metric": {"kind": "scan", "axes": [{"field": "times"}]},
       "basis": "The earlier workload selection named this previously unmeasured twotone workload.",
       "overrides": [
         {
@@ -662,6 +720,7 @@
     {
       "scene_id": "twotone/t2ramsey",
       "adapter": "twotone/t2ramsey",
+      "metric": {"kind": "scan", "axes": [{"field": "times"}]},
       "basis": "The earlier workload selection named this previously unmeasured twotone workload.",
       "overrides": [
         {
@@ -684,18 +743,21 @@
     {
       "scene_id": "twotone/zigzag",
       "adapter": "twotone/zigzag",
+      "metric": {"kind": "scan", "axes": [{"field": "times"}]},
       "basis": "The earlier workload selection named this previously unmeasured twotone workload.",
       "overrides": []
     },
     {
       "scene_id": "twotone/zigzag_scan/freq",
       "adapter": "twotone/zigzag_scan/freq",
+      "metric": {"kind": "scan", "axes": [{"field": "times"}, {"field": "values"}]},
       "basis": "The earlier workload selection named this previously unmeasured twotone workload.",
       "overrides": []
     },
     {
       "scene_id": "twotone/zigzag_scan/gain",
       "adapter": "twotone/zigzag_scan/gain",
+      "metric": {"kind": "scan", "axes": [{"field": "times"}, {"field": "values"}]},
       "basis": "The earlier workload selection named this previously unmeasured twotone workload.",
       "overrides": []
     }

@@ -36,6 +36,7 @@ def test_main_rejects_ambiguous_or_nonfinite_override_values_before_registration
             "scene_id": "scan",
             "adapter": "fake/frequency",
             "basis": "keep scout",
+            "metric": {"kind": "shots"},
             "overrides": [
                 {"path": ["freq"], "value": "sentinel", "basis": "short scan"}
             ],
@@ -64,6 +65,7 @@ def test_main_rejects_ambiguous_or_nonfinite_override_values_before_registration
         ("child_before_parent", "Overlapping override"),
         ("invalid_override", "overrides.0.path"),
         ("blank_exclusion", "ftf_exclusion"),
+        ("missing_metric", "scenes.0.metric"),
         ("unknown_selector", "unknown scene ID or adapter family"),
         ("duplicate_selector", "duplicate selector"),
     ],
@@ -78,6 +80,7 @@ def test_invalid_manifest_or_selector_fails_before_registration(
         "scene_id": "sweep",
         "adapter": "fake/frequency",
         "basis": "test",
+        "metric": {"kind": "shots"},
     }
     override = {"path": ["wait"], "value": 2, "basis": "bound wait"}
     argv = ["--output", str(tmp_path / "output")]
@@ -98,6 +101,8 @@ def test_invalid_manifest_or_selector_fails_before_registration(
         scene["overrides"] = [override | {"path": ["tones", -1]}]
     elif issue == "blank_exclusion":
         scene["ftf_exclusion"] = " "
+    elif issue == "missing_metric":
+        del scene["metric"]
     _write_scenes(
         tmp_path, *([scene, scene] if issue == "duplicate_scene" else [scene])
     )
