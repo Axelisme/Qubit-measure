@@ -214,17 +214,13 @@ class StirapAmplitudeExp(Experiment[StirapAmplitudeResult, StirapAmplitudeCfg]):
                 stokes_gains,
                 np.full((len(stokes_gains), len(pump_gains)), np.nan),
                 shading="nearest",
-                vmin=0,
-                vmax=1,
             )
             ax.set(
                 xlabel="Pump gain (a.u.)",
                 ylabel="Stokes gain (a.u.)",
                 title=f"Measured {state} label",
             )
-            figure.colorbar(
-                heatmap, ax=ax, label="Measured label fraction", ticks=(0, 0.5, 1)
-            )
+            figure.colorbar(heatmap, ax=ax, label="Measured label fraction")
             maps.append(heatmap)
 
         @context.plots.on_plot_thread
@@ -235,7 +231,10 @@ class StirapAmplitudeExp(Experiment[StirapAmplitudeResult, StirapAmplitudeCfg]):
                 data, total, out=np.full_like(data, np.nan), where=total > 0
             )
             for state, heatmap in enumerate(maps):
-                heatmap.set_array(raw[:, :, state].T)
+                panel = raw[:, :, state].T
+                heatmap.set_array(panel)
+                if np.isfinite(panel).any():
+                    heatmap.autoscale()
             headline.set_text(
                 f"{title}\nRetained shots: {int(np.nansum(total)):,} count"
             )
@@ -342,8 +341,6 @@ class StirapAmplitudeExp(Experiment[StirapAmplitudeResult, StirapAmplitudeCfg]):
                     source.result.stokes_gains,
                     values[:, :, state].T,
                     shading="nearest",
-                    vmin=min(0.0, float(values.min())),
-                    vmax=max(1.0, float(values.max())),
                 )
                 ax.set(
                     xlabel="Pump gain (a.u.)",
@@ -360,7 +357,7 @@ class StirapAmplitudeExp(Experiment[StirapAmplitudeResult, StirapAmplitudeCfg]):
         )
         if pump_gain is not None and stokes_gain is not None and peak is not None:
             corrected_f_ax.plot(
-                pump_gain, stokes_gain, "x", color="white", markeredgewidth=2
+                pump_gain, stokes_gain, "x", color="black", markeredgewidth=2
             )
             headline += (
                 f"\nPeak corrected f fraction = {corrected_f.flat[peak]:.3f} · "
