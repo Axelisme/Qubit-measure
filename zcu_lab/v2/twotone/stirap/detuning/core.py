@@ -281,17 +281,13 @@ class StirapDetuningExp(Experiment[StirapDetuningResult, StirapDetuningCfg]):
                 ys,
                 np.full((len(ys), len(xs)), np.nan),
                 shading="nearest",
-                vmin=0,
-                vmax=1,
             )
             ax.set(
                 xlabel="Pump detuning (MHz)",
                 ylabel="Stokes detuning (MHz)",
                 title=f"Measured {state} label",
             )
-            figure.colorbar(
-                image, ax=ax, label="Measured label fraction", ticks=(0, 0.5, 1)
-            )
+            figure.colorbar(image, ax=ax, label="Measured label fraction")
             maps.append(image)
 
         @plots.on_plot_thread
@@ -301,7 +297,10 @@ class StirapDetuningExp(Experiment[StirapDetuningResult, StirapDetuningCfg]):
                 counts, totals, out=np.full_like(counts, np.nan), where=totals > 0
             )
             for label, image in enumerate(maps):
-                image.set_array(fractions[..., label])
+                panel = fractions[..., label]
+                image.set_array(panel)
+                if np.isfinite(panel).any():
+                    image.autoscale()
             headline.set_text(
                 f"{title}\nRetained shots: {int(np.nansum(totals)):,} count"
             )
@@ -373,8 +372,6 @@ class StirapDetuningExp(Experiment[StirapDetuningResult, StirapDetuningCfg]):
                     source.result.y_values,
                     values[..., column],
                     shading="nearest",
-                    vmin=min(0.0, float(values.min())),
-                    vmax=max(1.0, float(values.max())),
                 )
                 figure.colorbar(image, ax=ax, label=f"{label} label fraction")
                 ax.set(
@@ -397,7 +394,7 @@ class StirapDetuningExp(Experiment[StirapDetuningResult, StirapDetuningCfg]):
                 pump_detuning_mhz,
                 stokes_detuning_mhz,
                 "x",
-                color="white",
+                color="black",
                 markeredgewidth=2,
             )
             headline += (

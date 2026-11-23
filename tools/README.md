@@ -158,7 +158,7 @@ write_snapshot(
 
 ## 實驗 Run 牆鐘
 
-[`case-inputs.json`](data/experiment_wall_time/case-inputs.json) 決定全表。首版 62 列包含先前手選的 52 個工作量（選集 commit `4a2dea87690bfcb2764886b2e5feb0b2113510c9`），另有 10 個快磁通或共用 coil 的派送驗收場景。每個場景填唯一 `scene_id`、精確 adapter key，以及有界 Form 覆寫的 path 和值。同一 adapter 可對應不同場景。Lab 新增 adapter 不會自動增加列。
+[`case-inputs.json`](data/experiment_wall_time/case-inputs.json) 決定全表。首版 62 列包含先前手選的 52 個工作量（選集 commit `4a2dea87690bfcb2764886b2e5feb0b2113510c9`），另有 10 個快磁通或共用 coil 的派送驗收場景。每個場景填唯一 `scene_id`、精確 adapter key、速度 `metric`，以及有界 Form 覆寫的 path 和值。同一 adapter 可對應不同場景。Lab 新增 adapter 不會自動增加列。
 
 入庫審閱時，維護者核對場景與覆寫的 `basis` 理由及 `unpinned.form`／`point` 的來源說明。CLI 不檢查這些註記的有無或內容。查核原則見[程式碼品質〈依判定用途決定查核與記錄〉](../docs/code-quality.md#依判定用途決定查核與記錄)。`ftf_exclusion` 會影響派送。對仍有註冊 adapter 的場景填非空理由時，工具不開表也不派送 Run。報表以該理由將該列標為 `not_runnable`。回查 manifest 解析與派送分支時，搜尋 `read_manifest` 與 `_run_batch`。
 
@@ -168,7 +168,7 @@ write_snapshot(
 
 工具將 fixture 複製到每列可寫的 project，經公開 entry Open、use point 選取 `ftf-demo/initial`，再開現行 adapter 的 Form。未覆寫的欄位取自現行 Form 及捕捉的 fixture 參數、模組和 aliases；需要操作者輸入的欄位可以留空。見 [Measure services 的開表 owner](../lib/zcu_tools/gui/app/measure/services/README.md#操作-owners)。Open 後工具以一次 `form.write` 套用該 scene 的覆寫，不會補回 Open 缺少的來源。路徑使用欄位名及從 0 起算的索引，例如 `["delay", "n"]` 是線性掃描點數。表單 Ready 才派送 Run。Run 的 admission、輸入快照與終態見 [ADR-0066〈問題與決策〉](../docs/adr/0066-operation-lifecycle.md#問題與決策)。
 
-場景覆寫只保留操作者本來要選的欄位，或用於限制計時工作量的時域、板型與掃描範圍。[Constructive phase](../zcu_lab/v2/two_qubit/constructive_phase/guide.md#prepare-the-form) 的 Form 自帶可編輯的 −180° 至 180°、25 點相對相位掃描。計時案例只指定其 duration 端點。`singleshot/ac_stark` 的 Q1 pulse source 不能在 Open 提供有效的 mixer 初值；板型不需要 mixer，此案例才直接填 `null`。
+場景覆寫只保留操作者本來要選的欄位，或用於限制計時工作量的時域、板型與掃描範圍。[Constructive phase](../zcu_lab/v2/two_qubit/constructive_phase/guide.md#prepare-the-form) 的計時案例只指定 duration 端點。相對相位用現行 Form 的可編輯初值，不釘舊的 25 點，也不拿 25 點當報表分母。`singleshot/ac_stark` 的 Q1 pulse source 不能在 Open 提供有效的 mixer 初值；板型不需要 mixer，此案例才直接填 `null`。
 
 Fresh FTF point 的 `qubit.kappa` 是模型線寬，單位是 MHz。用 Q1 的 κ 開 `twotone/freq`，全寬約 0.11723 MHz；這不是計時場景的 87.860 MHz 寬尋峰。要找峰請按用途調整掃窗。不要把有界計時窗當成 Form 初值或校準值。
 
@@ -211,9 +211,33 @@ uv run --directory "$PWD" --no-sync -- python tools/run_heavy.py \
 
 Run 在期限內完成，且至少有一筆 acquire、每筆都有 acquire 牆鐘和四個分項、每筆補充紀錄都有主紀錄配對時，才填 `core_s`。缺 materialize 的舊 telemetry 或未走到階段的 `null` 都不補 0。配不到主紀錄的補充紀錄不計秒數或 acquire 次數，並使分項不完整。成功但分項不全的 `missing_breakdown` 列保留 Run 秒數，四個分項與 remainder 寫 `null`。分項不全或逾時時，`core_s` 寫 `null`，`core_s_lower_bound` 只加總分項齊全的主紀錄與配對到它們的補充紀錄。沒有分項齊全的主紀錄時，下限也寫 `null`。
 
-完整只表示現存 telemetry 的分項齊全。Writer 採盡力寫入；工具無法察覺整筆主紀錄或補充紀錄遺失。若該 Run 期間出現保留上限刪檔或寫入失敗的警告，不要用該列的 `core_s` 斷言達標。
+完整只表示現存 telemetry 的分項齊全。Writer 採盡力寫入。除能和 Result 候選數對帳的逐次評估外，工具無法察覺整筆主紀錄遺失，也無法察覺未寫出的補充紀錄。若該 Run 期間出現保留上限刪檔或寫入失敗的警告，不要用該列的 `core_s` 斷言達標。
 
-摘要的 Core 欄在不完整列顯示 `≥` 加下限，沒有下限則顯示「—」。3 分鐘判定使用未四捨五入的秒數。完整核心嚴格大於 180 秒才列入 `Core >180 s`。下限嚴格大於 180 秒列入 `Core 已知至少超標`，其餘沒有完整核心的列列入 `Core 未判定`。Run 秒數和期限都不參與核心判定。
+`metric` 決定分母和目標，見 [ADR-0078〈模擬器速度目標〉](../docs/adr/0078-evolution-module-boundary.md#模擬器速度目標)。選擇與工作量相符的宣告：
+
+- `{"kind": "scan", "axes": [{"field": "flux_values", "dimension": 1}, {"field": "frequencies", "dimension": 1}]}`。按外到內列出公開 Result 陣列欄位與其掃描維度。`dimension` 從 0 起算，省略時用 0。工具取各軸長的乘積作 `point_count`，不乘 rounds 和 reps，也不計固定分類、同時讀取的 tone 等非掃描維度。目標是 `core_s_per_point ≤ 0.1`。
+- `{"kind": "shots"}`。無掃描軸、只取 shots 的實驗用 `core_s ≤ 180` 的整次目標。`point_count` 和 `core_s_per_point` 為 `null`。
+- `{"kind": "evaluation", "peak_field": "peak", "counts_field": "sums"}`。指定像 CZ optimize 的峰值與計數陣列。工具讀取期限內成功的 Run Result。有任一筆 seed counts 的候選計入 `point_count`，同一候選的多個 seed 不重計。有峰值但無 counts 表示峰值檢查跳過，計入 `rejected_evaluations`。峰值仍為 `NaN` 的候選計入 `unreached_evaluations`。工具不重做峰值判定。
+- `{"kind": "evaluation", "single_acquire_candidate_field": "params"}`。只用於每個候選恰呼叫一次 acquire、rounds 在該 acquire 內處理且不重試的實驗，例如 `twotone/ro_optimize/auto`。主紀錄數才是分母，補充紀錄不算。參數矩陣全為 `NaN` 的列只計入未走到，不用分數欄推定有無 acquire。若 Result 已進入的候選數與主紀錄數不符，工具在 `workload_issue` 說明差異，不判定速度。拒幅數在此模式為 0。
+
+逐次評估也以每次不超過 0.1 秒為目標。0 次 acquire 不除以 0，不判定達標。Result 欄位或掃描維度不符宣告時，工具報錯，不從 Form cfg、存檔軸或局部 acquire 的 `points` 猜測。`report.json` 的 `core_judgement` 是 `pass`、`over_target`、`lower_bound_over_target` 或 `undetermined`，判定使用未四捨五入的值。摘要的 `Measured core (s)` 對不完整列顯示 `≥` 加下限，沒有下限顯示「—」。有下限而且能證明已超過列的目標，才標 `lower_bound_over_target`。逾時掃描或逐次評估沒有可用的 Result 分母時不判定。Run 秒數和期限不參與核心判定。
+
+要外推，在場景新增 `extrapolation`，填其中一項或兩項。縮減必須對應同一場景的 `overrides`：
+
+```json
+{
+  "overrides": [
+    {"path": ["flux", "n"], "value": 11},
+    {"path": ["rounds"], "value": 2}
+  ],
+  "extrapolation": {
+    "outer_axis": {"path": ["flux", "n"], "full_points": 31},
+    "rounds": {"path": ["rounds"], "full_rounds": 8}
+  }
+}
+```
+
+`outer_axis` 只適用 `scan`，對應 `metric.axes` 的第一項。維護者核對縮減的 Form path、完整點數與完整 rounds 的來源，並在 `basis` 記理由。工具不推導完整 Form 預設。工具用 Result 的實測外層軸長和覆寫的實測 rounds 計倍率。這個例子若 Result 有 11 個外層點，估計核心秒數是實測 `core_s × (31/11) × (8/2)`。估計每點平均是實測每點平均乘以 `8/2`。外層軸點數只改變估計總秒數，不改變每點平均。工具只對完整核心耗時外推，並在 `extrapolated_*` 欄分開報完整格點、估計核心耗時、每點及判定。實測欄不受外推影響。核心不完整，或每點指標沒有可用分母時，外推欄為 `null`。
 
 `--row-timeout SECONDS` 從送出 Run 起算，預設 360 秒。只接受有限且介於 180 到 2,147,483.647 秒的值，兩端都可用。到期時先把所有 Python 執行緒的 stack 寫到該列的 `timeout-stack.txt`，再請 Controller 取消。`timeout` 的精確 `wall_s` 是 `null`，`wall_s_lower_bound` 表示 Run 大於期限。能加總的 acquire 分項標「部分」，沒有可用分項時標「分項缺」。請求取消後，工具先依當下的 telemetry 寫 `row.json`。取消寬限的 30 秒內，工具若觀察到 Run 終態且 Controller idle，就重新讀取 telemetry、更新逾時列，再繼續派送。寬限內未觀察到兩者時，工具保留先寫的列並停止派送，報表將尚未開始的列記為 `not_run`。
 
@@ -227,7 +251,7 @@ Controller 在期限內回報 Run `failed` 時，工具先寫 `run-failure.json`
 
 工具例外、未知 Run outcome、環境組裝、journal 與 telemetry 解析錯誤會中止指令，不轉成場景狀態。重建與續跑拒絕 scene ID 或 adapter 不符的結果列，以及沒有有效 Run 秒數的 `ok` 或 `missing_breakdown` 列。
 
-中斷時，有 `start.json` 而沒有 `row.json` 的列記為 `incomplete`。其 `started_at` 是派送前記下的時刻，不證明 Run 已派送。兩份紀錄都沒有時，列為 `not_run`。兩者不填精確秒數或下限，也不算已判定。180 秒判定不涵蓋未入選的實驗。
+中斷時，有 `start.json` 而沒有 `row.json` 的列記為 `incomplete`。其 `started_at` 是派送前記下的時刻，不證明 Run 已派送。兩份紀錄都沒有時，列為 `not_run`。兩者不填精確秒數或下限，也不算已判定。速度判定不涵蓋未入選的實驗。
 
 只有[場景選定結論](../docs/discussions/2026-11-23-curated-wall-time-scenes.md#結論)指定的 10 個派送驗收場景，才要求觀察 Controller 發出的 `RunStarted` 事件及其 admission token（實作搜尋 `RunStartedPayload`）。
 
@@ -249,7 +273,7 @@ uv run --directory "$PWD" --no-sync -- python -m tools.experiment_wall_time \
   --report-only --output "$output"
 ```
 
-舊 adapter-key 格式不能用新版續跑或重建。請在 `batch.json` 所記的原 commit 執行 `--report-only`。批次起迄與外層逾時看 `run_heavy.py` 的收據，不用來推算 Run 耗時。要補未派送或未完成的列，使用下方的續跑方式。
+每點報表使用 `batch.json` 的 `format_version: 3`。舊 adapter-key 格式及沒有工作量欄位的 v2 場景 journal 不能用新版續跑或重建。請在 `batch.json` 所記的原 commit 執行 `--report-only`。批次起迄與外層逾時看 `run_heavy.py` 的收據，不用來推算 Run 耗時。要補未派送或未完成的列，使用下方的續跑方式。
 
 續跑會派送 Run，仍由 `run_heavy.py` 配置 CPU slot、寫 log 和收據。以 `--resume-from` 指向前一份輸出。Commit 和每份輸入的 SHA-256 必須相同，否則用法錯誤，不派送 Run。`Sources.hashes` 用整份 manifest 原始 bytes 算 SHA-256，只改審閱註記也會使雜湊不同。呼叫端也要沿用來源批次的 worker 數。工具不把 worker 數寫入 journal，也不檢查是否一致。請查來源收據的 `command`：有 `--workers 3` 就沿用 3，沒有 `--workers` 就用預設的 1。
 

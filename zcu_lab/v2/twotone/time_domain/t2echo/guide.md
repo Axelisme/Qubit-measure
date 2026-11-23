@@ -13,9 +13,9 @@ See [`zcu_lab/v2/operator-workflow.md`](../../../operator-workflow.md) for the s
 
 ## Read the plots
 
-Check Live for a visible decay or fringe as the shots per point accumulate. The horizontal axis is total echo delay (µs). The vertical axis, **Principal-axis mean IQ (a.u.)**, shows a signed projection, not a state population.
+Check Live for a visible decay or fringe as the shots per point accumulate. The horizontal axis is total echo delay (µs). The vertical axis, **IQ projection (a.u.)**, shows the signed projection of mean IQ, not a state population.
 
-Live estimates the principal axis from all available points. Analyze estimates it and fits after dropping the first delay by position, so the projected values can differ. Compare the measured points with the model curve. T₂ Echo is the envelope decay time; fringe frequency is the fitted modulation, not the applied phase ramp. The Analyze summary separately lists the source Reps × Rounds and actual applied detune when available.
+Live estimates the principal axis from all available points. Analyze estimates it and fits after dropping the first delay by position, so the projected values can differ. Both use I if fewer than two finite points are available for the projection or if all available IQ values are equal. Compare the measured points with the model curve. T₂ Echo is the envelope decay time; fringe frequency is the fitted modulation, not the applied phase ramp. The Analyze summary separately lists the source Reps × Rounds and actual applied detune when available.
 
 Each vertical bar is the projected shot sample standard deviation divided by the square root of its retained shot count. It estimates the uncertainty of that point's mean, not round-to-round scatter or fit error. A point needs at least two retained shots for a bar. Native Save stores the shot sums when available. After loading a Native file with shot sums, Analyze draws the same bars as it did for the original run. Older Native files without shot sums still load and fit, but show no bars. Labber export still contains only the mean IQ trace.
 

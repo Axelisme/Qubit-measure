@@ -36,7 +36,9 @@ Experiment 公開同一型別，GUI analyze work 經分類後才讓 recipe 交�
 
 [`shot_uncertainty`](shot_uncertainty.py) 從保留 shots 的 IQ 總和或分類計數估計抽樣誤差。`iq_shot_sem` 接收
 ADR-0074 的單次讀出 IQ 總和 `[N, ΣI, ΣQ, ΣI², ΣIQ, ΣQ²]`。它取指定 IQ 投影的樣本標準差，再除以 √N。
-`iq_mean_covariance` 用同一組總和算 I、Q 的 2×2 樣本共變異矩陣，再除以 N，供非線性觀測量做誤差傳遞。
+I/Q 投影權重可固定或逐點給定。`propagated_iq_shot_sem` 用逐點梯度將獨立 shot 組的 IQ 平均傳遞到一個實數觀測量。
+它保留每組的 I/Q 共變異，加總各組的一階變異，再開根號。
+`iq_mean_covariance` 用同一組總和算 I、Q 的 2×2 樣本共變異矩陣，再除以 N。例如，MIST 用它計算共用掃描參考後的差值共變異。
 只存平均 IQ 時，缺少逐發的散布資訊，無法估計 shot SEM。
 `class_probability_covariance` 用保留 shots 的 one-hot 樣本共變異除以 N 估計平均機率的共變異。
 對角元素開根號就是各類的二項 SEM。比例為 0 或 1 時樣本變異數為 0，不代表信賴區間。
@@ -45,6 +47,8 @@ ADR-0074 的單次讀出 IQ 總和 `[N, ΣI, ΣQ, ΣI², ΣIQ, ΣQ²]`。它取�
 兩者都以實際保留的 shots 為分母，不估計輪間散布、RB 的 seed 散布或擬合參數誤差。
 少於兩發或缺測（NaN）時，該點誤差未定。負、非整數、無窮計數及其加總溢位會報錯。
 IQ 估計也拒絕無窮矩、超過捨入誤差的負中心平方和，以及不可能的中心共變異，不受選定的投影方向影響。
+有限矩無法支持共變異估計時會拋出 `IQCovarianceError`（`ValueError` 的子型別）。
+`readout_metrics.first_read_contrast` 只隔離這類逐點估計失敗：保留 R1 均值距離，省略該點 SEM 並記錄原因。
 
 ## 雙讀出矩的自校準
 

@@ -15,7 +15,7 @@ See [`zcu_lab/v2/operator-workflow.md`](../../operator-workflow.md) for the shar
 
 Run shows measured g/e/f label fractions against actual detuning (MHz) or gain (a.u.), or three maps when both vary. The title counts acquired points and retained shots. Stop keeps completed rows; unfinished rows stay blank.
 
-Analyze separates measured and confusion-corrected fractions using the Run's saved calibration, never the current library. For 1D, each bar is one shot SEM: √[p(1−p)/(N−1)] for measured fraction p and N > 1 retained shots. Corrected bars propagate the retained shots' label-count covariance with the saved calibration matrix treated as known. The bars are not fit errors, shot spread or scatter between rounds. The 2D maps have no pointwise bars.
+Analyze separates measured and confusion-corrected fractions using the Run's saved calibration, never the current library. For 1D, each bar is one shot SEM: √[p(1−p)/(N−1)] for measured fraction p and N > 1 retained shots. Corrected bars propagate the retained shots' label-count covariance with the saved calibration matrix treated as known. The bars are not fit errors, shot spread or scatter between rounds. Each 2D map uses its own data range and has no pointwise bars. Compare fractions using the colorbars.
 
 A large confusion-matrix condition number or small minimum singular value means correction amplifies count noise. The correction is unclipped; fractions outside [0, 1] are possible. Preparation contamination limits these estimates; they are not pure energy-state populations or gate fidelity. Analysis rejects incomplete, nonfinite or empty counts and singular confusion matrices.
 

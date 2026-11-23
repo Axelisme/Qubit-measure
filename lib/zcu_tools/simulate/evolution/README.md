@@ -66,11 +66,20 @@ contracts live with their types in [engine.py](engine.py), [secular.py](secular.
 [inspection records](_inspection.py), [controls.py](controls.py), [model.py](model.py)
 and [state.py](state.py).
 
-Units are ns, GHz and rad. `SecularModel` supplies energies, drive quadratures,
-directional rates and pure dephasing in each quantized flux level's energy
-basis. The optional `collapse_operators` tuple supplies full complex `L` matrices
-in that basis, in ns⁻½. CPU `dop853` adds each `LρL† − {L†L,ρ}/2` to the
-secular bath and transforms it with the Hamiltonian into the integration frame.
+Units are ns, GHz and rad. A [`DriveTrack`](engine.py) carries a signed numeric
+carrier in `frequency_ghz`, including zero. This field does not record emitted
+RF. The track's `port` matches a [`SecularDrive`](secular.py) by name. That record
+supplies Hermitian I/Q operators `X` and `Y` in the model's energy basis. Each
+active tone contributes `H_drive/h = Re(z)*X + Im(z)*Y`. Its complex drive
+coefficient `z` is the signed gain times the envelope evaluated at pulse-local
+ns times `exp(i*(phase_rad + 2π*frequency_ghz*t_ns))`, where `t_ns` is measured
+from the shot's common time origin.
+
+`SecularModel` supplies energies, drive quadratures, directional rates and pure
+dephasing in each quantized flux level's energy basis. The optional
+`collapse_operators` tuple supplies full complex `L` matrices in that basis,
+in ns⁻½. CPU `dop853` adds each `LρL† − {L†L,ρ}/2` to the secular bath and
+transforms it with the Hamiltonian into the integration frame.
 Keep the coherent components of one physical jump in one matrix. Use `()` when
 there are no explicit operators; the existing secular routes are unchanged.
 The model builder owns physical applicability. Records own read-only copies
@@ -86,6 +95,17 @@ must stay at a fixed flux level without a supplied flux waveform. `families=` ca
 exclude `dop853`, in which case both inspection and evolution raise
 `NoValidKernel`; neither falls back to a secular approximation. Explicit
 operators never use OpenCL, including on an Engine configured for that device.
+
+[`EnvelopeSpec`](engine.py) defines envelope sampling independently of
+`DriveTrack` pulse timing. `EnvelopeSpec.values(local_ns)` returns unity for a
+constant envelope. A sampled envelope linearly interpolates the real and
+imaginary parts at pulse-local ns, using its increasing `sample_ns` grid starting
+at zero. The grid need not be uniform. The final sample is held through pulse end.
+Tracks and segments enforce pulse support, not the evaluator.
+`DriveTrack.phase_rad` defines the carrier phase at the shot's absolute time
+zero, not at the start of the pulse or a continuation span. See
+[FTF control conversion](../../simulators/ftf/environment/README.md#control-conversion)
+for how the environment supplies these tracks.
 
 `TimelineBatch.segment_boundaries` adds point-aligned absolute ns boundaries.
 `segment_spans(batch)` is a pure query of the same final partition used by
@@ -113,7 +133,10 @@ be zero or final-span boundaries no later than `end_ns`. The engine plans with
 the common origin and propagates only `[start_ns,end_ns]`, without replaying the
 prefix or restarting carrier phases and envelopes. The full boundary query
 still covers `[0,end_ns]`. Batch construction retains the existing density
-invariants without repair. Continuation inputs participate in acquire digests, not model-only prepare identities.
+invariants without repair. Continuation inputs participate in acquire digests,
+not model-only prepare identities. See
+[FTF cavity drives](../../simulators/ftf/environment/README.md#cavity-drives)
+for how the environment supplies span shifts and continuation densities.
 
 `PathDiagnostics.point_members` records each class's increasing unique caller
 point IDs. `merge_path_diagnostics(parts)` unions these memberships, sums work

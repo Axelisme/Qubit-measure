@@ -10,18 +10,21 @@ from hashlib import sha256
 from pathlib import Path
 from types import SimpleNamespace
 
+import numpy as np
 import pytest
 from qtpy import QtCore
 from qtpy.QtCore import QCoreApplication, QTimer
+from qtpy.QtWidgets import QApplication
 from zcu_tools import program
 from zcu_tools.gui.app.measure import Registry, controller
 from zcu_tools.gui.app.measure.events.run import RunFinishedPayload
+from zcu_tools.gui.app.measure.services.ports import RunPaneSnapshot, TabSnapshot
 from zcu_tools.gui.event_bus import BaseEventBus
 from zcu_tools.gui.session.context_types import EntryRequest
 from zcu_tools.simulators.ftf import config, environment
 from zcu_tools.simulators.ftf.config.schema import FTFSettings, Numerics
 
-from tests.gui.app.measure._synthetic import SampleAdapter
+from tests.gui.app.measure._synthetic import SampleAdapter, SampleResult, SampleRun
 from tools import experiment_wall_time
 from tools.experiment_wall_time import main
 
@@ -64,6 +67,7 @@ class _SyntheticController:
         self.on_cancel = on_cancel
         self.project = Path(project_root)
         self.entry: Path | None = None
+        self.published_run: RunPaneSnapshot | None = None
 
         def open_entry(request: EntryRequest) -> None:
             self.entry = self.project / "result" / request.name
@@ -85,7 +89,9 @@ class _SyntheticController:
         self.entry_control = SimpleNamespace(open_entry=open_entry, use_point=use_point)
         self.tab_control = SimpleNamespace(
             new_tab=lambda adapter: adapter,
-            get_tab_snapshot=lambda _tab: SimpleNamespace(run=None),
+            get_tab_snapshot=lambda tab: TabSnapshot(
+                adapter_name=tab, cfg_input={}, tab_id=tab, run=self.published_run
+            ),
         )
         self.cfg_resources = SimpleNamespace(
             lookup=lambda _tab: SimpleNamespace(write=on_write, result=object)
@@ -136,13 +142,38 @@ def _use_virtual_deadline(monkeypatch: pytest.MonkeyPatch, clock: _Clock) -> Non
     monkeypatch.setattr(QtCore, "QTimer", DeadlineTimer)
 
 
-@pytest.fixture
-def core_app() -> Iterator[QCoreApplication]:
-    """Keep the owner loop alive without opening windows or a Measure session."""
-    yield QCoreApplication.instance() or QCoreApplication([])
+@pytest.fixture(scope="session")
+def core_app() -> Iterator[QApplication]:
+    """Keep one headless Qt owner loop alive without opening windows.
+
+    Creates a QApplication rather than a bare QCoreApplication because Qt allows
+    only one application instance per process: leaving a QCoreApplication alive
+    in a shared xdist worker aborts any later GUI test that creates a QWidget.
+    """
+    with pytest.MonkeyPatch.context() as patch:
+        patch.setenv("QT_QPA_PLATFORM", "offscreen")
+        patch.setenv("QT_QPA_PLATFORMTHEME", "generic")
+        app = QApplication.instance()
+        if app is None:
+            app = QApplication([])
+    if not isinstance(app, QApplication):
+        raise RuntimeError(f"Qt tests require a QApplication, got {type(app).__name__}")
+    yield app
 
 
-def _headless_inputs(directory: Path, *adapters: str) -> None:
+def test_core_app_provides_a_widget_compatible_qapplication(
+    core_app: QApplication,
+) -> None:
+    """Running wall-time controller tests must leave a QApplication for GUI tests."""
+    assert isinstance(core_app, QApplication)
+    assert QCoreApplication.instance() is core_app
+
+
+def _headless_inputs(
+    directory: Path, *adapters: str, metric: dict[str, object] | None = None
+) -> None:
+    if metric is None:
+        metric = {"kind": "shots"}
     directory.mkdir(parents=True)
     (directory / "board-profile.yaml").write_text("{}")
     (directory / "ftf-settings.yaml").write_text("{}")
@@ -153,7 +184,7 @@ def _headless_inputs(directory: Path, *adapters: str) -> None:
                 "point": "initial",
                 "unpinned": {"form": "current Form", "point": "fixture point"},
                 "scenes": [
-                    {"scene_id": key, "adapter": key, "basis": "test workload"}
+                    {"scene_id": key, "adapter": key, "metric": metric}
                     for key in adapters or ("fake/frequency",)
                 ],
             }
@@ -303,10 +334,16 @@ def test_main_applies_selected_overrides_without_reading_review_notes(
             "point": "initial",
             **notes,
             "scenes": [
-                {"scene_id": "other", "adapter": "fake/power", **basis},
+                {
+                    "scene_id": "other",
+                    "adapter": "fake/power",
+                    "metric": {"kind": "shots"},
+                    **basis,
+                },
                 {
                     "scene_id": "scout",
                     "adapter": "fake/frequency",
+                    "metric": {"kind": "shots"},
                     **basis,
                     "overrides": [
                         {"path": ["delay", "stop"], "value": 3, **basis},
@@ -392,6 +429,73 @@ def test_main_configures_ftf_workers_and_stamps_batch_telemetry(
     assert settings.numerics.projection_weight_floor == 0.0002
     assert settings.numerics.telemetry.commit == "abc"
     assert settings.numerics.telemetry.dirty is True
+
+
+@pytest.mark.parametrize(
+    ("publication_id", "wrapped", "error"),
+    [
+        pytest.param(1, True, None, id="current-run-record"),
+        pytest.param(0, True, RuntimeError, id="stale-publication"),
+        pytest.param(None, True, RuntimeError, id="missing-publication"),
+        pytest.param(1, False, TypeError, id="wrong-record-type"),
+    ],
+)
+@pytest.mark.usefixtures("core_app")
+def test_main_uses_only_the_current_controller_run_record_for_scan_grid_points(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    publication_id: int | None,
+    *,
+    wrapped: bool,
+    error: type[Exception] | None,
+) -> None:
+    data_dir, output = tmp_path / "inputs", tmp_path / "output"
+    _headless_inputs(data_dir, metric={"kind": "scan", "axes": [{"field": "data"}]})
+    result = SampleResult(np.linspace(0.0, 1.0, 5))
+
+    def run(ctrl: _SyntheticController) -> None:
+        (ctrl.telemetry / "routing-scan.jsonl").write_text(
+            '{"families":{},"points":99,"wall_s":1,"compile_wall_s":0,'
+            '"evolve_wall_s":0.375,"readout_wall_s":0,"materialize_wall_s":0}\n'
+        )
+
+        def finish() -> None:
+            if publication_id is not None:
+                ctrl.published_run = RunPaneSnapshot(
+                    result=SampleRun(cfg=None, result=result) if wrapped else result,
+                    source_path=None,
+                    source_operation_id=publication_id,
+                )
+            ctrl.complete()
+
+        QTimer.singleShot(0, finish)
+
+    register = _install_headless_controller(
+        monkeypatch,
+        _Clock(),
+        ("fake/frequency",),
+        run,
+        lambda _: pytest.fail("a completed Run must not be cancelled"),
+    )
+
+    def measure() -> int:
+        return main(
+            ["--output", str(output)],
+            data_dir=data_dir,
+            registry_factory=register,
+            read_commit=lambda: "abc",
+        )
+
+    if error is not None:
+        with pytest.raises(error, match="Run 1"):
+            measure()
+        return
+
+    assert measure() == 0
+    [row] = json.loads((output / "report.json").read_text())["rows"]
+    assert row["point_count"] == 5
+    assert row["core_s_per_point"] == 0.075
+    assert row["core_judgement"] == "pass"
 
 
 @pytest.mark.parametrize("orphan", [False, True], ids=["paired", "orphan"])
@@ -591,7 +695,7 @@ def test_timeout_continues_only_when_terminal_and_idle_are_observed_in_grace(
         "missing_breakdown" if expected_exit == 0 else "not_run"
     )
     summary = (output / "summary.md").read_text()
-    assert "Core >180 s: —\n" in summary
+    assert "Core 超標（實測）: —\n" in summary
     assert ">180.0" in summary
     assert f"Runs: {int(expected_exit == 0)} timed, 1 timeout, 0 run_failed." in summary
 
@@ -681,7 +785,7 @@ def test_timeout_judges_only_the_measured_core_lower_bound(
     assert row["materialize_s"] == (1.5 if evolve_s is not None else None)
     assert row["acquires"] == (2 if evolve_s is not None else 1)
     summary = (output / "summary.md").read_text()
-    assert "Core >180 s: —" in summary
+    assert "Core 超標（實測）: —" in summary
     assert f"Core 已知至少超標: {'`fake/frequency`' if over_target else '—'}" in summary
     assert f"Core 未判定: {'—' if over_target else '`fake/frequency`'}" in summary
     if lower_bound is not None:

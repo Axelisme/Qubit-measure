@@ -21,8 +21,8 @@ def make_form(ctx: FormContext) -> Form[RamanGFCfg]:
         RamanGFCfg,
         tree={
             "scan_mode": "frequency_gain",
-            "detuning": Range(-50, 50, expts=11),
-            "gain": Range(0, 0.9, expts=10),
+            "detuning": Range(-50, 50, expts=31),
+            "gain": Range(0, 0.9, expts=31),
             "drive": Template(
                 "pulse:blank",
                 set={
