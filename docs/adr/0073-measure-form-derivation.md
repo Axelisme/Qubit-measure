@@ -47,14 +47,14 @@ status: accepted
 **例子。** 單 qubit 的頻譜表單用 lab helper `source(ctx, "$resonator.module.readout", Template("readout"))` 選 readout 初值。`$resonator` 由 `resonator: $qubit.resonator` alias 解析，readout 與 slot 的 resonator 所有權見 [[0072]]。可解析時 helper 回傳 `Slot(path)`；缺席、懸空或 alias 未綁時才用傳入的 Template，不重寫路徑。頻率掃描用 `Range.around("$qubit.freq", "1.5 * $qubit.kappa", expts=301)`，`reps` 初值為 1000。其他作者入口及例子見 [Form adapter README](../../lib/zcu_tools/gui/form_adapter/README.md)：
 - `Range` 的字串端點轉成 `Expr`，數字與 `None` 不變。[Sweep 表示](../../lib/zcu_tools/gui/form_adapter/README.md#sweep-表示)列出四個 tagged branches。Range／Center 與 Expts／Step 各只保存 active 欄位，分別以 `n` 或 `step` 保存採樣，新表單用 Range + Expts。Center 的 span 是帶正負號的完整寬度，不另存端點。
 - `LogPoints(max, points, include_zero=True)` 宣告一個整數清單的初值。`cfg_model` 只保存宣告，`form_adapter` 擁有分支、換算與產生清單的規則。Core 只接收 `list[int]`。LogPoints 只用於整數次數；浮點的對數間距掃描不在此列，有實驗需要時再連同 core 的清單掃描一起設計。兩種 Log 的首尾、點數限制、去重與 List→Log 的 invalid draft 行為見 [Log／List 整數清單](../../lib/zcu_tools/gui/form_adapter/README.md#loglist-整數清單)，不影響普通 list 或 SweepCfg。
-- 唯讀限制作用於整棵被標記的子樹。Module 子欄位標唯讀不影響 library key 的選擇；module 本身標唯讀則固定 ref／inline 與所有子欄位，不另設 selector-only 宣告或強制 inline。只為組 cfg 存在的固定值由 `run()` 補齊，例如單發的 `reps`／`rounds=1`，不放進 Form 或實驗 cfg 型別。要顯示的 mux tone name 保持唯讀。
+- 唯讀限制作用於整棵被標記的子樹。Module 子欄位標唯讀不影響 library key 的選擇；module 本身標唯讀則固定 ref／inline 與所有子欄位。Designer 的實作選擇是不另設 selector-only 宣告或強制 inline。只為組 cfg 存在的固定值由 `run()` 補齊，例如單發的 `reps`／`rounds=1`，不放進 Form 或實驗 cfg 型別。要顯示的 mux tone name 保持唯讀。
 - Two-qubit 的 [`captured_qubits`](../../zcu_lab/v2/two_qubit/_measure.py) 從固定 capture 解析元件名。元件名不進表單欄位或 cfg，見 [ADR-0069 的 adapter 身分契約](0069-experiment-core-and-frontends.md#綁定身分留在-adapter)。表單以 `Hidden` 將按 `$mux.qubits` 順序推得的 `qubit1_tone`、`qubit2_tone` 填入 cfg。`TwoQubitForm` 提交時從同一次 capture 取 group 的 `resonators` 長度，核對 readout 的 tone 數。Tone 數不是表單欄位。
 - Run 會覆寫的必填欄位由作者宣告 `Hidden(合法值)`。普通 core tree 和 `Template.set`／`Slot.set` 的 dotted Spec 路徑共用這個節點，填值仍受驗證。相反地，Bath reset 的 `tested_reset.pi2_cfg.phase` 由 Template 的 `set` 給可編輯的初值 90。`run()` 使用填入的 phase，不覆寫成 90，guide 將 90 說明為建議的 tomography offset。逐 tone 的 Hidden 路徑相同才可共享元素 model；各位置的值與來源仍獨立。`Hidden()` 的省略語意、共用路徑檢查與普通位置 tree 的限制見 [Hidden 填入值](../../lib/zcu_tools/gui/form_adapter/README.md#hidden-填入值)及 [Native model lists](../../lib/zcu_tools/gui/form_adapter/README.md#native-model-lists)。
 - Readout 使用平鋪欄位，例如 `Template("readout", set={"gain": 0.1, "ro_length": 2.0})`。`gen_ch`、`ro_ch` 必填且可編輯，generator 與 ADC 共用 `freq`，waveform 可保留 child key。生成器屏蔽不支援的硬體欄位，不推導通道、不補值，見 [[0074]] 與 [Form adapter README](../../lib/zcu_tools/gui/form_adapter/README.md)。
 
 **邊界。**
 - `Slot(path, copy=False, set={})` 指向捕捉的 library 槽位，copy 才建 inline；`Template(id, set={}, seed_metadata={})` 從注入的持久範本建 fresh inline input。框架不替 Slot 選 fallback。作者可用 lab 的 `source` helper 或明寫 if／else，不增設 init 模式。可解析但 family 不相容就報錯，不回退。未選 Template 而 Slot 缺來源時，必填欄位留空並標 Invalid，可留空且預設 `None` 的欄位停用而維持有效。Seed metadata 只合併實際採用的 Template，與 `Form.with_seed_metadata` 共用 root-relative canonical paths，同路徑以顯式 Form metadata 優先。`to_cfg` 保留持久 Spec 的 child key，不 materialize 或改寫。未知或受屏蔽的 seed、缺必要 discriminator 或不支援的選項在入口報錯。範本各自的 input projection／model、Expr requiredness、branch ancestry 與 `input.model.default_input(env)` 的邊界見 [Form adapter README](../../lib/zcu_tools/gui/form_adapter/README.md)。
-- `Slot`／`Template` 不提供 `lock`，也沒有 `Locked` 節點。唯讀初值用 `Display(readonly=True)` 或 `FieldMeta(readonly=True)`，Form core 強制唯讀，不生成單值 Literal。List 可按位置給不同唯讀初值。生成器不從欄位同名或 sweep 與 module 的關係推導 Hidden，不增設 hidden_paths、nested readonly、共用型別的複本或局部 cfg 型別，也不改 Run。
+- Designer 的實作選擇是 `Slot`／`Template` 不提供 `lock`，也沒有 `Locked` 節點。唯讀初值用 `Display(readonly=True)` 或 `FieldMeta(readonly=True)`，Form core 強制唯讀，不生成單值 Literal。List 可按位置給不同唯讀初值。生成器不從欄位同名或 sweep 與 module 的關係推導 Hidden，不增設 hidden_paths、nested readonly、共用型別的複本或局部 cfg 型別，也不改 Run。
 - 普通選項切換由該欄位的 converter 決定；沒有 converter 只改 selection，不補 fresh defaults。Inline 繼承由 `gui.form_adapter` 集中宣告，欄位轉換與固定具名 model list 的設計見 [[0079]]。固定元素 picker 與 participants 清單分開，lab 在 Open／Reset 把捕捉到的 alias 名稱轉成原始 index，框架不接管 mux group 關係。
 - 顯式 Sweep 指令保值換算，不套 fresh defaults。座標換算只求值座標，採樣換算另求值採樣欄位；成功才原子安裝 direct 數字，失敗保留整組原稿。點數或區間無效時不靠切換修成另一個掃描。Step 的 floor count、相對容差、有效端點、精度與 lowering 見 [Sweep 表示](../../lib/zcu_tools/gui/form_adapter/README.md#sweep-表示)及 [Measure tab 的 input 與使用](0065-cfg-editing.md#measure-tab-的-input-與使用)。Qt 顯示原稿與有效值的差異，MCP 讀同一份 values，都不另算，也不寫回 input。
 - `to_inline` 明確複製固定 library 內容。Widget 與 MCP 用共用 description 的 Option label、value 與 commands，不猜 union 或 library 結構。直接 children 的查詢、wrapper 攤平、完整 model-field path 與首次展開才建子表單的契約見 [Measure tab 的 input 與使用](0065-cfg-editing.md#measure-tab-的-input-與使用)。Inspect、New Entry、writeback 與 workflows 共用這套描述。
@@ -111,23 +111,25 @@ status: accepted
 
 ### 自動推導點到為止
 
-**規則。** 一般實驗的表單初值用簡單固定的公式，不為了讓每個 point 的初值都能執行而加分支、讀更多來源或依板子調整。不依板子的固定上下限，在初值 expression 用 `min` 截斷。缺值、無效值與來源故障按[校準初值政策](../../zcu_lab/v2/measure-authoring.md#校準初值政策)分流。
+**規則。** 一般實驗的表單初值用簡單固定的公式，不為了讓每個 point 的初值都能執行而加分支、讀更多來源或依板子調整。由參數推導的初值有兩種寫法：建立 Form 時算好並填入數值，或把推導式寫成 expression。推導結果可能超出不依板子的固定範圍時，兩種寫法都讓初值留在範圍內。填數值就先截斷，寫 expression 就用 `min` 或 `max` 截斷。缺值、無效值與來源故障按[校準初值政策](../../zcu_lab/v2/measure-authoring.md#校準初值政策)分流。
 
-**例子。** Length Rabi 沿用捕捉的 x180，掃描上限是 x180 長度的四倍。FTF 測試 point 用 0.48 µs 的 cosine，上限 1.92 µs 已超過 drive generator 的 envelope 容量，公式仍不改。`singleshot/reset_check` 的 Gain Stop 用 `min(1.0, 4.0 * $qubit.module.x180.gain)`，例如 0.125 得 0.5，0.617 得 1.0。見 [Length Rabi guide](../../zcu_lab/v2/singleshot/len_rabi/guide.md)及 [Reset Check guide](../../zcu_lab/v2/singleshot/reset_check/guide.md)。
+**例子。** Length Rabi 沿用捕捉的 x180，掃描上限是 x180 長度的四倍。FTF 測試 point 用 0.48 µs 的 cosine，上限 1.92 µs 已超過 drive generator 的 envelope 容量，公式仍不改。`singleshot/reset_check` 的 Gain Stop 取 π pulse gain 的四倍，上限 1.0。表單寫成 `min(1.0, 4.0 * $qubit.module.x180.gain)`，例如 0.125 得 0.5，0.617 得 1.0。作者也可填入事先算好並截斷的數值。見 [Length Rabi guide](../../zcu_lab/v2/singleshot/len_rabi/guide.md)及 [Reset Check guide](../../zcu_lab/v2/singleshot/reset_check/guide.md)。
 
 **邊界。** 截斷只用於不依板子的固定上下限，例如正規化 gain 的 [-1, 1]。依輸入浮動的導出值照公式帶入，Form 不再 clamp，由後續驗證報錯。依板子的 envelope 容量、單一 pulse 可編碼長度不在初值裡截斷，見[板子限制](#板子限制先不加程式檢查)。這是慣例，不是禁令：作者有具體需求時，例如生成初值要偵測環境，可以加需要的邏輯，並在 guide 寫出初值怎麼來；沒有需求就用簡單做法。
 
 **依據。** 本條由 designer 依下列裁決整理；使用者 2026-11-21 覆核措辭並定為慣例：「这四处措辞基本没问题，不过它是作为惯例。如果作者有需求，比如说生成初值的时候需要一些特别的环境侦测逻辑是没有问题的。一般实验用简单的做法就好了，有需求再做多余的设计。」2026-11-21，使用者對 Length Rabi 答「……2a，簡單比複雜好，自動推導的正確性點到為止即可」；「2a」即沿用 x180 的形狀。同日對 reset_check 說：「關於4gain超過1.0使於是預設值設計不良，應該套一層min來在expression中截斷」。見 [2026-10-17 的初值討論](../discussions/2026-10-17-measure-form-initial-values-and-sweep-mode.md)及[板子限制討論](../discussions/2026-11-21-form-board-limits.md)。
 
+2026-11-23，使用者說：「1兩種選擇，推導後填入數值，或是將推導式填入expression」。Designer 依使用者同日授權「你繼續幫我代裁」，定下兩種寫法的截斷方式，使用者未覆核。此次原始問答未入庫。
+
 ### 預設值的瑕疵就改預設值
 
-**規則。** 表單初值在一般 point 上就違反實驗自己的規則時，修初值公式，不加檢查。新公式對所有 point 一致，guide 與 seed metadata 寫出公式。Form 不因個別 point 的算出值另做修正，Run 的既有檢查照常拒絕手動填錯的值。
+**規則。** 表單初值在一般 point 上就違反實驗自己的規則時，修初值公式，不加檢查。新公式對所有 point 一致，guide 說明公式。Form 不因個別 point 的算出值另做修正，Run 的既有檢查照常拒絕手動填錯的值。
 
 **例子。** CPMG 的 Minimum time 用 16 ×（x90 長度 + x180 長度），見 [CPMG guide](../../zcu_lab/v2/twotone/time_domain/cpmg/guide.md)。兩個 0.48 µs 的脈衝得 15.36 µs，通過既有 interval 檢查；手填 15.35 µs 仍被拒。
 
 **邊界。** 違反的是依板子的限制時不改初值，留給 Run 報錯，見[下一節](#板子限制先不加程式檢查)。例如 `singleshot/t1_tone` 缺 T1 時仍用 150 µs 作掃描終點，即使 `qick_216_v2` 的 gen 0 單一 pulse 上限約 109 µs。
 
-**依據。** 本條由 designer 依下列裁決整理，使用者 2026-11-21 覆核措辭，定為慣例（原話見 ADR-0073〈自動推導點到為止〉）。2026-11-21，使用者選擇修 CPMG 初值：「1c，没错，这个是 这个是预设值的瑕疵，这种类似的东西都是改预设值就好了。」同日以「核准」接受 t1_tone 不改初值的邊界。舊初值的失敗與公式比較見[板子限制討論](../discussions/2026-11-21-form-board-limits.md)。
+**依據。** 本條由 designer 依下列裁決整理，使用者 2026-11-21 覆核措辭，定為慣例（原話見 ADR-0073〈自動推導點到為止〉）。2026-11-21，使用者選擇修 CPMG 初值：「1c，没错，这个是 这个是预设值的瑕疵，这种类似的东西都是改预设值就好了。」同日以「核准」接受 t1_tone 不改初值的邊界。2026-11-23，使用者以「2A」確認保留 guide 對公式的說明，不要求 seed metadata 記錄公式。舊初值的失敗與公式比較見[板子限制討論](../discussions/2026-11-21-form-board-limits.md)。
 
 ### 板子限制先不加程式檢查
 

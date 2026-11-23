@@ -457,6 +457,22 @@ def test_ge_iq_density_refreshes_the_blank_image_and_rescales_to_current_shots()
     assert ax.get_title() == "Live GE"
 
 
+def test_ge_iq_density_blends_three_classes_with_sharpened_weights() -> None:
+    ax = Figure().subplots()
+    ground = np.array([-6 - 6j, 0j, 0j, 0j])
+    excited = np.array([6 + 6j, 0j, 0j, 0j])
+    other = np.array([5 - 5j, 0j])
+    image = ge.plot_ge_iq_density(ax, ground, excited, other=other)
+    rgba = np.asarray(image.get_array())
+
+    np.testing.assert_array_equal(rgba[0, 0, :3], (0, 0, 1))
+    np.testing.assert_array_equal(rgba[-1, -1, :3], (1, 0, 0))
+    np.testing.assert_array_equal(rgba[7, 82, :3], (0.5, 0.5, 0.5))
+    # Three g, three e and one Other: the green channel comes only from Other.
+    np.testing.assert_allclose(rgba[45, 45], (0.5, 0.5 / (2 * 3**6 + 1), 0.5, 1))
+    assert rgba[44, 44, 3] == 0
+
+
 def test_fitted_snr_uses_joint_covariance_and_preserves_the_fit(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

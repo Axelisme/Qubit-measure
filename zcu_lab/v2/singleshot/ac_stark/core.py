@@ -235,10 +235,9 @@ class AcStarkExp(Experiment[AcStarkResult, AcStarkCfg]):
                 title=f"P({state})",
             )
             ax.grid(False)
-            heatmaps.append(live_heatmap(ax, uniform=False, clim=(0.0, 1.0)))
-        figure.colorbar(
-            figure.axes[0].images[0], ax=figure.axes, label="Probability (0–1)"
-        )
+            ax.set_facecolor("0.9")
+            heatmaps.append(live_heatmap(ax, uniform=False))
+            figure.colorbar(ax.images[0], ax=ax)
 
         @context.plots.on_plot_thread
         def plot_fn(counts: NDArray[np.float64]):
@@ -465,7 +464,8 @@ def _plot_populations(
             title=f"P({state})", xlabel=xlabel, ylabel="Qubit probe RF frequency (MHz)"
         )
         ax.grid(False)
-        live_heatmap(ax, uniform=False, clim=(0.0, 1.0)).set(
+        ax.set_facecolor("0.9")
+        (image,) = live_heatmap(ax, uniform=False).set(
             coordinates, freqs, populations[..., index]
         )
-    fig.colorbar(fig.axes[0].images[0], ax=fig.axes, label="Probability (0–1)")
+        fig.colorbar(image, ax=ax)

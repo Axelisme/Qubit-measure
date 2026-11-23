@@ -230,17 +230,13 @@ class StirapAmplitudeExp(Experiment[StirapAmplitudeResult, StirapAmplitudeCfg]):
                 stokes_gains,
                 np.full((len(stokes_gains), len(pump_gains)), np.nan),
                 shading="nearest",
-                vmin=0,
-                vmax=1,
             )
             ax.set(
                 xlabel="Pump gain (a.u.)",
                 ylabel="Stokes gain (a.u.)",
                 title=f"Measured {state} label",
             )
-            figure.colorbar(
-                heatmap, ax=ax, label="Measured label fraction", ticks=(0, 0.5, 1)
-            )
+            figure.colorbar(heatmap, ax=ax, label="Measured label fraction")
             maps.append(heatmap)
 
         @context.plots.on_plot_thread
@@ -251,7 +247,10 @@ class StirapAmplitudeExp(Experiment[StirapAmplitudeResult, StirapAmplitudeCfg]):
                 data, total, out=np.full_like(data, np.nan), where=total > 0
             )
             for state, heatmap in enumerate(maps):
-                heatmap.set_array(raw[:, :, state].T)
+                panel = raw[:, :, state].T
+                heatmap.set_array(panel)
+                if np.isfinite(panel).any():
+                    heatmap.autoscale()
             headline.set_text(
                 f"{title}\nRetained shots: {int(np.nansum(total)):,} count"
             )
@@ -359,8 +358,6 @@ class StirapAmplitudeExp(Experiment[StirapAmplitudeResult, StirapAmplitudeCfg]):
                     source.result.stokes_gains,
                     values[..., column].T,
                     shading="nearest",
-                    vmin=min(0.0, float(values.min())),
-                    vmax=max(1.0, float(values.max())),
                 )
                 figure.colorbar(image, ax=ax, label=f"{label} label fraction")
                 ax.set(
@@ -371,7 +368,7 @@ class StirapAmplitudeExp(Experiment[StirapAmplitudeResult, StirapAmplitudeCfg]):
         headline = centroid3_title("STIRAP amplitude", confusion)
         classified_peak = None
         if peak_value is not None and pump_gain is not None and stokes_gain is not None:
-            axes[-1].plot(pump_gain, stokes_gain, "x", color="white", markeredgewidth=2)
+            axes[-1].plot(pump_gain, stokes_gain, "x", color="black", markeredgewidth=2)
             basis = "classified" if corrected is None else "corrected"
             headline += (
                 f"\nPeak {basis} f fraction = {peak_value:.3f} · "

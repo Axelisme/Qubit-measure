@@ -19,6 +19,8 @@ class Models(NamedTuple):
     energies: (k,M) GHz; rates/decay: (k,M,M) directional rates and total
     coherence loss per ns. x/y: (k,P,M,M) drive quadratures in GHz. basis:
     (k,M,M) eigenvectors in fixed coordinates. ports: (k,) valid port counts.
+    jumps/jumps_adjoint: (sum L counts,M,M), complex L and L†, keyed by
+    jump_offsets (k+1,). loss: (k,M,M), sum L†L, or empty without jumps.
     """
 
     energies: NDArray[np.float64]
@@ -28,6 +30,10 @@ class Models(NamedTuple):
     y: NDArray[np.complex128]
     basis: NDArray[np.complex128]
     ports: NDArray[np.int64]
+    jump_offsets: NDArray[np.int64]
+    jumps: NDArray[np.complex128]
+    jumps_adjoint: NDArray[np.complex128]
+    loss: NDArray[np.complex128]
 
 
 class Segments(NamedTuple):
@@ -93,7 +99,19 @@ def pack_models(models: list[SecularModel]) -> Models:
         for port, drive in enumerate(model.drives):
             x[index, port] = drive.in_phase_ghz
             y[index, port] = drive.quadrature_ghz
-    packed = Models(energies, rates, decay, x, y, basis, ports)
+    jump_offsets = np.r_[
+        0, np.cumsum([len(m.collapse_operators) for m in models], dtype=np.int64)
+    ]
+    jumps = np.empty((jump_offsets[-1], size, size), dtype=np.complex128)
+    loss = np.zeros((count if len(jumps) else 0, size, size), dtype=np.complex128)
+    for index, model in enumerate(models):
+        for j, jump in enumerate(model.collapse_operators, start=jump_offsets[index]):
+            jumps[j] = jump
+            loss[index] += jump.conj().T @ jump
+    adjoint = np.ascontiguousarray(jumps.conj().swapaxes(1, 2))
+    packed = Models(
+        energies, rates, decay, x, y, basis, ports, jump_offsets, jumps, adjoint, loss
+    )
     for array in packed:
         array.setflags(write=False)
     return packed

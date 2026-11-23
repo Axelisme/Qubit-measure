@@ -8,7 +8,14 @@ import pytest
 from zcu_tools.experiment import Scope
 from zcu_tools.mcp.measure.recipe_api import RecipeSession, recipe
 
-from ._script_recipe_support import Fit, Inputs, Report, SyntheticGui, start
+from ._script_recipe_support import (
+    Fit,
+    Inputs,
+    Report,
+    SyntheticGui,
+    start,
+    wait_for_terminal,
+)
 from ._support import make_client
 
 
@@ -164,7 +171,8 @@ def test_execution_projects_only_the_current_run_progress(tmp_path: Path) -> Non
                 "answer": {"accepted": False, "items": []},
             },
         )
-        terminal = client.call("wait", {**selector, "timeout": 3}).data
+        wait_for_terminal(execution)
+        terminal = client.call("wait", {**selector, "timeout": 0}).data
         assert terminal["status"] == "completed"
         for reply in (
             *after_run,
@@ -179,4 +187,3 @@ def test_execution_projects_only_the_current_run_progress(tmp_path: Path) -> Non
         release_run.set()
         release_analysis.set()
         client.context.session.close()
-        execution.join()

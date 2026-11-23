@@ -60,6 +60,36 @@ def test_model_fit_recovers_nonuniform_trace_in_either_direction(
     np.testing.assert_allclose(fitted, signals, atol=1e-8)
 
 
+def test_hanger_fit_recovers_noisy_notch_when_rational_pole_is_outside_sweep() -> None:
+    freq, fwhm = 7080.0, 1.4
+    freqs = freq + np.linspace(-9.8, 9.8, 99)
+    ql = freq / fwhm
+    clean = hanger_truth(
+        freqs,
+        freq=freq,
+        Ql=ql,
+        Qc_abs=ql / 0.68,
+        phi=-0.12,
+        a0=1.0 + 0.2j,
+        edelay=0.4,
+        bg_amp_slope=0.001,
+    )
+    # This noise puts the rational pre-fit pole outside the sweep even though
+    # its RMS is low enough to accept. Assert recovery through the public fit.
+    rng = np.random.default_rng(44)
+    noise_sigma = 0.065
+    signals = clean + noise_sigma * (
+        rng.standard_normal(freqs.size) + 1j * rng.standard_normal(freqs.size)
+    )
+
+    result = HangerModel.fit(freqs, signals, fit_bg_amp_slope=True)
+
+    # Local 1-sigma errors from noise_sigma * row norms of the pseudoinverse
+    # of the analytic model's IQ Jacobian at truth, in MHz (rounded up).
+    assert result["freq"] == pytest.approx(freq, rel=0, abs=3 * 0.046)
+    assert result["fwhm"] == pytest.approx(fwhm, rel=0, abs=3 * 0.092)
+
+
 @pytest.mark.parametrize("model", [HangerModel, TransmissionModel])
 def test_model_fit_rejects_zero_signal(
     model: type[HangerModel] | type[TransmissionModel],

@@ -1,6 +1,6 @@
 # zcu_tools.analysis.fitting
 
-**Last updated:** 2026-11-23，Singleshot T1 的衰減模命名
+**Last updated:** 2026-11-23，Singleshot T1 的衰減模命名與 hanger rational 初值
 
 **讀者：** lab-author。擬合模型、數值輸入、結果與失敗契約速查。
 
@@ -302,8 +302,9 @@ background option 都關閉時的 sequential 公開路徑。
 
 Resonance rational initializer 是 internal helper，不是 public fitting facade，也不估
 absolute electrical-delay branch。Caller 先用 route-scoped delay contract 移除 delay；
-initializer 只在 corrected trace 上提供 degree-1 single-pole 初值，病態或不可信結果會
-warning 並回退 sequential initializer。它不引入外部 `abcd_rf_fit` delay estimator。
+initializer 只在 corrected trace 上提供 degree-1 single-pole 初值。求解失敗時發出 warning，
+並改用原 IQ 的 sequential initializer。Hanger 只有在 normalized RMS 通過門檻、且極點實部
+落在掃頻窗內時才採用 rational 平滑；否則直接以原 IQ 初始化。它不引入外部 `abcd_rf_fit` delay estimator。
 背景只處理平滑的乘法 amplitude 與以 resonance 為中心的 phase curvature，不把 additive
 leakage、Fano path 或第二個 linear phase 併入 `bg_amp_slope`。後者與 `edelay` 無法獨立辨識。
 

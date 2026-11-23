@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from typing import Annotated, ClassVar, Literal, Self
 
 import numpy as np
+from matplotlib.colors import Normalize
 from matplotlib.figure import Figure
 from matplotlib.ticker import MaxNLocator
 from numpy.typing import NDArray
@@ -557,15 +558,17 @@ class SpectroscopyExp(Experiment[SpectroscopyResult, SpectroscopyCfg]):
                 fig.suptitle(
                     f"Conditional spectroscopy · {role} · Terminal P(e) map\n{variant}"
                 )
+                values = np.ma.masked_invalid(answer.excitation[..., target])
+                norm = Normalize()
+                norm.autoscale(values)
                 for ax, index in zip(fig.axes, np.ndindex(2, 2), strict=True):
                     qubit1, qubit2 = index
                     ax.pcolormesh(
                         frequencies,
                         dc,
-                        answer.excitation[:, qubit1, qubit2, :, target],
+                        values[:, qubit1, qubit2, :],
                         shading="nearest",
-                        vmin=0,
-                        vmax=1,
+                        norm=norm,
                         cmap="viridis",
                     )
                     ax.grid(False)
@@ -578,7 +581,6 @@ class SpectroscopyExp(Experiment[SpectroscopyResult, SpectroscopyCfg]):
                     fig.axes[0].collections[0],
                     ax=fig.axes,
                     label=f"{role} terminal P(e)",
-                    ticks=np.linspace(0, 1, 6),
                 )
 
         # Coverage answers whether the measured points have any retained shots.

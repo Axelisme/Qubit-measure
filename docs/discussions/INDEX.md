@@ -103,6 +103,8 @@
 - 2026-11-16 [Family 量表改為整批 cache-only](2026-11-16-family-pareto-cache-only.md)：介面退休。Consumer 整批載入後才量測，check 不求解；公開接縫提供穩定的每筆 record 身份，存放已遷移到共用快取與小清單。
 
 - 2026-11-16 [模擬器場景凍結與參考解數值交接](2026-11-16-frozen-simulator-inputs.md)：資料交接。場景 producer 自持控制與模型，通用 codec 保留既有 key，獨立 solver 留在 tests 側。
+- 2026-11-23 [Evolution 保留完整 collapse operators](2026-11-23-evolution-full-collapse-operators.md)：數值能力擴充。固定 H 的 CPU `dop853` 保留同一 jump 的相干轉移，不增加 FTF 專用介面。
+- 2026-11-23 [凍結數值升到 physical v2](2026-11-23-frozen-physical-v2.md)：資料格式版本。保留無 jump 身份，另設場景與 capture 根。不支援完整 jump 的 solver 不得在 cache miss 時發布參考解。
 
 - 2026-11-14 [single_tone_rwa 以 endpoint kick 保留，guard 改用 κ2](2026-11-14-single-tone-rwa-kick.md)：保留或刪除。隨機相位序列從最大 1.07e-2 降到 ≤2e-3；價格計入 kick 延後，L、I 的預設選路暫時比 floquet_period 慢超過 10%。
 
@@ -175,6 +177,7 @@
 - 2026-11-22 [GE 寫回保護先於診斷圖交付](2026-11-22-ge-gate-split-from-diagnostic.md)：交付切分。窄磚上診斷圖標籤仍相碰，寫回初選的中心檢查先獨立落地，直方圖與擬合 SNR 整批延到續作。
 - 2026-11-22 [GE 診斷圖保留四格](2026-11-22-ge-diagnostic-layout.md)：圖面取捨。assignment 移到兩列之間；當時採多數準備取色，後記說明改為銳化混色。
 - 2026-11-22 [GE Post 的準備顏色與分類邊界](2026-11-22-ge-post-preparation-majority.md)：讀圖語意。當時採準備共格取色；後記說明回到分格，分類邊界仍與上色分工。
+- 2026-11-23 [GE Post 以分類結果上色](2026-11-23-ge-post-classified-color.md)：讀圖語意。Post 保留準備分格，顏色改表示各發的分類；Analyze 保留準備色。
 - 2026-11-23 [Mux GE Fit 用準備色，圖例標出 probe 來源](2026-11-22-mux-fit-preparation-color.md)：讀圖語意。Fit 與 Diagnostic 同用準備色；從 Fit 圖例追溯 Live 的取數列。
 - 2026-11-22 [實驗 guide 只寫操作者需要的內容](2026-11-22-guide-content.md)：文件範圍。改寫規則並清理 111 份 guide，通用操作移到共用頁，排錯與可重用判讀留在知識庫。
 
@@ -229,7 +232,8 @@
 - 2026-11-22 [Mux 逐 tone 校正 IQ 矩與 R11](2026-11-22-mux-iq-moments-and-r11.md)：資料格式。Reducer 按參與 tone 順序計算完成輪的同批校正六矩，保留既有平均與舊檔。
 - 2026-11-23 [Labber scalar 匯出的索引軸](2026-11-23-labber-scalar-index-axis.md)：資料格式（已撤回）。原做法是替無軸 scalar 加一點索引軸。
 - 2026-11-23 [CZ 最佳化的 Labber 選集](2026-11-23-cz-optimize-labber-selection.md)：資料格式。Native 保留 `duration`；Labber 只匯出 `params` 與 `peak`，不替無軸變數加軸。
-- 2026-11-23 [Coherence 的 shot SEM 只隨當次 Run 交接](2026-11-23-coherence-run-only-shot-sem.md)：資料入庫。Mux Ramsey／Echo 與單 qubit Echo 不把矩寫入 Native 或 Labber，重載後重算不畫棒。
+- 2026-11-23 [Coherence 的 shot SEM 只隨當次 Run 交接](2026-11-23-coherence-run-only-shot-sem.md)：資料入庫（superseded）。只在記憶體交接矩的保存決策已由 [Native 保存六矩](2026-11-23-coherence-native-shot-moments.md) 取代。
+- 2026-11-23 [Coherence 的 shot 矩寫入 Native 檔](2026-11-23-coherence-native-shot-moments.md)：資料入庫。三個 leaf 可選保存同次六矩，重載後重算 SEM；Labber 匯出與三個歷史輸入契約不變。
 
 ## 量測策略
 

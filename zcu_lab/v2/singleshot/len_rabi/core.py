@@ -151,7 +151,8 @@ def _plot_confusion_matrix(ax: Axes, fit: RabiJointFitResult) -> None:
     labels = ("g", "e", "other")
     matrix = fit.confusion_matrix
     if fit.backend.valid and np.isfinite(matrix).all():
-        ax.imshow(matrix, cmap="Blues", vmin=0.0, vmax=1.0)
+        image = ax.imshow(matrix, cmap="Blues")
+        shades = np.asarray(image.norm(matrix), dtype=np.float64)
         for row in range(3):
             for column in range(3):
                 value = matrix[row, column]
@@ -161,7 +162,7 @@ def _plot_confusion_matrix(ax: Axes, fit: RabiJointFitResult) -> None:
                     f"{value:.3f}",
                     ha="center",
                     va="center",
-                    color="white" if value > 0.5 else "black",
+                    color="white" if shades[row, column] > 0.5 else "black",
                     fontsize=8,
                 )
         ax.set_title("Fitted confusion matrix\nOther row fixed by model", fontsize=10)

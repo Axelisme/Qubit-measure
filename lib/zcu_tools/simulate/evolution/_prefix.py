@@ -105,6 +105,7 @@ def _representative(geometry: Geometry, first: int, stop: int) -> Geometry:
             "level",
             "shift_content",
             "complete_pulses",
+            "has_collapse_operators",
             "tones",
             "tone_port",
             "tone_frequency_ghz",
@@ -136,6 +137,7 @@ def _representative(geometry: Geometry, first: int, stop: int) -> Geometry:
         subset,
         geometry.points[point : point + 1],
         geometry.flux_drive[first:stop],
+        geometry.reject_jump_flux[first:stop],
         geometry.prefix_paths,
     )
 
@@ -152,7 +154,12 @@ def _cpu_context(geometry: Geometry, context: KernelContext) -> KernelContext:
     latest = np.full(len(geometry.points), -1, dtype=np.int64)
     np.maximum.at(latest, table.timeline[certified], certified)
     suffix = np.arange(len(table.timeline)) >= latest[table.timeline]
-    possible_direct = np.flatnonzero(suffix & (table.tones > 0) & ~geometry.flux_drive)
+    possible_direct = np.flatnonzero(
+        suffix
+        & (table.tones > 0)
+        & ~geometry.flux_drive
+        & ~table.has_collapse_operators
+    )
     possible_direct.setflags(write=False)
     return replace(
         context,

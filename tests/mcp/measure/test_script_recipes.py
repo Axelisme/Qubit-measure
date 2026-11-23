@@ -19,6 +19,7 @@ from ._script_recipe_support import (
     Report,
     SyntheticGui,
     start,
+    wait_for_terminal,
 )
 from ._support import make_client
 
@@ -48,8 +49,7 @@ def test_async_declaration_runs_edits_analysis_and_single_synchronous_save(
     try:
         assert synthetic.inputs.model_json_schema()["required"] == ["count"]
         execution = start(client, "synthetic")
-        execution.wait(3)
-        outcome = execution.snapshot().outcome
+        outcome = wait_for_terminal(execution).outcome
         assert outcome is not None
         assert outcome.status == "completed"
         assert outcome.report == Report(count=9)
@@ -143,8 +143,7 @@ def test_run_cancel_delivers_partial_and_runs_cleanup_on_author_worker(
         execution = start(client, "synthetic")
         assert gui.started.wait(3)
         execution.cancel(scope="run")
-        execution.wait(3)
-        snapshot = execution.snapshot()
+        snapshot = wait_for_terminal(execution)
         outcome = snapshot.outcome
         assert outcome is not None
         assert outcome.status == "completed"
@@ -185,8 +184,7 @@ def test_invalid_inputs_fail_before_binding_gui(tmp_path: Path) -> None:
         execution = client.context.session.recipes.start(
             client.context, "synthetic", {"count": "not an integer"}
         )
-        execution.wait(3)
-        assert execution.snapshot().status == "failed"
+        assert wait_for_terminal(execution).status == "failed"
         assert client.transport.sent == []
     finally:
         client.context.session.close()
@@ -282,8 +280,7 @@ def test_analysis_summary_missing_authored_field_fails_without_repair(
     client = make_client(tmp_path, respond, recipes=(synthetic,))
     try:
         execution = start(client, "synthetic")
-        execution.wait(3)
-        snapshot = execution.snapshot()
+        snapshot = wait_for_terminal(execution)
         assert snapshot.status == "failed"
         assert snapshot.error is not None
         assert snapshot.error.type == "ValidationError"
@@ -317,14 +314,12 @@ def test_missing_parameters_is_terminal_and_releases_recipe_admission(
     client = make_client(tmp_path, recipes=(missing, next_recipe))
     try:
         execution = start(client, "missing")
-        execution.wait(3)
-        snapshot = execution.snapshot()
+        snapshot = wait_for_terminal(execution)
         assert snapshot.status == "needs_parameters"
         assert snapshot.missing == ("frequency_mhz",)
         assert snapshot.outcome is None
         following = start(client, "next")
-        following.wait(3)
-        assert following.snapshot().status == "completed"
+        assert wait_for_terminal(following).status == "completed"
     finally:
         client.context.session.close()
 
@@ -390,8 +385,7 @@ def test_run_cancel_during_analysis_does_not_stop_analysis(tmp_path: Path) -> No
         release_analysis.set()
         assert reply.data["cancelled"] is False
         assert reply.data["reason"] == "no run in progress"
-        execution.wait(3)
-        assert execution.snapshot().status == "completed"
+        assert wait_for_terminal(execution).status == "completed"
         assert not gui.cancelled.is_set()
     finally:
         release_analysis.set()
@@ -461,8 +455,7 @@ def test_save_transport_failure_does_not_claim_an_unreceived_report(
     client = make_client(tmp_path, respond, recipes=(synthetic,))
     try:
         execution = start(client, "synthetic")
-        execution.wait(3)
-        snapshot = execution.snapshot()
+        snapshot = wait_for_terminal(execution)
         assert snapshot.status == "failed"
         outcome = snapshot.outcome
         assert outcome is not None
@@ -534,8 +527,7 @@ def test_form_reads_keep_structured_owner_values_for_selector_and_sweep_helpers(
     client = make_client(tmp_path, LookbackGui(), recipes=(synthetic,))
     try:
         execution = start(client, "synthetic")
-        execution.wait(3)
-        outcome = execution.snapshot().outcome
+        outcome = wait_for_terminal(execution).outcome
         assert outcome is not None and outcome.status == "completed"
     finally:
         client.context.session.close()

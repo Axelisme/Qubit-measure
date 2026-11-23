@@ -20,11 +20,13 @@ In `mux_t2ramsey`, omission retains settings. Null `participants` leaves a missi
 
 ## Measurement and analysis
 
-Live `measurement_i` uses the original tone index `i`, not the participant-list row. Read its progress in acquired delay points and accumulated shots per point. The connected markers show the signed principal-axis projection of mean IQ versus requested free-evolution delay. The projection is in a.u., not a population. With fewer than two finite points, the plot uses the I axis.
+Live `measurement_i` uses the original tone index `i`, not the participant-list row. Read its progress in acquired delay points and accumulated shots per point. Live and Analyze plot **IQ projection (a.u.)** versus requested free-evolution delay. This is the signed projection of mean IQ onto its principal axis, not a population. With fewer than two finite points, both plots use the I axis.
 
 Analyze `fit_i` keeps the same points and overlays the fitted model as a solid line. The dotted line marks T2* when it falls within the fitted window. If the fit fails, the plot connects the points and reports why no model is available.
 
-Shot SEM bars show the expected error of each projected mean: the sample standard deviation of the same shots that gave that point, divided by the square root of their count. They are not single-shot scatter, round-to-round scatter or fit uncertainty. Fewer than two shots give no bar. After reloading a data file, rerunning Analyze gives no bars because only the mean was saved; saved figures still show their original bars.
+Shot SEM bars show the expected error of each projected mean: the sample standard deviation of the same shots that gave that point, divided by the square root of their count. They are not single-shot scatter, round-to-round scatter or fit uncertainty. Fewer than two shots give no bar.
+
+After loading a Native file with shot moments, run Analyze with the same options to see the same bars as before saving. Older Native files without shot moments still load; Analyze shows no bars for those files. Labber exports do not include shot moments.
 
 The ± on T2* and fringe rate is the fitted parameter's standard error. R² measures explained variation; normalized residual RMS is the residual RMS divided by the observed signal span. Systematic mismatch, unresolved fringes or cross-tone contamination can make a correction unreliable. Sampling uses `1 / (largest delay gap × max(|fitted fringe rate|, |actual detune|))`. This estimate cannot rule out unknown aliases.
 

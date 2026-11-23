@@ -14,10 +14,12 @@ from pathlib import Path
 from typing import Any
 
 import numpy as np
+from numpy.typing import NDArray
 
 from .engine import DriveTrack, EnvelopeSpec, TimelineBatch
 from .secular import (
     FluxExpansion,
+    FluxLevel,
     FluxSchedule,
     FluxTerm,
     FluxWaveform,
@@ -27,7 +29,7 @@ from .secular import (
     SegmentShift,
 )
 
-FROZEN_PHYSICAL_VERSION = 1
+FROZEN_PHYSICAL_VERSION = 2
 """Physical decoding contract shared by manifests and standalone inputs.
 
 Bump when fields, units, dtypes, defaults or Engine-input reconstruction change.
@@ -116,10 +118,14 @@ def physical_input(
         {tuple(int(v) for v in row) for row in batch.flux.level}
         | {(0,) * batch.flux.level.shape[1]}
     )
-    models = [asdict(source.model(level)) for level in levels]
-    if not include_identity:
-        for model in models:
+    models = []
+    for level in levels:
+        model = asdict(source.model(level))
+        if not model["collapse_operators"]:
+            model.pop("collapse_operators")
+        if not include_identity:
             model.pop("identity")
+        models.append(model)
     return {
         "batch": asdict(batch),
         "initial_density": source.initial_density,
@@ -132,9 +138,59 @@ def physical_input(
 
 
 def _complex_object(value: dict[str, Any]) -> object:
-    if value.keys() == {"real", "imag"}:
+    if value.keys() == {"real", "imag"} and all(
+        type(part) in (int, float) for part in value.values()
+    ):
         return complex(value["real"], value["imag"])
     return value
+
+
+def _collapse_operators(model: dict[str, Any]) -> tuple[NDArray[np.complex128], ...]:
+    """Decode or validate an optional canonical list of full L matrices."""
+    if "collapse_operators" not in model:
+        return ()
+    field = model["collapse_operators"]
+    if not isinstance(field, (list, tuple)) or not field:
+        raise ValueError("collapse_operators must be omitted or a nonempty list")
+    size = len(model["energies_ghz"])
+    jumps = []
+    for matrix in field:
+        entries = np.asarray(matrix, dtype=object)
+        values = [
+            _complex_object(item) if isinstance(item, dict) else item
+            for item in entries.flat
+        ]
+        if entries.shape != (size, size) or any(
+            type(item) not in (int, float, complex) for item in values
+        ):
+            raise ValueError(
+                f"collapse_operators must contain numeric ({size}, {size}) matrices"
+            )
+        jump = np.asarray(values, dtype=np.complex128).reshape(size, size)
+        if not np.isfinite(jump).all():
+            raise ValueError("collapse_operators must be finite")
+        jumps.append(jump)
+    return tuple(jumps)
+
+
+def _frozen_model_rows(value: dict[str, object]) -> dict[FluxLevel, dict[str, Any]]:
+    models = value["models"]
+    if not isinstance(models, (list, tuple)):
+        raise ValueError("frozen models must be a list")
+    rows = {}
+    for model in models:
+        if not isinstance(model, dict):
+            raise ValueError("frozen model must be an object")
+        level = tuple(model["level"])
+        if level in rows:
+            raise ValueError(f"duplicate frozen flux level: {level}")
+        rows[level] = model
+    return rows
+
+
+def _validate_frozen_models(value: dict[str, object]) -> None:
+    for model in _frozen_model_rows(value).values():
+        _collapse_operators(model)
 
 
 def _track(value: dict[str, Any]) -> DriveTrack:
@@ -219,6 +275,7 @@ def _model(value: dict[str, Any]) -> SecularModel:
         ),
         np.asarray(value["rates_per_ns"]),
         np.asarray(value["dephasing_per_ns"]),
+        collapse_operators=_collapse_operators(value),
     )
 
 
@@ -226,12 +283,13 @@ def read_physical_input(value: dict[str, object]) -> FrozenInput:
     """Reconstruct a physical_input snapshot, including JSON-decoded snapshots.
 
     Numeric record constructors reject invalid shape, ordering and physics.
+    Duplicate flux levels or invalid collapse operators raise ValueError.
     Missing fields raise KeyError; malformed JSON values raise TypeError or
     ValueError. Identity-free snapshots cannot reconstruct a source. No model
     is built outside the finite supplied mapping and no solver is invoked.
     """
     decoded = json.loads(canonical_json(value), object_hook=_complex_object)
-    models = {model.level: model for model in map(_model, decoded["models"])}
+    models = {level: _model(row) for level, row in _frozen_model_rows(decoded).items()}
     expansion = decoded["expansion"]
     restored_expansion = (
         None
@@ -278,14 +336,19 @@ def write_frozen_manifest(
 ) -> None:
     """Write records with FROZEN_PHYSICAL_VERSION inside canonical stdlib gzip.
 
-    Calculate both physical hashes and reject duplicate/non-string names.
-    Preserve opaque record metadata and, if supplied, write JSON-encodable
-    manifest metadata alongside the inputs. gzip has mtime=0 and no filename,
-    so identical inputs produce identical bytes regardless of path. Create parents and replace the
-    destination. Serialization and I/O errors propagate. No model or solver runs.
+    Calculate both physical hashes. Reject duplicate/non-string names, duplicate
+    flux levels or invalid collapse operators. A model without explicit jumps
+    omits collapse_operators. A model with jumps supplies a nonempty ordered list
+    of finite numeric matrices matching its dimension.
+    Preserve opaque record and optional JSON-encodable manifest metadata. gzip
+    has mtime=0 and no filename, so identical inputs produce identical bytes
+    regardless of path. Create parents and replace the destination. Serialization
+    and I/O errors propagate. No model or solver runs.
     """
     records = tuple(records)
     _unique_names(records)
+    for record in records:
+        _validate_frozen_models(record.physical)
     payload: dict[str, object] = {
         "version": FROZEN_PHYSICAL_VERSION,
         "inputs": [
@@ -311,8 +374,10 @@ def read_frozen_manifest(path: Path) -> tuple[FrozenRecord, ...]:
 
     Check FROZEN_PHYSICAL_VERSION, unique names and both physical hashes before
     returning numeric records. Top-level manifest metadata is not returned.
-    Bad versions/hashes/duplicates raise ValueError.
-    Missing fields, invalid JSON/gzip and I/O errors propagate. Reconstruct a
+    Bad versions or hashes, duplicate names or flux levels, and invalid collapse
+    operators raise ValueError. The collapse_operators field follows the same
+    rules as in write_frozen_manifest. Missing fields, invalid JSON/gzip and I/O
+    errors propagate. Reconstruct a
     caller-owned source separately with read_physical_input(record.physical).
     """
     payload = json.loads(gzip.decompress(path.read_bytes()))
@@ -328,6 +393,7 @@ def read_frozen_manifest(path: Path) -> tuple[FrozenRecord, ...]:
             raise ValueError(f"frozen manifest physical hash mismatch: {record.name}")
         if record.oracle_sha256 != stored["oracle_sha256"]:
             raise ValueError(f"frozen manifest oracle hash mismatch: {record.name}")
+        _validate_frozen_models(record.physical)
     return records
 
 
@@ -338,6 +404,7 @@ def write_frozen_input(path: Path, source: ModelSource, batch: TimelineBatch) ->
     and I/O errors propagate. No solver or Engine work runs.
     """
     physical = physical_input(source, batch)
+    _validate_frozen_models(physical)
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(
         canonical_json(

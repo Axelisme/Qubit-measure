@@ -68,7 +68,7 @@ from zcu_lab.v2.support.mux_sweep_cfg import (
     validate_participants,
 )
 from zcu_lab.v2.support.singleshot.classification_plot import (
-    plot_ge_classification_boundary,
+    plot_ge_classified_iq,
     share_ge_preparation_limits,
 )
 from zcu_lab.v2.support.singleshot.util import ge_signals_by_state
@@ -425,23 +425,29 @@ def _plot_confusion_matrix(
         layout="constrained",
     )
     g_iq, populations, e_iq, classifier = fig.axes
-    empty = np.empty(0, dtype=np.complex128)
-    plot_ge_iq_density(g_iq, g_signals, empty)
-    plot_ge_iq_density(e_iq, empty, e_signals)
-    for ax, label, color, (g, e, other) in (
-        (g_iq, "g preparation", "blue", confusion.g_classification),
-        (e_iq, "e preparation", "red", confusion.e_classification),
+    for ax, shots, preparation, (g, e, other) in (
+        (g_iq, g_signals, "g preparation", confusion.g_classification),
+        (e_iq, e_signals, "e preparation", confusion.e_classification),
     ):
-        plot_ge_classification_boundary(
-            ax, primary.g_center, primary.e_center, confusion.radius
+        plot_ge_classified_iq(
+            ax, shots, primary.g_center, primary.e_center, confusion.radius
         )
-        ax.set_title(f"Observed: g {g:.1%}, e {e:.1%}, Other {other:.1%}", fontsize=10)
+        ax.set_title(
+            f"{preparation}\nObserved: g {g:.1%}, e {e:.1%}, Other {other:.1%}",
+            fontsize=10,
+        )
         ax.set_xlabel("I (a.u.)", fontsize=10)
         ax.set_ylabel("Q (a.u.)", fontsize=10)
         ax.tick_params(labelsize=10)
         ax.grid(False)
         ax.legend(
-            handles=[Patch(color=color, label=label)],
+            handles=[
+                Patch(color="blue", label="g"),
+                Patch(color="red", label="e"),
+                Patch(color="0.5", label="Other"),
+            ],
+            title="Classified as",
+            title_fontsize=10,
             loc="lower left",
             bbox_to_anchor=(1, 0),
             frameon=False,
