@@ -35,7 +35,6 @@ from zcu_tools.program.v2.modules.readout import centroid3_classifier
 from zcu_tools.program.v2.modules.waveform import EnvelopeWaveformCfg
 
 from zcu_lab.v2.support.singleshot.centroid3_analysis import (
-    centroid3_title,
     correct_saved_centroid3,
 )
 
@@ -336,7 +335,8 @@ class StirapDetuningExp(Experiment[StirapDetuningResult, StirapDetuningCfg]):
     ) -> StirapDetuningSummary:
         """Plot saved g/e/f counts on the requested scan grid.
 
-        Require valid saved cfg and finite, nonempty counts at every point.
+        Require valid saved cfg and finite, nonempty counts with nonnegative
+        entries at every point.
         Plot classified fractions only when no saved centroid3 correction
         is usable. Otherwise also plot unclipped preparation-label estimates.
         Return applied matrix diagnostics and the corrected or classified
@@ -347,9 +347,13 @@ class StirapDetuningExp(Experiment[StirapDetuningResult, StirapDetuningCfg]):
         if cfg is None:
             raise ValueError("STIRAP analysis requires the saved run readout cfg")
         counts = source.result.counts
-        if not np.isfinite(counts).all() or np.any(counts.sum(axis=-1) <= 0):
+        if (
+            not np.isfinite(counts).all()
+            or np.any(counts < 0)
+            or np.any(counts.sum(axis=-1) <= 0)
+        ):
             raise ValueError(
-                "STIRAP detuning analysis requires finite, nonempty counts at every point"
+                "STIRAP detuning analysis requires finite, nonempty counts with nonnegative entries at every point"
             )
         classified = counts / counts.sum(axis=-1, keepdims=True)
         corrected, confusion = correct_saved_centroid3(cfg.readout, classified)
@@ -391,7 +395,17 @@ class StirapDetuningExp(Experiment[StirapDetuningResult, StirapDetuningCfg]):
                     ylabel="Stokes detuning (MHz)",
                     title=f"{label} {state} label",
                 )
-        headline = centroid3_title("STIRAP detuning", confusion)
+        if corrected is None:
+            headline = "STIRAP detuning · g → f · classified populations"
+        else:
+            condition = confusion.condition_number
+            minimum = confusion.minimum_singular_value
+            condition_text = "unavailable" if condition is None else f"{condition:.3g}"
+            minimum_text = "unavailable" if minimum is None else f"{minimum:.3g}"
+            headline = (
+                "STIRAP detuning · g → f · preparation-label fractions\n"
+                f"Readout condition number: {condition_text} · Minimum singular value: {minimum_text}"
+            )
         classified_peak = None
         if (
             peak_value is not None

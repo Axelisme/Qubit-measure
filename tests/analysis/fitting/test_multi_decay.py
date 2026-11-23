@@ -82,6 +82,33 @@ def test_equal_excited_population_amplitudes_choose_longer_and_log(caplog):
     assert "equal" in message.lower() and "longer" in message.lower()
 
 
+@pytest.mark.parametrize(
+    "rates",
+    [
+        TransitionRates(0, 0, 0, 0, 0, 0),
+        TransitionRates(1, 2, 0, 0, 0, 0),
+        TransitionRates(1, 0, 1, 0, 0, 0),  # Equal-rate one-way chain (Jordan block).
+    ],
+    ids=["no-transitions", "disconnected-other-state", "defective-chain"],
+)
+def test_excited_population_decay_times_requires_two_decaying_modes(
+    rates: TransitionRates,
+) -> None:
+    with pytest.raises(ValueError, match="two finite decaying modes"):
+        excited_population_decay_times(rates)
+
+
+def test_excited_population_decay_times_preserves_complex_mode_envelopes() -> None:
+    # g -> e -> other -> g at the same rate gives a complex-conjugate pair.
+    times = excited_population_decay_times(TransitionRates(1, 0, 1, 0, 0, 1))
+    assert (times.t1, times.t1_b) == pytest.approx((2 / 3, 2 / 3))
+
+
+def test_excited_population_decay_times_preserves_two_equal_real_modes() -> None:
+    times = excited_population_decay_times(TransitionRates(1, 1, 1, 1, 1, 1))
+    assert (times.t1, times.t1_b) == pytest.approx((1 / 3, 1 / 3))
+
+
 @pytest.mark.parametrize("dual", [False, True], ids=["single", "dual"])
 def test_prefix_fit_diagnostics_complete_on_agg(dual):
     previous_backend = plt.get_backend()

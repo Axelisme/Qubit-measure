@@ -1,6 +1,6 @@
 # zcu_tools.analysis.fitting
 
-**Last updated:** 2026-11-23，Singleshot T1 的衰減模命名與 hanger rational 初值
+**Last updated:** 2026-11-23，Singleshot T1 的衰減模與 joint fit 品質
 
 **讀者：** lab-author。擬合模型、數值輸入、結果與失敗契約速查。
 
@@ -235,7 +235,9 @@ callers不解包positional per-trace covariance。
 [`calc_lambdas`](multi_decay.py) 從 transition-rate matrix 取得衰減率與特徵向量。
 兩個非平穩模各有衰減時間，不是指定兩能階的 pair lifetime。
 [`excited_population_decay_times`](multi_decay.py) 以純 e 準備、觀測 e 布居的模振幅絕對值命名兩個時間。
-主模是 `t1`，副模是 `t1_b`，單位為 µs。振幅相等時取較長的時間為 `t1` 並記 log。
+主模是 `t1`，副模是 `t1_b`，單位為 µs。振幅相等時取較長的時間為 `t1` 並記 log。兩個獨立衰減模無法給出有限時間或振幅時，raise `ValueError`。
+
+[`summarize_excited_population_decay`](multi_decay.py) 接受既有 joint fit 與同一次擬合的 g／e 準備觀測值。它用兩組觀測和對應的預測、具名參數及同一 covariance 計算 `fit_quality`，與 `t1`、`t1_b` 一起回傳。它不重跑擬合或改用圖上的曲線取樣。
 兩種模型觀點的區別見 [ADR-0071〈Pair lifetime 與 manifold model T1〉](../../../../docs/adr/0071-coherence-units.md#pair-lifetime-與-manifold-model-t1)。
 
 `analysis.fitting.base.fit_func` 的 curve_fit optimizer 不收斂時 raise

@@ -27,7 +27,6 @@ from zcu_tools.program.v2.modules.waveform import EnvelopeWaveformCfg
 
 from zcu_lab.v2.support import live_errorbar
 from zcu_lab.v2.support.singleshot.centroid3_analysis import (
-    centroid3_title,
     centroid3_trace_sems,
     correct_saved_centroid3,
 )
@@ -125,6 +124,19 @@ class StirapDelayCfg(ConfigBase):
         if self.pump_ch == self.stokes_ch:
             raise ValueError("Pump and Stokes require different bound generators")
         return self
+
+
+def _population_title(confusion: Centroid3Summary) -> str:
+    if confusion.confusion_matrix is None:
+        return "STIRAP delay · g → f · classified populations"
+    condition = confusion.condition_number
+    minimum = confusion.minimum_singular_value
+    condition_text = "unavailable" if condition is None else f"{condition:.3g}"
+    minimum_text = "unavailable" if minimum is None else f"{minimum:.3g}"
+    return (
+        "STIRAP delay · g → f · preparation-label fractions\n"
+        f"Readout condition number: {condition_text} · Minimum singular value: {minimum_text}"
+    )
 
 
 class StirapDelayExp(Experiment[StirapDelayResult, StirapDelayCfg]):
@@ -270,7 +282,7 @@ class StirapDelayExp(Experiment[StirapDelayResult, StirapDelayCfg]):
             layout="constrained",
             figsize=(7, 7),
         )
-        fig.suptitle(centroid3_title("STIRAP delay", confusion))
+        fig.suptitle(_population_title(confusion))
         for ax, (values, label), sem in zip(fig.axes, series, sems, strict=True):
             for index, state in enumerate(STATE_LABELS):
                 ax.errorbar(

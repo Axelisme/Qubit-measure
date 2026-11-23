@@ -40,7 +40,6 @@ from zcu_tools.program.v2.modules.readout import centroid3_classifier
 
 from zcu_lab.v2.support import live_errorbar, live_heatmap
 from zcu_lab.v2.support.singleshot.centroid3_analysis import (
-    centroid3_title,
     centroid3_trace_sems,
     correct_saved_centroid3,
 )
@@ -361,7 +360,18 @@ class RamanGFExp(Experiment[RamanGFResult, RamanGFCfg]):
                 series,
                 centroid3_trace_sems(counts, confusion),
             )
-        figure.suptitle(centroid3_title("Raman spectroscopy", confusion))
+        if corrected is None:
+            headline = "Raman spectroscopy · g → f · classified populations"
+        else:
+            condition = confusion.condition_number
+            minimum = confusion.minimum_singular_value
+            condition_text = "unavailable" if condition is None else f"{condition:.3g}"
+            minimum_text = "unavailable" if minimum is None else f"{minimum:.3g}"
+            headline = (
+                "Raman spectroscopy · g → f · preparation-label fractions\n"
+                f"Readout condition number: {condition_text} · Minimum singular value: {minimum_text}"
+            )
+        figure.suptitle(headline)
         figure.show()
         return confusion
 

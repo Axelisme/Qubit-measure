@@ -304,7 +304,7 @@ MIST Freq／Power／PreFreq／FreqPower 回純 Result，分類校準屬 typed cf
 其 analyze 接對應 options，允許 cfg=None，只發布 fit。Power 支援 photon 軸與 log scale，FreqPower 只提供已實作的軸選項。
 單 sweep 與二維 Ground／Excited／Other 面板發布為 measurement，Population 表示 counts 正規化的三態比例。
 Singleshot T1／T1WithTone／T1WithToneSweep 用 typed sampling，analyze 允許 cfg=None。
-Tone 回 t1／t1_b，其餘只發布 fit，保留 transition-rate fitting、host rounds 與完整 outer-row 篩選。
+普通 T1 與固定 tone 用同一型別回傳 `t1`、`t1_b` 和同次 joint fit 的 `fit_quality`。Tone sweep 只發布 fit，保留 host rounds 與完整 outer-row 篩選。
 T1／Tone measurement 含 ground／excited traces，Tone sweep measurement 含六張 population 熱圖與兩張 current traces。
 格式細節見 [datafile README](../../lib/zcu_tools/datafile/README.md)。
 

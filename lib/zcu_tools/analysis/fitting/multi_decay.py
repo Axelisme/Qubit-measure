@@ -3,7 +3,8 @@ from __future__ import annotations
 import logging
 from collections.abc import Mapping
 from dataclasses import dataclass
-from math import isclose
+from fractions import Fraction
+from math import isclose, isfinite
 from typing import ClassVar
 
 import matplotlib.pyplot as plt
@@ -15,6 +16,7 @@ from scipy.optimize import nnls
 from tqdm.auto import tqdm
 
 from .base import FitResult, fit_func
+from .quality import FitQuality, compute_fit_quality
 from .shared import FitDiagnostics, FitTrace, ParameterSpec, SharedFitResult, fit_shared
 
 RATE_UPPER_GUESS_MULTIPLIER = 5.0
@@ -425,21 +427,51 @@ class ExcitedPopulationDecayTimes:
     t1_b: float
 
 
+def _validate_decay_modes(rates: TransitionRates) -> None:
+    values = rates.as_tuple()
+    if any(not isfinite(rate) or rate < 0.0 for rate in values):
+        raise ValueError("Transition rates must be finite and nonnegative")
+
+    # Restrict the generator to deviations with p_other = -p_g - p_e.
+    # Exact arithmetic distinguishes a zero or defective mode from nearby
+    # valid modes without a rate threshold or dependence on eigensolve roundoff.
+    ge, eg, eo, oe, go, og = (Fraction(float(rate)) for rate in values)
+    a, b = -(ge + go + og), eg - og
+    c, d = ge - oe, -(eg + eo + oe)
+    if a * d == b * c:
+        raise ValueError("Transition rates must yield two finite decaying modes")
+    if (a - d) ** 2 + 4 * b * c == 0 and not (a == d and b == c == 0):
+        raise ValueError(
+            "Transition rates must yield two finite decaying modes with independent eigenvectors"
+        )
+
+
 def excited_population_decay_times(
     rates: TransitionRates,
 ) -> ExcitedPopulationDecayTimes:
     """Name the two fitted decay times by their amplitudes for pure e preparation.
 
-    rates contains the g/e/other transition rates in µs⁻¹. Only the two
-    nonstationary modes enter the comparison. Log a tie and put the longer time
-    first. A complex-conjugate pair has two equal envelope decay times.
+    rates contains finite, nonnegative g/e/other transition rates in µs⁻¹.
+    Only the two nonstationary modes enter the comparison. Log a tie and put
+    the longer time first. A complex-conjugate pair has two equal envelope
+    decay times. Raise ValueError if two independent decaying modes cannot
+    be resolved with finite times and amplitudes.
     """
-    lambdas, vectors = calc_lambdas(rates)
-    _, slow_weight, fast_weight = clac_amplitude(vectors, p0g=0.0, p0e=1.0)
+    _validate_decay_modes(rates)
+    try:
+        lambdas, vectors = calc_lambdas(rates)
+        weights = np.linalg.solve(vectors, np.array([0.0, 1.0, 0.0]))
+    except np.linalg.LinAlgError as error:
+        raise ValueError("Could not resolve the two finite decaying modes") from error
+    slow_rate, fast_rate = float(lambdas[1]), float(lambdas[2])
+    if not (isfinite(slow_rate) and isfinite(fast_rate) and 0 < slow_rate <= fast_rate):
+        raise ValueError("Transition rates must yield two finite decaying modes")
+    slow, fast = 1.0 / slow_rate, 1.0 / fast_rate
     # Project each eigenmode onto the observed e population, not its full norm.
-    slow_amp = slow_weight * abs(vectors[1, 1])
-    fast_amp = fast_weight * abs(vectors[1, 2])
-    slow, fast = float(1.0 / lambdas[1]), float(1.0 / lambdas[2])
+    slow_amp = float(abs(weights[1])) * float(abs(vectors[1, 1]))
+    fast_amp = float(abs(weights[2])) * float(abs(vectors[1, 2]))
+    if not all(isfinite(value) for value in (slow, fast, slow_amp, fast_amp)):
+        raise ValueError("Could not resolve finite decay times and amplitudes")
     # Allow for roundoff from the eigensolve when comparing equal amplitudes.
     if isclose(slow_amp, fast_amp, rel_tol=1e-15):
         logger.info(
@@ -448,6 +480,47 @@ def excited_population_decay_times(
     elif fast_amp > slow_amp:
         return ExcitedPopulationDecayTimes(t1=fast, t1_b=slow)
     return ExcitedPopulationDecayTimes(t1=slow, t1_b=fast)
+
+
+@dataclass(frozen=True)
+class ExcitedPopulationDecayAnalysis:
+    """Compact diagnostics from one joint fit of g- and e-prepared populations.
+
+    t1 and t1_b are the decay times in µs of the larger and smaller absolute
+    e-to-e mode amplitudes. A tie assigns the longer time to t1. fit_quality
+    describes the joint fit's residuals and named optimizer parameter errors;
+    unavailable metrics are None with issues, not an acceptance decision.
+    """
+
+    t1: float
+    t1_b: float
+    fit_quality: FitQuality
+
+
+def summarize_excited_population_decay(
+    fit: DualTransitionRateFitResult,
+    populations1: NDArray[np.float64],
+    populations2: NDArray[np.float64],
+) -> ExcitedPopulationDecayAnalysis:
+    """Report the named decay times and diagnostics without refitting.
+
+    fit is the result of fit_dual_transition_rates on the supplied populations1
+    (g preparation) and populations2 (e preparation), using the very same
+    rows and units. Compare every observed g/e/other fraction to its prediction
+    in optimizer order. An unresolved decay mode or invalid fit inputs raise
+    ValueError. No diagnostics affect fit acceptance or writeback.
+    """
+    times = excited_population_decay_times(fit.rates)
+    values = fit.shared_fit.values
+    quality = compute_fit_quality(
+        np.concatenate((populations1.ravel(), populations2.ravel())),
+        np.concatenate(
+            (fit.fitted_populations1.ravel(), fit.fitted_populations2.ravel())
+        ),
+        {name: values[name] for name in fit.shared_fit.parameter_names},
+        fit.covariance,
+    )
+    return ExcitedPopulationDecayAnalysis(times.t1, times.t1_b, quality)
 
 
 def fit_with_vadality(

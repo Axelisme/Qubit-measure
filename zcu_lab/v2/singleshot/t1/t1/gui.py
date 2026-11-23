@@ -3,7 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import TypeAlias
 
-from zcu_tools.analysis.fitting.multi_decay import ExcitedPopulationDecayTimes
+from zcu_tools.analysis.fitting.multi_decay import ExcitedPopulationDecayAnalysis
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.gui.app.measure.adapter import (
@@ -23,12 +23,12 @@ SsT1RunResult: TypeAlias = RunRecord[T1Cfg, T1Result]
 
 def _analyze(
     req: AnalyzeRequest[SsT1RunResult, None], *, plots: Plots
-) -> ExcitedPopulationDecayTimes:
+) -> ExcitedPopulationDecayAnalysis:
     return T1Exp().analyze(req.run_result, T1AnalyzeOptions(), plots=plots)
 
 
 def _writeback(
-    req: WritebackRequest[SsT1RunResult, ExcitedPopulationDecayTimes],
+    req: WritebackRequest[SsT1RunResult, ExcitedPopulationDecayAnalysis],
 ) -> list[ParameterWriteback]:
     return [
         ParameterWriteback(

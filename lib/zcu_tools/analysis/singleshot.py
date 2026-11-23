@@ -479,8 +479,8 @@ class Centroid3Summary:
     no correction was applied. Rows are prepared g/e/f, columns measured g/e/f.
     TypeAdapter decodes finite numeric lists to a float64 (3, 3) matrix.
     condition_number is the 2-norm condition number (None if it exceeds
-    float64 range); minimum_singular_value is the smallest singular value.
-    No purity or fidelity is inferred.
+    float64 range); minimum_singular_value is the smallest singular value
+    (None if it exceeds float64 range). No purity or fidelity is inferred.
     """
 
     confusion_matrix: (
@@ -513,13 +513,19 @@ def _confusion_quality(matrix: NDArray[np.float64]) -> tuple[float, float]:
 def summarize_centroid3(result: Centroid3IQAnalysis) -> Centroid3Summary:
     """Retain saved-readout diagnostics without scan-sized fractions.
 
-    Copy the training confusion matrix and retain both computed diagnostics.
-    The complete result remains available to the caller for local plotting.
+    Copy the finite training confusion matrix and retain both computed
+    diagnostics, using None for values above float64 range. Malformed
+    calibration or negative/NaN diagnostics raise ValueError. The complete
+    result remains available to the caller for local plotting.
     """
+    matrix = _centroid3_confusion(result.confusion_matrix)
+    condition, minimum = result.condition_number, result.minimum_singular_value
+    if not (condition >= 0 and minimum >= 0):
+        raise ValueError("Confusion diagnostics must be nonnegative and not NaN")
     return Centroid3Summary(
-        confusion_matrix=result.confusion_matrix.copy(),
-        condition_number=result.condition_number,
-        minimum_singular_value=result.minimum_singular_value,
+        confusion_matrix=matrix.copy(),
+        condition_number=None if condition == np.inf else condition,
+        minimum_singular_value=None if minimum == np.inf else minimum,
     )
 
 

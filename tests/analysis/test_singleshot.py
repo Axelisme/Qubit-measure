@@ -1,5 +1,7 @@
 """Public IQ classification and population probability contracts."""
 
+import json
+
 import numpy as np
 import pytest
 from pydantic import JsonValue, TypeAdapter, ValidationError
@@ -171,6 +173,31 @@ def test_centroid3_analysis_summary_decodes_to_owner_arrays(
     np.testing.assert_array_equal(compact.confusion_matrix, result.confusion_matrix)
     assert compact.condition_number == result.condition_number
     assert compact.minimum_singular_value == result.minimum_singular_value
+
+
+def test_centroid3_summary_encodes_out_of_range_condition_as_json_null() -> None:
+    calibration = Centroid3Classifier(
+        g_center=0j,
+        e_center=2 + 0j,
+        f_center=4 + 0j,
+        confusion_matrix=[[1, 0, 0], [0, 1, 0], [0, 0, 1e-310]],
+    )
+    result = analyze_centroid3_populations(np.array([[1.0, 0.0, 0.0]]), calibration)
+    compact = summarize_centroid3(result)
+    payload = json.loads(
+        json.dumps(
+            {
+                "condition_number": compact.condition_number,
+                "minimum_singular_value": compact.minimum_singular_value,
+            },
+            allow_nan=False,
+        )
+    )
+
+    assert payload == {"condition_number": None, "minimum_singular_value": 1e-310}
+    np.testing.assert_array_equal(
+        compact.confusion_matrix, calibration.confusion_matrix
+    )
 
 
 @pytest.mark.parametrize(

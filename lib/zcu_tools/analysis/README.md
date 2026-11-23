@@ -231,5 +231,5 @@ Lab 的 saved-matrix reader 把奇異矩陣當成缺席並記一筆 warning。`c
 `analyze_centroid3_populations(populations, calibration)` 接收已正規化的 g/e/f fractions 與 caller 從 saved run cfg 取得的 `Centroid3Classifier`。它回傳 `Centroid3IQAnalysis`，包含 raw/unclipped corrected fractions、training confusion 副本及其 condition number/minimum singular value。它保留任意 scan axes，依 prepared rows／measured columns 解矩陣，singular matrix 拋出 LinAlgError。這個入口要求 caller 提供校準；Raman 和 STIRAP 的 saved-counts Analyze 另走可選校正，只共用數值 solver。
 `analyze_centroid3_iq(signals, calibration)` 先以 saved centers 分類 acquired IQ，再呼叫同一個 population 入口。兩個入口都不讀 library、Form、program 或硬體，不重新訓練校準，也不重宣告數值結果型別。
 完整的 `Centroid3IQAnalysis` 留給 caller 畫 raw／unclipped corrected fractions。
-`summarize_centroid3(result)` 產生 `Centroid3Summary`，複製 3×3 training confusion，保留 condition number 與 minimum singular value，不重算分析。摘要大小不隨 scan axes 或 shot 數成長，供實驗回傳與 recipe 解碼。
+`summarize_centroid3(result)` 產生 `Centroid3Summary`，複製 3×3 training confusion，保留 condition number 與 minimum singular value，不重算分析。超出 float64 範圍的診斷值記為 null，原分析結果不變。摘要大小不隨 scan axes 或 shot 數成長，供實驗回傳與 recipe 解碼。
 `Centroid3Summary.from_applied_matrix` 描述這次實際套用的矩陣。沒有校正時，矩陣、condition number 和最小 singular value 都是 null。TypeAdapter 可解碼 null 或重建有限的 float64 3×3 matrix；矩陣內的 null、非有限值與錯 dtype 或 shape 仍拒絕。Saved cfg 不變。

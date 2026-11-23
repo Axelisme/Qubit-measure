@@ -8,9 +8,12 @@ from numpy.typing import NDArray
 from pydantic import Field
 from pydantic.dataclasses import dataclass as pydantic_dataclass
 from zcu_tools.analysis.fitting.multi_decay import (
-    excited_population_decay_times,
+    ExcitedPopulationDecayAnalysis as T1WithToneAnalysis,
+)
+from zcu_tools.analysis.fitting.multi_decay import (
     fit_dual_transition_rates,
     model_func,
+    summarize_excited_population_decay,
 )
 from zcu_tools.analysis.shot_uncertainty import (
     class_probability_covariance,
@@ -72,19 +75,6 @@ class T1WithToneResult:
 class T1WithToneAnalyzeOptions:
     confusion_matrix: NDArray[np.float64] | None = None
     skip: int = Field(default=0, ge=0)
-
-
-@dataclass(frozen=True)
-class T1WithToneAnalysis:
-    """Two model decay times under the probe tone, which can be equal.
-
-    t1: Decay time in µs of the mode with the larger absolute amplitude in the
-        e-prepared e population. Equal amplitudes select the longer time.
-    t1_b: Decay time in µs of the other mode.
-    """
-
-    t1: float
-    t1_b: float
 
 
 def _sum_rounds(data: NDArray[np.float64]) -> NDArray[np.float64]:
@@ -357,9 +347,10 @@ class T1WithToneExp(Experiment[T1WithToneResult, T1WithToneCfg]):
         """Fit transitions between G, E and Other during the applied probe tone.
 
         Normalize source counts per row after options.skip, optionally corrected by the
-        supplied confusion matrix. Fit both I/pi preparations together, return
-        T1 and T1b in µs by their amplitudes in the e-prepared e population,
-        and publish the population curves to plots.
+        supplied confusion matrix read from the saved cfg. Fit both I/pi
+        preparations together and report the two times in µs, named by their
+        amplitudes in the e-prepared e population, and the joint fit quality.
+        Publish the population curves to plots.
         """
         # 1. Select durations and correct readout populations for both preparations.
         result = source.result
@@ -386,7 +377,9 @@ class T1WithToneExp(Experiment[T1WithToneResult, T1WithToneCfg]):
         # 2. Infer shared transition rates and their two decay times.
         fit_result = fit_dual_transition_rates(lens, populations1, populations2)
 
-        times = excited_population_decay_times(fit_result.rates)
+        summary = summarize_excited_population_decay(
+            fit_result, populations1, populations2
+        )
 
         # 3. Render counted fractions and physical decay fit on matching panels.
         fig, _ = plots.subplots(
@@ -404,7 +397,7 @@ class T1WithToneExp(Experiment[T1WithToneResult, T1WithToneCfg]):
         diagnostics = fit_result.diagnostics
         fig.suptitle(
             f"{title}\n"
-            f"T1 = {times.t1:.3g}, T1b = {times.t1_b:.3g} µs · "
+            f"T1 = {summary.t1:.3g}, T1b = {summary.t1_b:.3g} µs · "
             f"Reduced χ² = {diagnostics.reduced_chi_square:.3g}"
         )
         dense_time = np.linspace(float(lens.min()), float(lens.max()), 250)
@@ -429,4 +422,4 @@ class T1WithToneExp(Experiment[T1WithToneResult, T1WithToneCfg]):
             )
         fig.axes[2].legend(loc="best", fontsize=10)
 
-        return T1WithToneAnalysis(t1=times.t1, t1_b=times.t1_b)
+        return summary
