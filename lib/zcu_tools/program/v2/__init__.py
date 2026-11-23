@@ -39,6 +39,7 @@ from .modules import (
     WaveformCfgFactory,
 )
 from .mux_iq import mux_iq_sums
+from .output_scale import pulse_output_scale
 from .read_axes import (
     IQ,
     Classify,

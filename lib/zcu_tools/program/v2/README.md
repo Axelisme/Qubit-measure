@@ -1,6 +1,6 @@
 # program/v2
 
-**Last updated:** 2026-11-23，arb 寫回提案的 Spec 轉換、timeline 與模擬輸出契約連結
+**Last updated:** 2026-11-23，加入 pulse 表示的輸出尺度
 
 **讀者：** lab-author、framework-dev、agent。查找 V2 program 公開 API、型別契約與編譯規則的 owner。
 
@@ -135,6 +135,12 @@ FPGA sweep 的 `QickParam` 仍在編譯時由 `MyProgramV2.add_pulse` 檢查。�
 以及 `QickParam` 與 `TableParam` 運算後的 `minval()`／`maxval()`。
 超出 [-1, 1] 時拋出 `ValueError`，列出 pulse、generator、實際範圍與允許範圍。兩條路徑的診斷不保證相同。
 Mux 的 `declare_gen(mux_gains=...)` 不經此入口。Mux tone 的 gain 由 `MuxReadoutTone.gain` 的 `Gain` 欄位限制在 [-1, 1]，建構與賦值時都會驗證。
+
+## Pulse 表示的輸出尺度
+
+`from zcu_tools.program.v2 import pulse_output_scale`。`pulse_output_scale(soccfg, gen_ch, style)` 回傳同一個 raw gain 下，`const`、`flat_top` 或 `arb` 的理想滿幅峰值相對 DDS `const` 的比例。要在切換表示時維持峰值，將原 gain 乘原表示的比例，再除以新表示的比例。較低的 envelope 峰值、gain word 量化與脈衝場積不包含在這個比例內。
+
+依 [ADR-0072〈模組定位〉](../../../../docs/adr/0072-module-boundaries.md#模組定位)，QICK 的 pulse 表示與 generator 設定由 Program 解讀。這個 API 在編譯前使用。Simulation 的 [Output amplitude scale](simulation/README.md#output-amplitude-scale) 則解讀編譯後的 gain word 與實際 DAC samples，不重新套用表示比例。
 
 ## 呼叫端 YAML 編譯設定
 
