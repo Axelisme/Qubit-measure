@@ -231,7 +231,6 @@ def _start_live_view(
     ax.set(xlabel="Common CZ frequency (MHz)", ylabel="Conditional phase per CZ (deg)")
     format_conditional_phase_axis(ax, frequencies)
     (curve,) = ax.plot([], [], ".-", color="C0", label="Spectator e minus g")
-    status = ax.set_title("Waiting for shots")
     ax.legend(loc="upper center", bbox_to_anchor=(0.5, -0.16), ncols=2)
     fig.show()
 
@@ -248,7 +247,7 @@ def _start_live_view(
     contrast_ax.set_xlim(low - padding, high + padding)
     contrast_ax.xaxis.set_major_locator(MaxNLocator(nbins=5))
     contrast_ax.ticklabel_format(useOffset=False)
-    contrast_status = contrast_ax.set_title("Waiting for shots")
+    contrast_title = contrast_ax.title
     contrast_ax.set_prop_cycle(color=[to_rgba("C0"), to_rgba("C1")])
     contrast = live_errorbar(contrast_ax, num_lines=2)
     for line, state in zip(contrast_ax.lines, ("g", "e"), strict=True):
@@ -261,9 +260,9 @@ def _start_live_view(
         payload: tuple[int, CountQuadratures],
     ) -> tuple[Artist, ...]:
         n, pooled = payload
-        contrast_status.set_text(f"{n} CZ gates")
+        contrast_title.set_text(f"{n} CZ gates")
         return (
-            contrast_status,
+            contrast_title,
             *contrast.set(
                 frequencies,
                 np.hypot(pooled.values[:, 0], pooled.values[:, 1]),
@@ -276,11 +275,9 @@ def _start_live_view(
     phase_deg = np.full_like(frequencies, np.nan)
 
     @plots.on_plot_thread
-    def render(payload: tuple[NDArray[np.float64], str]) -> tuple[Artist, ...]:
-        angles_deg, progress = payload
+    def render(angles_deg: NDArray[np.float64]) -> tuple[Artist, ...]:
         curve.set_data(*conditional_phase_plot_data(frequencies, angles_deg))
-        status.set_text(progress)
-        return curve, status
+        return (curve,)
 
     def update_view(sums: NDArray[np.float64]) -> None:
         complete = update_complete_frequency_phases(
@@ -292,11 +289,7 @@ def _start_live_view(
                 gate_counts, *_fit_groups(sums, config)
             ),
         )
-        progress = (
-            f"{np.count_nonzero(processed)}/{len(frequencies)} frequencies acquired\n"
-            f"{np.count_nonzero(complete)}/{complete.size} projections at {expected_shots} shots"
-        )
-        render((phase_deg, progress))
+        render(phase_deg)
         # Show the latest train with a complete X/Y pair, without another slope fit.
         trains = np.flatnonzero(np.any(np.all(complete, axis=2), axis=(1, 2)))
         if trains.size:
