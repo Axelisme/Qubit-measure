@@ -283,15 +283,13 @@ class JointReadoutExp(Experiment[JointReadoutResult, JointReadoutCfg]):
         fig, _ = context.plots.subplots(
             num="measurement", nrows=2, ncols=2, figsize=(11, 8), layout="constrained"
         )
-        title = "Joint readout · Qubit1 / Qubit2 · Terminal distribution"
-        fig.suptitle(f"{title}\nRetained shots: 0 count total")
+        fig.suptitle("Joint readout · Qubit1 / Qubit2 · Terminal distribution")
         _draw_distributions(fig, np.full(SUMS_SHAPE, np.nan))
         fig.show()
 
         @context.plots.on_plot_thread
         def update_view(sums: NDArray[np.float64]) -> tuple[Figure, ...]:
             _draw_distributions(fig, sums)
-            fig.suptitle(f"{title}\nRetained shots: {np.nansum(sums):,.0f} count total")
             return (fig,)
 
         # 2. Accumulate classified rounds without normalizing away shot totals.

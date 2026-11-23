@@ -16,7 +16,7 @@ Each shot runs **optional Reset → I or Xπ on each qubit → terminal mux read
 
 Every retained shot counts once. The nearer circle center wins only if it is strictly nearer and the point is inside its radius; ties and points on or outside the radius are `other`. Other stays in the denominator and does not identify a leakage level.
 
-- **Run and Analyze distributions:** one panel per nominal preparation, nine terminal classes on the x-axis, probability on the y-axis. Hatching marks the outcome matching that panel's preparation. Live adds the total retained shots across all four panels. Analyze shows the same distribution at the end of the run. No retained shots means no probabilities.
+- **Run and Analyze distributions:** one panel per nominal preparation, nine terminal classes on the x-axis, probability on the y-axis. Hatching marks the outcome matching that panel's preparation. Analyze shows the same distribution at the end of the run. No retained shots means no probabilities.
 - **Error bars:** the sample standard deviation of the 0/1 class indicator divided by √N retained shots in that panel. This shot SEM is not single-shot spread, fit error, round spread or a confidence interval. Fewer than two shots gives no bar; a zero bar does not establish an impossible or certain event.
 - **Analyze matrix:** rows are nominal preparations and columns are terminal classes; the upper number is probability, the lower number is count, and the colorbar spans the probabilities in this matrix. For exact fractions, divide the count by its row total. Use the source Run ID and **Reps×Rounds** in Analyze; the count alone does not identify the Reset/filter settings. Use that run's saved cfg, not the current form.
 

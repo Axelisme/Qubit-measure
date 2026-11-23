@@ -13,7 +13,7 @@
 
 ## 讀 Run 與 Analyze 圖
 
-- **Ramsey contrast**：各 bias 比較 spectator I／Xπ 兩色的 `(N_e−N_g)/N_total` 對實際延遲。Other 單發記 0 並留在分母。棒是保留 shots 的樣本標準差除以 √N，少於兩發不畫；不是 fit 誤差或輪間散布。Run 的進度與保留數可區分無資料和零對比。
+- **Ramsey contrast**：各 bias 比較 spectator I／Xπ 兩色的 `(N_e−N_g)/N_total` 對實際延遲。Other 單發記 0 並留在分母。棒是保留 shots 的樣本標準差除以 √N，少於兩發不畫；不是 fit 誤差或輪間散布。無保留 shots 時不畫點；零對比時畫在 0。
 - **Analyze** 疊兩條衰減餘弦，任一分支缺必要延遲或無保留 shots 不給頻率。頻率旁的 ± 是 fit SE；R² 是解釋的起伏比例，normalized RMS 是殘差 RMS／實測峰谷差，相對頻率誤差是頻率 SE／|f|。不以這些量設自動門檻。
 - 多 bias 的 **Conditional fringe shift** 連接各 bias 獨立估出的 ζ。缺值斷線。棒為兩分支頻率 SE 平方和開根，不是 shot SEM。
 

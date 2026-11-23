@@ -152,7 +152,6 @@ class TwoToneExp(Experiment[TwoToneResult, TwotoneCfg]):
         fig, ax = context.plots.subplots(num="measurement", layout="constrained")
         fig.suptitle("Fast-flux spectroscopy · Qubit · Resonance map")
         ax.set(xlabel="Flux pulse gain (a.u.)", ylabel="Qubit probe frequency (MHz)")
-        ax.set_title(f"0/{gains.size * freqs.size} scan points with IQ")
         ax.grid(False)
         viewer = live_heatmap(ax)
         (image,) = viewer.set(gains, freqs, np.full((gains.size, freqs.size), np.nan))
@@ -161,9 +160,7 @@ class TwoToneExp(Experiment[TwoToneResult, TwotoneCfg]):
         @context.plots.on_plot_thread
         def update(data: NDArray[np.complex128]) -> Iterable[Artist]:
             """Display available IQ on the scan grid without changing the buffer."""
-            count = np.count_nonzero(np.isfinite(data))
-            title = ax.set_title(f"{count}/{data.size} scan points with IQ")
-            return (*viewer.set(gains, freqs, twotone_signal2real(data)), title)
+            return viewer.set(gains, freqs, twotone_signal2real(data))
 
         fig.show()
         signals_buffer = SignalBuffer(

@@ -163,7 +163,6 @@ class FluxExp(Experiment[FluxResult, FluxCfg]):
         ax.ticklabel_format(axis="x", style="plain", useOffset=False)
         line = live_line(ax)
         ax.lines[0].set(marker="o", markersize=4, color="C0")
-        retained_shots = np.zeros(len(jpa_fluxs), dtype=np.int64)
 
         @context.plots.on_plot_thread
         def update(data: NDArray[np.float64]) -> Iterable[Artist]:
@@ -172,11 +171,7 @@ class FluxExp(Experiment[FluxResult, FluxCfg]):
             Read the scan-shaped data without changing it. Update the live
             artists over the prepared coordinates; plot errors propagate.
             """
-            progress = ax.set_title(
-                f"{title}\n{np.count_nonzero(np.isfinite(data))}/{len(jpa_fluxs)} settings sampled"
-                f" · {retained_shots.sum():,} retained shots"
-            )
-            return (*line.set(jpa_fluxs, np.abs(data)), progress)
+            return line.set(jpa_fluxs, np.abs(data))
 
         fig.show()
         signals_buffer = SignalBuffer(
@@ -185,11 +180,12 @@ class FluxExp(Experiment[FluxResult, FluxCfg]):
             on_update=update,
         )
 
+        def score(sums: NDArray[np.float64]) -> NDArray[np.float64]:
+            return snr_as_signal(sums, skew_penalty=cfg.skew_penalty)
+
         # 2. Move the external flux bias before each readout comparison.
         with Schedule(signals_buffer, scope=context.scope) as sched:
-            for index, (jpa_flux, step) in enumerate(
-                sched.scan("JPA flux bias", jpa_fluxs.tolist())
-            ):
+            for jpa_flux, step in sched.scan("JPA flux bias", jpa_fluxs.tolist()):
                 if cfg.jpa_flux_dev is not None:
                     set_flux(
                         context.devices[cfg.jpa_flux_dev],
@@ -218,13 +214,6 @@ class FluxExp(Experiment[FluxResult, FluxCfg]):
                 builder.delay_by_timeline()
                 builder.emit(Readout("readout", cfg.readout))
                 prog = builder.build()
-
-                def score(
-                    sums: NDArray[np.float64], *, point: int = index
-                ) -> NDArray[np.float64]:
-                    """Track cumulative retained shots from both preparations and return SNR."""
-                    retained_shots[point] = int(sums[..., 0].sum())
-                    return snr_as_signal(sums, skew_penalty=cfg.skew_penalty)
 
                 step.run_acquire_summed(
                     prog,

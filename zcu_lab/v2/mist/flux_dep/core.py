@@ -207,7 +207,6 @@ class FluxDepExp(Experiment[FluxDepResult, FluxDepCfg]):
         heat_ax.set(
             xlabel=_flux_label(cfg),
             ylabel=_GAIN_LABEL,
-            title=f"0/{len(values)} bias rows with IQ",
         )
         line_ax.set(
             xlabel=_GAIN_LABEL,
@@ -239,18 +238,14 @@ class FluxDepExp(Experiment[FluxDepResult, FluxDepCfg]):
             history = np.full((_HISTORY, len(gains)), np.nan)
             for offset, index in enumerate(valid[-_HISTORY:][::-1]):
                 history[-offset - 1] = real[index]
-            progress = heat_ax.set_title(
-                f"{valid.size}/{len(values)} bias rows with IQ"
-            )
             title = line_ax.set_title(
                 f"Latest: {values[current]:.4g} {cfg.flux_unit} (blue)"
                 if current >= 0
-                else "Waiting for a bias row"
+                else "Latest bias row and recent rows"
             )
             return (
                 *heatmap.set(values, gains, real),
                 *lines.set(gains, history),
-                progress,
                 title,
             )
 

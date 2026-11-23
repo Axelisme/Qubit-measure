@@ -230,37 +230,31 @@ def _live_return_map(
     plots: Plots,
     durations: NDArray[np.float64],
     coordinates: NDArray[np.float64],
-) -> tuple[Axes, QuadMesh]:
+) -> QuadMesh:
     """Show an empty return heatmap with the same axes and color map as Analyze."""
     fig, ax = plots.subplots(num="measurement", layout="constrained")
     image = _return_map(
         ax, durations, coordinates, np.full((len(coordinates), len(durations)), np.nan)
     )
-    ax.set_title(f"{_MAP_TITLE}\nWaiting for shots")
+    ax.set_title(_MAP_TITLE)
     fig.colorbar(image, ax=ax, label=_RETURN_LABEL)
     fig.show()
-    return ax, image
+    return image
 
 
 def _update_return_map(
-    ax: Axes, image: QuadMesh, counts: NDArray[np.float64]
+    image: QuadMesh, counts: NDArray[np.float64]
 ) -> tuple[Artist, ...]:
-    """Display measured pixels and the finite points' retained shot range."""
+    """Display measured probabilities and scale color to the finite pixels."""
     probabilities = joint_probabilities(counts)[..., 0, 0]
     image.set_array(probabilities)
     valid = np.isfinite(probabilities)
-    totals = counts.sum(axis=(-2, -1))
-    measured = totals[np.isfinite(totals)]
     if valid.any():
         lo, hi = float(probabilities[valid].min()), float(probabilities[valid].max())
         if lo == hi:
             lo, hi = (max(0, lo - 0.01), min(1, hi + 0.01))
         image.set_clim(lo, hi)
-    if measured.size:
-        ax.set_title(
-            f"{_MAP_TITLE}\n{measured.size}/{totals.size} points · {int(measured.min())}–{int(measured.max())} retained shots/point"
-        )
-    return image, ax.title
+    return (image,)
 
 
 class ChevronExp(Experiment[ChevronResult, ChevronCfg]):
@@ -326,11 +320,11 @@ class ChevronExp(Experiment[ChevronResult, ChevronCfg]):
         coordinates = sweep2array(config.frequency)
         durations = sweep2array(config.duration)
         # 2. Show terminal return as a heatmap on the two sweep axes.
-        ax, image = _live_return_map(context.plots, durations, coordinates)
+        image = _live_return_map(context.plots, durations, coordinates)
 
         @context.plots.on_plot_thread
         def update_view(sums: NDArray[np.float64]) -> tuple[Artist, ...]:
-            return _update_return_map(ax, image, sums)
+            return _update_return_map(image, sums)
 
         class_shape = (3, 3)
         shape = (len(coordinates), len(durations), *class_shape)
@@ -398,11 +392,11 @@ class ChevronExp(Experiment[ChevronResult, ChevronCfg]):
         coordinates = sweep2array(config.frequency)
         durations = sweep2array(config.duration)
         # 2. Show terminal return as a heatmap on the two sweep axes.
-        ax, image = _live_return_map(context.plots, durations, coordinates)
+        image = _live_return_map(context.plots, durations, coordinates)
 
         @context.plots.on_plot_thread
         def update_view(sums: NDArray[np.float64]) -> tuple[Artist, ...]:
-            return _update_return_map(ax, image, sums.swapaxes(0, 1))
+            return _update_return_map(image, sums.swapaxes(0, 1))
 
         class_shape = (3, 3)
         shape = (len(durations), len(coordinates), *class_shape)

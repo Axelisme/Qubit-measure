@@ -138,9 +138,11 @@ Data 縮圖用來選圖。`View figure` 在 Data 頁把同一張圖等比放入�
 - 壞例：存檔 PNG 的 colorbar 擠到標題，或 legend 遮住量測資料。
 - 好例：Ding 圖 5-7（頁 150）的四分支分成 2×2 panel。採用這種分組後，在固定幾何的 PNG 核對字級、tick、legend 與資料位置。
 
-### R8：圖型對應資料，liveplot 標明進度
+<a id="r8圖型對應資料liveplot-標明進度"></a>
 
-離散結果分布用長條圖，二維掃描用熱圖。liveplot 讓讀者看出哪些部分已取完、累積多少 shots、目前估計值。
+### R8：圖型對應資料
+
+離散結果分布用長條圖，二維掃描用熱圖。Live 圖顯示目前的量測結果，不畫進度計數；取數進度由 GUI progress bar 顯示。
 
 Run 和 Analyze 的一維掃描用相同規則：沒有擬合曲線，就用折線連接量測點；有擬合曲線，量測資料只畫點和可用的誤差棒，只有擬合曲線用實線。類別軸（例如 gg、ge、eg、ee 或 AllXY gate 名稱）的量測點不連線。這條規則不適用於 IQ 散點和二維圖。
 
@@ -151,8 +153,8 @@ Wrapped phase 的折線只連掃描順序中相鄰的有效點。圖上角度相
 
 曲線圖沿用[共用樣式](../../lib/zcu_tools/plotting/experiment.mplstyle)的 `axes.grid: True`，不另外呼叫 `grid()`。影像與熱圖在 liveplot 和 Analyze 都明確呼叫 `grid(False)`。
 
-- 壞例：用折線連接 gg、ge、eg、ee，讓離散分類看起來像連續掃描，也沒顯示取數是否完成。
-- 好例（本地示例）：joint readout 用四種準備態 × 四種結果的分組長條圖，顯示已取資料的分布，liveplot 標題寫累積 shots。二維掃描則可參考 Ding 圖 5-8(b)（頁 151）的頻率 × 長度熱圖。
+- 壞例：用折線連接 gg、ge、eg、ee，讓離散分類看起來像連續掃描。
+- 好例（本地示例）：joint readout 用長條圖顯示終端結果分布，四種名目準備各有一格。二維掃描則可參考 Ding 圖 5-8(b)（頁 151）的頻率 × 長度熱圖。
 
 ### R9：liveplot 與 Analyze 盡量一致
 
@@ -164,7 +166,7 @@ GUI 依 adapter 的 [capability](gui-contracts.md#capability-宣告與實作) �
 
 ### R10：圖放理論重點，採集設定放摘要
 
-圖上放物理量、模型、擬合結果與判讀所需的標註。不要把 run 身分或採集設定印在圖上。存檔路徑已有實驗名與 run id。除了定位 run 的實驗名與 run id，GUI 與 MCP 的可見 Analyze 摘要只由 adapter 補上該次 cfg 的 Reps×Rounds，以及實驗已回傳的實際施加值，例如 detune。不列完成輪數、是否提前停或 shot 數。liveplot 的進度仍按 R8 顯示。
+圖上放物理量、模型、擬合結果與判讀所需的標註。不要把 run 身分或採集設定印在圖上。存檔路徑已有實驗名與 run id。除了定位 run 的實驗名與 run id，GUI 與 MCP 的可見 Analyze 摘要只由 adapter 補上該次 cfg 的 Reps×Rounds，以及實驗已回傳的實際施加值，例如 detune。不列完成輪數、是否提前停或 shot 數。
 
 Run 身分與採集摘要是呈現資料，不寫進原生結果的 JSON `summary`，也不擴充 `RunMetadata`。各實驗依需要決定是否在 Result 保存實際施加值。MCP 的 Analyze 回覆沿用 [RPC handler 提供的 `presentation`](../../lib/zcu_tools/gui/app/measure/remote/handlers/analysis.py)，獨立傳遞來源 run id。GUI 與 MCP 共用的摘要讀取契約見 [Analysis presentation](../../lib/zcu_tools/gui/app/measure/remote/README.md#analysis-presentation)。原生結果欄位的命名見 [S2](#s2report-的數值沿用-analyze-摘要名稱)。
 
