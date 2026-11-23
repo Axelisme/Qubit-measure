@@ -24,8 +24,7 @@ Device 層的 `device_operation` 是共同的活動記錄入口。Driver 在其�
 
 ## GUI 觀察與標記
 
-GUI 在主 thread 定時讀取活動快照，初始約每 200 ms。Device dialog 擁有「運作中」標記的呈現與時序。初始做法在操作中或最後結束後約 1 秒保持標記，合併後更新。連續快速操作保持穩定標記，停手後熄滅。後續 UI/UX 打磨由 GUI 負責，不改變 device 的狀態來源。
-使用者 2026-11-18 過目此條：「我大概看了一遍，基本上是没问题」，並說明這類規則「并不算是裁决，而算是建议」；它是 agent 的選擇，引用時視為僅供參考的先例。
+Device dialog 的活動標記與輪詢時序見 [共用 session UI README](../../lib/zcu_tools/gui/session/ui/README.md#裝置活動標記)。
 
 Dialog Apply、experiment、MCP 與 workflow 經由公開 driver 操作時，都使用相同的活動狀態。GUI 不解析 cfg 預查裝置名稱，也不把全部已連線儀器一律標為操作中。標記不是 driver busy admission 或 operation lease，呼叫者不能用它決定能否操作硬體。
 
@@ -45,10 +44,7 @@ Dialog Apply、experiment、MCP 與 workflow 經由公開 driver 操作時，都
 
 ## FakeDevice 的 address 身分
 
-2026-10-19，使用者裁定：「FakeDevice採用以address為分辨的單例模式」，並指定「存在FakeDevice的類容器裡」。只有顯式 address 進入 process 共享的 class 容器。同 address 取回同一個 driver，保留模擬綁定、單位與設定。省略 address 的 anonymous instance 沒有可比較的身分，每次獨立建立，不進容器。真實 driver 不受影響。
-
-使用者說明上限「可以很大」，再修正「可能也不丟了，創建時報錯」。容器最多保留 1024 個 addressed instances，僅防止無限增長。滿額時拒絕新 address，既有 address 仍可取回，不淘汰。測試使用公開 isolation scope，結束時清空測試建立的容器並還原原 scope。
-使用者 2026-11-18 過目此條：「我大概看了一遍，基本上是没问题」，並說明這類規則「并不算是裁决，而算是建议」；它是 agent 的選擇，引用時視為僅供參考的先例。
+FakeDevice 的實例身分、容器上限與測試隔離見 [Device README](../../lib/zcu_tools/device/README.md#fakedevice-的-address-身分)。
 
 單名稱 registry 規則維持不變。同 address 的 driver 已連線時，第二個名稱的連線明確失敗。先斷開舊名再用新名連線，則取回同一實例。FTF source 以 source name 作 address，數值 owner 保留原 source 身分，不隨 GUI registry 改名。SimulationEnvironment 只保存可建模的 address metadata；composition 注入其 lookup，未知 type 或 address 明確失敗，不建立無作用的 FakeDevice。
 

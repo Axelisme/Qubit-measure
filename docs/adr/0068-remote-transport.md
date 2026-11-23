@@ -24,7 +24,7 @@ MCP 的 GUI module 名稱由 `mcp_servers/<app>.py` 注入 lib server 的 `gui_m
 
 2026-10-12 使用者裁決 RPC 與 MCP 的分工：「前者(MCP)面向agent，設計上要考慮agent使用負擔，後者(RPC)是控制接口，設計上要簡單基礎通用。前者透過組裝後者來兼顧雙方需求」。Fluxdep 工具直接表達階段意圖，open、context id 與 search token 只在單次組裝內使用。
 
-Auto Align 與 search 中途沒有 agent 可影響結果的判斷，因此 MCP 輪詢到結束才回，不設整體等待上限。等待時同一 stdio server 不處理其他呼叫。GUI 仍持有 context lifetime、operation、完整 inputs、recorded quality 與 fit freshness。GUI Show 和 MCP 使用同一 fit renderer；MCP 不回過期結果的疊圖，GUI 仍顯示過期與原因。這是 fluxdep 的局部契約，不把 fit 依賴模型升為所有 app 的規則。跨 app 的 MCP 設計原則見 [[0075]] 的 MCP 設計原則。
+Fluxdep 的 Auto Align／search 等待策略見 [Fluxdep README](../../lib/zcu_tools/gui/app/fluxdep/README.md#auto-align-與-search-的等待)。
 
 同機跨程序的 MCP 使用 socket；同機並不等於同程序呼叫。GUI 可停用 remote socket，GUI core 不依賴 MCP。MCP `connect` 可接上現有 GUI，或經明確選項啟動 GUI；MCP server 結束只斷開連線，不關閉 GUI。
 
@@ -46,7 +46,9 @@ RPC `device.setup(name, cfg)` 只收完整 Info constructor cfg，不合併 cach
 
 固定 MCP `device_setup(name, cfg)` 接 partial patch。它讀 before Info，合併完整候選後送一次 RPC。Before Info 有 value_unit 欄位且 patch 含 value 時，caller 必須同時明填 value_unit，不借 before unit 或 constructor 推導代替意圖。這項規則依 Info 欄位判斷，不比對儀器名稱，FakeDevice 同樣適用。只改 output／rampstep 不需 unit。其他 model 規則仍由 RPC 驗證，不在 MCP 建第二份 validator。
 
-工具沒有 timeout 參數，最多等待 300 秒，逾時回 running 與已知 handle，不取消，caller 用 `wait(op)` 續等。回覆保留 pre_read、start、wait、post_read、native operation 和 before／after。Requested.cfg 在 before 讀取並完成合併前為 null，之後是完整候選，不保證 model 接受。Before.info 為 null 時 pre_read failed；有 Info 但 disconnected 時沿 service 回 start failed，保完整候選與 before，after 為 null。工具不做 verification、單位換算、重連、retry 或 rollback。
+`device_setup` 的等待時限與續等方式見 [Measure MCP README](../../lib/zcu_tools/mcp/measure/README.md#device-setup-的等待)。
+
+回覆保留 pre_read、start、wait、post_read、native operation 和 before／after。Requested.cfg 在 before 讀取並完成合併前為 null，之後是完整候選，不保證 model 接受。Before.info 為 null 時 pre_read failed；有 Info 但 disconnected 時沿 service 回 start failed，保完整候選與 before，after 為 null。工具不做 verification、單位換算、重連、retry 或 rollback。
 使用者 2026-11-18 過目此條：「我大概看了一遍，基本上是没问题」，並說明這類規則「并不算是裁决，而算是建议」；它是 agent 的選擇，引用時視為僅供參考的先例。
 
 握手版本以 [wire_version.py](../../lib/zcu_tools/gui/app/measure/remote/wire_version.py) 的 WIRE_VERSION／GUI_VERSION 與 [server.py](../../lib/zcu_tools/mcp/measure/server.py) 的 MCP_VERSION 宣告為準。只有 wire 版本用於相容比對，其餘是程式版本投影。

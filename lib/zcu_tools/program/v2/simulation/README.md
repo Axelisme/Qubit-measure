@@ -1,6 +1,6 @@
 # Explicit acquisition environments
 
-**Last updated:** 2026-11-23, round pacing, acquisition routing and deferred raw shots
+**Last updated:** 2026-11-23, round pacing, acquisition routing, deferred raw shots and mock clock example
 
 **讀者：** framework-dev。模擬 acquisition 的 request、round 與 raw source 契約。
 
@@ -595,3 +595,9 @@ boundary while allowing the entry to delegate internally. The
 `zcu_tools.simulators`, including from this package. `experiment.simulation`
 composes program and device capabilities. Numeric backends depend on core records,
 not on program or GUI owners.
+
+### Mock clock example
+
+Mock 時鐘的公共頻率為 43008 MHz。對應的 tProc、fabric、ADC、envelope 週期為 100、112、140、7 ticks。ADC output 為 76.8 MHz 的 FTF 配置，其 ADC 週期為 560 ticks。
+
+這些數字只適用於這些 mock 配置，不是 request 的固定參數。公共時基的計算與適用範圍見 [ADR-0084](../../../../../docs/adr/0084-simulation-integer-time-base.md#時間契約)。

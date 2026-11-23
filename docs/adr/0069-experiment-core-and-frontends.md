@@ -350,9 +350,7 @@ Notebook 不新增 generation／request identity 的發布限制。較早啟動�
 
 ### G6：Notebook 互動前端
 
-Notebook 互動分析直接使用 Notebook widget，不增加前端可用性 preflight 或 backend 偵測。建立或使用 widget 的實際錯誤正常傳遞，不自動降級到 inline、無頭分析或自動 Done。
-
-同步分析的不呈現繪圖模式維持不變。它不是無頭互動工作流。
+Notebook 互動前端的局部規則見 [`notebook/adapter.py`](../../lib/zcu_tools/notebook/adapter.py) 的「Notebook interactive analysis」註解。
 
 ### G7：GUI adapters
 
