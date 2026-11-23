@@ -1,4 +1,4 @@
-"""Preparation density colors for GE IQ clouds."""
+"""Density colors for GE preparation and classification IQ clouds."""
 
 from collections.abc import Sequence
 
@@ -16,27 +16,29 @@ def plot_ge_iq_density(
     excited: NDArray[np.complex128],
     *,
     image: AxesImage | None = None,
+    other: NDArray[np.complex128] | None = None,
 ) -> AxesImage:
-    """Draw one equal-scale image of two 1-D complex IQ clouds on ax.
+    """Draw an equal-scale density image of 1-D complex IQ clouds on ax.
 
-    Use the input IQ coordinates, ignoring nonfinite shots. Blend blue (ground)
-    and red (excited) in each bin, weighting each preparation by its share of
-    the bin count raised to the sixth power, then normalizing the weights.
-    A tie is purple. Pass an empty cloud for the other preparation to show
-    just one color. Opacity rises with the log of the combined count; empty
-    bins and frames without finite shots are transparent. Major ticks follow
-    the displayed IQ box size so narrow axes can use fewer labels.
+    Pass g/e preparations for Analyze or g/e classified shots with the optional
+    Other class for Post. Use the input IQ coordinates, ignoring nonfinite shots.
+    Blend blue (g), red (e) and gray (Other) in each bin using the sixth powers
+    of the groups' counts, normalized to sum to one. Equal g/e counts without
+    Other give purple. Pass an empty cloud for any group with no shots.
+    Opacity rises with the log of the combined count; empty bins and frames
+    without finite shots are transparent. Major ticks follow the IQ box size.
 
     To update a dedicated live IQ axes, pass its previously returned image.
     Reuse that artist and rescale from the current frame if autoscaling is on.
     Call on the plot owner thread after presenting ax; no refresh is scheduled
     here. A non-1-D cloud or a detached or foreign image raises ValueError.
     """
-    if ground.ndim != 1 or excited.ndim != 1:
+    clouds = (ground, excited) if other is None else (ground, excited, other)
+    if any(cloud.ndim != 1 for cloud in clouds):
         raise ValueError("GE IQ clouds must be one-dimensional")
     if image is not None and image.axes is not ax:
         raise ValueError("GE IQ image must be attached to the supplied axes")
-    rgba, extent = _density_frame(ground, excited)
+    rgba, extent = _density_frame(clouds)
     if image is not None:
         image.set_data(rgba)
         image.set_extent(extent)
@@ -77,26 +79,34 @@ class _RawIQTickLocator(AutoLocator):
 
 
 def _density_frame(
-    ground: NDArray[np.complex128], excited: NDArray[np.complex128]
+    clouds: tuple[NDArray[np.complex128], ...],
 ) -> tuple[NDArray[np.float64], tuple[float, float, float, float]]:
-    ground, excited = ground[np.isfinite(ground)], excited[np.isfinite(excited)]
-    shots = np.concatenate((ground, excited))
+    finite = tuple(cloud[np.isfinite(cloud)] for cloud in clouds)
+    shots = np.concatenate(finite)
     if not shots.size:
         return np.zeros((1, 1, 4)), (0, 1, 0, 1)
 
-    # Both preparations must vote on the same grid, including constant I or Q.
+    # All groups vote on the same grid, including constant I or Q.
     i_edges = np.histogram_bin_edges(shots.real, bins=90)
     q_edges = np.histogram_bin_edges(shots.imag, bins=90)
-    g, _, _ = np.histogram2d(ground.real, ground.imag, bins=(i_edges, q_edges))
-    e, _, _ = np.histogram2d(excited.real, excited.imag, bins=(i_edges, q_edges))
-    total = g + e
-    # Normalizing the sixth powers cancels the shared per-bin total.
-    g_weight, e_weight = g**6, e**6
-    red = np.divide(
-        e_weight, g_weight + e_weight, out=np.full_like(total, 0.5), where=total > 0
+    counts = np.stack(
+        [
+            np.histogram2d(cloud.real, cloud.imag, bins=(i_edges, q_edges))[0]
+            for cloud in finite
+        ]
     )
+    total = counts.sum(axis=0)
+    # Normalizing the sixth powers cancels the shared per-bin total.
+    weights = counts**6
+    weight_sum = weights.sum(axis=0)
+    red = np.divide(
+        weights[1], weight_sum, out=np.full_like(total, 0.5), where=total > 0
+    )
+    gray = np.zeros_like(total)
+    if len(clouds) == 3:
+        np.divide(0.5 * weights[2], weight_sum, out=gray, where=total > 0)
     opacity = np.where(
         total > 0, 0.15 + 0.85 * np.log1p(total) / np.log1p(total.max()), 0.0
     )
-    rgba = np.stack((red, np.zeros_like(red), 1.0 - red, opacity), axis=-1)
+    rgba = np.stack((red + gray, gray, 1.0 - red - gray, opacity), axis=-1)
     return rgba.transpose(1, 0, 2), (i_edges[0], i_edges[-1], q_edges[0], q_edges[-1])

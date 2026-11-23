@@ -63,7 +63,7 @@ def make_form(ctx: FormContext) -> Form[ConstructivePhaseCfg]:
             "x180_qubit2": Slot("$qubit2.module.x180", copy=True),
             "readout": readout,
             "drive": drive,
-            "relative_phase": Range(-180.0, 180.0, expts=25),
+            "relative_phase": Range(-180.0, 180.0, expts=51),
             "duration": Range(None, None, expts=101),
         },
     ).with_seed_metadata(mux_readout_seed_metadata(readout))
