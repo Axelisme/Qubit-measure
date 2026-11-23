@@ -70,10 +70,13 @@ constant reduced flux, without event metadata. It is not valid for a driven
 flux source or passive tail. Neither record performs evolution.
 
 `collapse_operators` combines multilevel relaxation with CP flux/residual-photon
-pure dephasing. Slopes/pulls use rad/us in the pure-rate formulas, then rates
-convert to 1/ns. No second T1/2 is added. Flux absolute-distance and photon
-Lorentzian Gram kernels define diagonal Lindblad operators. This models an
-exponential echo characteristic rate, not complete 1/f noise or Floquet baths.
+pure dephasing. For relaxation, [`baths.py::jump_operators`](../../../simulate/baths.py)
+maps each nonzero directional rate `[target, source]` to a rank-one jump in the
+joint model's fixed coordinates. Slopes/pulls use rad/us in the pure-rate
+formulas, then rates convert to 1/ns. No second T1/2 is added. Flux
+absolute-distance and photon Lorentzian Gram kernels define diagonal
+Lindblad operators. This models an exponential echo characteristic rate, not
+complete 1/f noise or Floquet baths.
 Resonator thermal occupation enters residual photon dephasing. `_bath_rates`
 uses circuit loss channels and adds no resonator-induced Purcell transition
 rates. `fixed_numeric_model` stores the collapse operators alongside static H
@@ -162,7 +165,8 @@ has the largest span-start population; exact ties select the lowest DC energy.
 Every conditional branch begins with the same inherited field at that span's
 absolute start time. ADC owns propagation and second-moment integration. This
 single-branch memory is semiclassical and does not describe quantum cavity-state
-entanglement. Experiment composes it with evolution's continued DC densities.
+entanglement. See [FTF environment: Cavity drives](../environment/README.md#cavity-drives)
+for the handoff of span shifts and continuation densities to evolution.
 `advance` gets second moments and all-state endpoint fields from ADC in both
 projective and non-projective continuation. Pass a `CavityAverageCache` as
 `cache` to reuse exact flat span results. Without a cache, `advance` does not

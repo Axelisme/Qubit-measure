@@ -378,6 +378,8 @@ solves the rest as one batch at the selected dimension. The smaller verification
 never supplies output. Later rounds solve all points together at the selected
 dimension. FTF pads smaller densities with zero rows and columns before ADC.
 Isolated pilot solves do not add to the production source's routing history.
+See [Preparation reuse](#preparation-reuse) for when a later acquire can reuse
+the selected dimension independently of the prepared result.
 
 ### Preparation reuse
 
@@ -400,9 +402,10 @@ retires the memo even when telemetry and debug capture are both disabled.
 It runs finish diagnostics only if either is enabled. A preparation cache hit
 in a new acquire starts without a raw plan.
 A later acquire can reuse either a pilot round's split preparation or a full-batch
-preparation. Both retain the selected N. A separate 256-entry LRU remembers N for
-that same content after the preparation is evicted. On a preparation miss with a
-remembered N, FTF skips the pilot and evolves the full batch at N.
+preparation. Both retain the N chosen by [Dimension selection](#dimension-selection).
+A separate 256-entry LRU remembers N for that same content after the
+preparation is evicted. On a preparation miss with a remembered N, FTF skips
+the pilot and evolves the full batch at N.
 The key still reads full current C1 content, layout, mode, reps and readout
 values, including absolute phase origins. Physical settings, snapshot or numeric
 changes, engine replacement, failed preparation and close clear both caches.
@@ -455,10 +458,13 @@ the source-owned latest facts and rejects calls after close.
 `plan_template` requires the originating request's `time_base` keyword.
 It converts QICK ticks/MHz/degrees into ns/GHz/radians with point arrays.
 `TimeBase.ns` owns exact nearest-2-ns rounding and converts complete integer ADC
-sample grids. Preparation keys include the clock. It preserves signed gains, complex sampled envelopes and the common
-carrier origin for evolution. Readout converts the program's common-origin
-phase to ADC's pulse-local phase by subtracting
-`2*pi*(f-f_ref)*pulse_start_ns`, with frequencies in GHz. When pulses are
+sample grids. Preparation keys include the clock. The shared `drive_track`
+converter preserves signed gains, complex sampled envelopes and the common
+carrier origin for evolution. See the [evolution input contract](../../../simulate/evolution/README.md#public-entry-points)
+for the signed carrier and pulse support in `DriveTrack`, `EnvelopeSpec.values`
+interpolation, and the I/Q operators in `SecularDrive`.
+Readout converts the program's common-origin phase to ADC's pulse-local phase
+by subtracting `2*pi*(f-f_ref)*pulse_start_ns`, with frequencies in GHz. When pulses are
 present, the first terminal carrier sets the model reference and its phase
 stays unchanged. The existing
 `phase_reference_ticks` contribution, converted through `TimeBase.ns`, stays part of the common-origin phase.
@@ -637,6 +643,7 @@ states, and removes the identity approximation within this vacuum-reset model.
 
 In the Markov model, six same-seed comparisons of the template floor against floor zero, including the original first point of chain amp_rabi, found maximum differences of 6.921e-6 in the full final density and 6.964e-6 in per-readout populations (commit cc6b252c0). This checks the floor within the model, not accuracy against an independent reference.
 
+`FTFModelFacts.joint` supplies the fixed-DC model for the cavity calculation.
 `simulate.adc` solves the linear, state-conditioned cavity fields. The incident
 amplitude uses the same `input_per_gain` conversion as terminal readout.
 For state s and resonator r, the photon number is `n[s,r] = |alpha[s,r]|²`.
@@ -646,15 +653,23 @@ Differences between state-conditioned outgoing fields cause photon-shot-noise
 dephasing, including shared-line interference and independent internal losses.
 These driven contributions are separate from residual thermal-photon dephasing.
 
-FTF queries evolution's final spans, then advances density and cavity memory
-sequentially. The first span and each projection start from vacuum. Otherwise,
-all state-conditioned fields start from the previous main branch's final
-field. The main branch has the largest population in the span-start DC density;
-exact ties select the lowest energy. Each span supplies ADC's `initial_field`
-and absolute `initial_time_ns`. Fields retain ringdown after pulse switch-off.
-Selecting one
-branch for a superposition is a semiclassical approximation, not a description
-of quantum cavity-state entanglement.
+FTF queries evolution's final spans with [`segment_spans`](../../../simulate/evolution/README.md#public-entry-points),
+then advances density and cavity memory sequentially. The first span and each
+projection start from vacuum. Otherwise, all state-conditioned branches inherit
+the previous main branch's final field. Each span passes its starting field and
+absolute start time to ADC through
+[`initial_field` and `initial_time_ns`](../../../simulate/adc/README.md#readout-model).
+Fields retain ringdown after pulse switch-off. See
+[Cavity drive composition](../physics/README.md#cavity-drive-composition)
+for how `CavityDrive.advance` selects the main branch.
+
+Production FTF uses semiclassical state-conditioned fields for cavity memory
+and [readout](#readout-and-sampling), without adding photon states to the
+evolution space. [ADC's Joint-Fock validation limits](../../../simulate/adc/README.md#joint-fock-validation-limits)
+describe the opt-in `JointFockDiagnostic` prototype, not an acquisition backend.
+To build a model with explicit photon states, call
+[`build_resonator_mode`](../../../simulate/README.md#quantum-resonator-mode)
+separately. The builder does not connect the model to FTF acquisition.
 
 FTF averages Stark energy shifts and driven dephasing over each span and passes
 neutral `SegmentShift` values to evolution in `TimelineBatch.segment_shifts`.

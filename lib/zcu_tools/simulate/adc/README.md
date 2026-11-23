@@ -58,6 +58,8 @@ ringdown. Flat inputs use analytic constant-line propagation and quadratic
 integrals. Shaped inputs retain the field ODE and converged quadrature, split at
 pulse boundaries, envelope corners and the decay timescale. ADC owns these
 field integrals; consumers project them into their own Stark or dephasing models.
+See the [FTF cavity span handoff](../../simulators/ftf/environment/README.md#cavity-drives)
+for how FTF supplies `initial_field` and `initial_time_ns` at span boundaries.
 
 `CavityAverageCache.average` reuses flat second moments. `CavityAverageCache.span`
 returns both second moments and final fields for all states in the original model
