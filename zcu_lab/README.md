@@ -1,6 +1,6 @@
 # zcu_lab
 
-**Last updated:** 2026-11-21，讀出範本的 ADC window 餘量
+**Last updated:** 2026-11-23，離線 probe 的 fit 失敗判讀
 
 **讀者：** lab-author、agent。查找實驗室定義的套件邊界、註冊入口與操作文件。
 
@@ -141,6 +141,11 @@ for name, png in analyzed.pngs.items():
 若要核對 PNG 看不出的 artist 屬性，在 scratch 用 caller 建立的 `Plots(NonPresentingHost())` 呼叫公開入口：
 run 使用 `RunContext.plots`，analyze 直接收 `plots=`。從同一個 `Plots` 讀取具名圖的原生 artist。
 Caller 負責[結束繪圖與釋放呈現](../lib/zcu_tools/plotting/README.md#完成與保留)。不為個別實驗新增 durable test。
+
+例如，將新建的 `Plots(NonPresentingHost())` 傳給 [`T2EchoExp.analyze`](v2/twotone/time_domain/t2echo/core.py) 的 `plots=`。
+在 core 搜尋 `_iq_direction` 與 `Build the measured trace before fitting`。
+若量測 trace 已畫出，fit 才拋錯，捕捉原例外後從同一個 `plots["fit"]` 檢查量測點與可估的 shot SEM 棒，並確認沒有模型線。
+記錄原例外及 traceback。這是 core 的殘圖診斷；`analysis_stage` 拋錯時不回傳 PNG，也不代表 GUI 成功發布圖或摘要。
 
 ### 檢查與執行
 

@@ -46,6 +46,8 @@ I/Q 投影權重可固定或逐點給定。`propagated_iq_shot_sem` 用逐點梯
 它不估計校正矩陣本身的誤差。算不出有限 SEM 時以 NaN 回傳並記錄警告；接近奇異不另設門檻。
 兩者都以實際保留的 shots 為分母，不估計輪間散布、RB 的 seed 散布或擬合參數誤差。
 少於兩發或缺測（NaN）時，該點誤差未定。負、非整數、無窮計數及其加總溢位會報錯。
+[Summed acquisition](../program/README.md#summed-acquisition) 在取數時以
+[`AdditiveShotReducer.add`](../program/shot_processing.py) 累加各完成輪的原始矩，分析時才中心化。
 兩個 IQ 估計入口用同一個有上限的原始六矩捨入界。界線取決於實收 shot 數，不用名目 Reps × Rounds。
 容差內的負中心量可歸零，不截斷小的正估計。矩陣修復與直接投影的檢查不同，同一組矩通過原始矩檢查不保證任意投影可估。
 超界中心平方和或交叉共變異與估計溢位會拋出 `IQCovarianceError`（`ValueError` 的子型別）。

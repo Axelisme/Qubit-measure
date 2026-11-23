@@ -1,6 +1,6 @@
 # `zcu_tools.experiment` — 實驗層
 
-**Last updated:** 2026-11-23，離線 probe 的圖形產物與 GE 模型診斷
+**Last updated:** 2026-11-23，離線 probe 的 run-only 欄位比較
 
 **讀者：** framework-dev。實驗介面、Run 資料、持久化映射與裝置操作邊界。
 
@@ -207,6 +207,13 @@ Slice 由 VariableZSpec 的 index 與 index_axis 選取。
 每個不符 slice 由 `zcu_tools.experiment.probe` logger 記 WARNING，其餘可比 slice 繼續比較，相符 slice 不記錄。
 Warning 指出欄位、index_axis、index 與 shape、dtype 或 value 差異。整欄 shape 不符時 index_axis 與 index 為 None。
 重疊區域須符合每個宣告的比較規則，未宣告區域維持 exact。
+逐欄比較的既有測試見 [`test_save_stage.py`](../../../tests/experiment/probe/test_save_stage.py) 的
+`test_scalar_field_restored_as_none_reports_dtype_and_keeps_comparing`：run-only scalar 還原成 `None` 仍記為差異，後續欄位照比。這個案例直接測 `compare_roundtrip`，不測 `save_stage`。
+
+例如，[`T2EchoResult.true_activate_detune`](../../../zcu_lab/v2/twotone/time_domain/t2echo/core.py) 是 run-only 欄位，Native 還原後是 `None`。
+若原 record 的該欄有值，先以原 record 跑 `save_stage`，在 scratch 記錄 `roundtrip_equal=False`，從 WARNING 確認唯一差異是 `true_activate_detune`。
+再用 `dataclasses.replace` 複製 record 與 Result，只將副本的 `true_activate_detune` 設為 `None`，以另一個輸出目錄重跑 `save_stage`。
+用第二次的 `roundtrip_equal is True` 驗其餘欄位，並記錄與判讀 `cfg_issue`。原 record 不變；有值的 `iq_moments` 是 Native 持久欄位，仍須比較。
 
 ## 實驗介面與資料
 
