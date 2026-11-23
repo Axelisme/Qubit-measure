@@ -213,17 +213,13 @@ class QutritPopulationExp(Experiment[QutritPopulationResult, QutritPopulationCfg
         ):
             ax.grid(False)
             corrected = title == "Corrected (unclipped)"
-            image = ax.imshow(
-                matrix,
-                cmap="Blues",
-                vmin=None if corrected else 0,
-                vmax=None if corrected else 1,
-            )
+            image = ax.imshow(matrix, cmap="Blues")
+            shades = np.asarray(image.norm(matrix), dtype=np.float64)
             figure.colorbar(
                 image,
                 ax=ax,
                 shrink=0.8,
-                label="Estimate" if corrected else "Probability (0–1)",
+                label="Estimate" if corrected else "Probability",
             )
             ax.set(
                 xticks=range(3),
@@ -243,7 +239,7 @@ class QutritPopulationExp(Experiment[QutritPopulationResult, QutritPopulationCfg
                     f"{value:.5f}",
                     ha="center",
                     va="center",
-                    color="white" if value > 0.5 else "black",
+                    color="white" if shades[i, j] > 0.5 else "black",
                 )
         ax = figure.axes[3]
         ax.axis("off")

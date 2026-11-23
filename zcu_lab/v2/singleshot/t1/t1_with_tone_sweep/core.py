@@ -271,13 +271,13 @@ class T1WithToneSweepExp(Experiment[T1WithToneSweepResult, T1WithToneSweepCfg]):
         two three-population line viewers. Plot errors propagate.
         """
         figure, _ = plots.subplots(
-            nrows=4, ncols=2, num="measurement", figsize=(12, 10)
+            nrows=4, ncols=2, num="measurement", figsize=(12, 10), layout="constrained"
         )
         # Row-major grid: columns are initial g/e; rows are g/e/other and current.
         cells = figure.axes
         heatmaps = []
         for column in (0, 1):
-            for row in (0, 1, 2):
+            for row, state in enumerate(("g", "e", "other")):
                 ax = cells[2 * row + column]
                 ax.set(
                     xlabel="Probe gain (a.u.)"
@@ -285,7 +285,10 @@ class T1WithToneSweepExp(Experiment[T1WithToneSweepResult, T1WithToneSweepCfg]):
                     else "Probe frequency (MHz)",
                     ylabel="Time (µs)" if column == 0 else "",
                 )
-                heatmaps.append(live_heatmap(ax, uniform=False, clim=(0.0, 1.0)))
+                ax.grid(False)
+                ax.set_facecolor("0.9")
+                heatmaps.append(live_heatmap(ax, uniform=False))
+                figure.colorbar(ax.images[0], ax=ax, label=f"P({state})")
         lines = []
         for column, ax in enumerate(cells[6:]):
             ax.set(

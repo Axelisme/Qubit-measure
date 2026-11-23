@@ -18,7 +18,7 @@ Every retained shot counts once. The nearer circle center wins only if it is str
 
 - **Run and Analyze distributions:** one panel per nominal preparation, nine terminal classes on the x-axis, probability on the y-axis. Hatching marks the outcome matching that panel's preparation. Live adds the total retained shots across all four panels. Analyze shows the same distribution at the end of the run. No retained shots means no probabilities.
 - **Error bars:** the sample standard deviation of the 0/1 class indicator divided by √N retained shots in that panel. This shot SEM is not single-shot spread, fit error, round spread or a confidence interval. Fewer than two shots gives no bar; a zero bar does not establish an impossible or certain event.
-- **Analyze matrix:** rows are nominal preparations and columns are terminal classes; the upper number is probability, the lower number is count, and 0–1 color indicates probability. For exact fractions, divide the count by its row total. Use the source Run ID and **Reps×Rounds** in Analyze; the count alone does not identify the Reset/filter settings. Use that run's saved cfg, not the current form.
+- **Analyze matrix:** rows are nominal preparations and columns are terminal classes; the upper number is probability, the lower number is count, and the colorbar spans the probabilities in this matrix. For exact fractions, divide the count by its row total. Use the source Run ID and **Reps×Rounds** in Analyze; the count alone does not identify the Reset/filter settings. Use that run's saved cfg, not the current form.
 
 ## Decide what to check next
 

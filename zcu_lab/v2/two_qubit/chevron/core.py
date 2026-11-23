@@ -7,9 +7,7 @@ from typing import Annotated, ClassVar, Self
 import numpy as np
 from matplotlib.artist import Artist
 from matplotlib.axes import Axes
-from matplotlib.cm import ScalarMappable
 from matplotlib.collections import QuadMesh
-from matplotlib.colors import Normalize
 from numpy.typing import NDArray
 from pydantic import model_validator
 from zcu_tools.analysis.shot_uncertainty import class_probability_covariance
@@ -553,7 +551,7 @@ def _plot_population_maps(
     coordinates: NDArray[np.float64],
     populations: NDArray[np.float64],
 ) -> None:
-    """Compare the remaining outcomes on shared 0–1 heatmap scales."""
+    """Show the remaining outcomes, each scaled to its own probability range."""
     labels = tuple(
         f"P({a},{b})" for a in ("g", "e", "other") for b in ("g", "e", "other")
     )
@@ -570,12 +568,10 @@ def _plot_population_maps(
         fig.suptitle(f"{_MAP_TITLE}\nTerminal outcomes after double Xπ")
         for outcome, ax in enumerate(fig.axes, start):
             image = _return_map(ax, durations, coordinates, populations[..., outcome])
-            image.set_clim(0, 1)
             ax.set(xlabel="", ylabel="", title=labels[outcome])
+            fig.colorbar(image, ax=ax)
         fig.supxlabel(_DURATION_LABEL)
         fig.supylabel(_COORDINATE_LABEL)
-        key = ScalarMappable(norm=Normalize(0, 1), cmap="viridis")
-        fig.colorbar(key, ax=fig.axes, label="Joint probability (0–1)")
 
 
 def _plot_duration_rates(
