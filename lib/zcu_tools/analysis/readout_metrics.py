@@ -1,10 +1,15 @@
 """Two-state readout separation and QND estimates from repeated IQ moments."""
 
+import logging
 from dataclasses import dataclass
 from math import erfc, nan, sqrt
 
 import numpy as np
 from numpy.typing import NDArray
+
+from .shot_uncertainty import IQCovarianceError, propagated_iq_shot_sem
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -53,6 +58,56 @@ class ReadoutMetrics:
     pi_miss_on: float = nan
     pi_miss_off: float = nan
     retention_from_covariance: float = nan
+
+
+@dataclass(frozen=True)
+class FirstReadContrast:
+    """Per-gain R1 mean-IQ distance and its first-order shot SEM, both in IQ units.
+
+    values and sem are float64 vectors. NaN values mark missing means; NaN SEMs
+    mark points for which the sampling error cannot be derived.
+    """
+
+    values: NDArray[np.float64]
+    sem: NDArray[np.float64]
+
+
+def first_read_contrast(sums: NDArray[np.float64]) -> FirstReadContrast:
+    """Return the R1-on, middle-I preparation mean-IQ distance and shot SEM.
+
+    sums is float64 (Npoint, 8, 6, 6), using the branch and feature order of
+    readout_metrics. Only the R1 moments in branches 2 and 6 are used. Either
+    missing mean leaves the distance undefined; a zero distance, fewer than
+    two shots per branch, or missing moments leave the SEM undefined, not zero.
+    The SEM propagates the shot covariance of independent preparation branches
+    to first order. Their moments pool retained shots across rounds and include
+    projection noise. Round-to-round mean changes contribute to the scatter;
+    the SEM does not estimate or remove drift. At a finite positive distance,
+    a covariance estimation failure leaves that SEM undefined and logs the
+    point and cause. Invalid input shapes or invalid shot statistics (such as
+    invalid counts at finite positive distances) still raise ValueError.
+    """
+    if sums.shape[1:] != (8, 6, 6):
+        raise ValueError(f"sums must have shape (Npoint, 8, 6, 6), got {sums.shape}")
+    moments = sums[..., 0][:, [2, 6]]
+    counts = moments[..., 0]
+    means = moments[..., 1:3] / np.where(counts == 0, np.nan, counts)[..., None]
+    difference = means[:, 1] - means[:, 0]
+    values = np.linalg.norm(difference, axis=-1)
+    sem = np.full(values.shape, np.nan)
+    for index in np.flatnonzero(np.isfinite(values) & (values > 0)):
+        # The gradient of the norm is the unit vector along the IQ difference.
+        i, q = difference[index] / values[index]
+        direction = complex(i, q)
+        try:
+            sem[index] = propagated_iq_shot_sem(
+                moments[index], gradients=np.array([-direction, direction])
+            )
+        except IQCovarianceError as error:
+            logger.warning(
+                "Omitting first-read contrast SEM at point %d: %s", index, error
+            )
+    return FirstReadContrast(values, sem)
 
 
 def _transition_metrics(

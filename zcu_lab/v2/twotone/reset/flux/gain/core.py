@@ -37,6 +37,10 @@ from zcu_tools.program.v2 import (
 
 from zcu_lab.v2.support import live_errorbar
 from zcu_lab.v2.twotone.reset._projection import principal_iq_direction
+from zcu_lab.v2.twotone.reset.flux._diagnostics import (
+    flux_ratio_sem,
+    plot_flux_ratio_residual,
+)
 
 
 @dataclass(frozen=True)
@@ -329,16 +333,16 @@ class GainExp(Experiment[GainResult, GainCfg]):
         ratio = np.where(valid, ratio, np.nan)
         residual = np.where(valid, residual, np.nan)
         candidates = np.flatnonzero(valid)
-        selected = (
-            float(gains[candidates[np.argmin(residual[candidates])]])
+        selected_index = (
+            int(candidates[np.argmin(residual[candidates])])
             if candidates.size
             else None
         )
 
         # 3. Show the measured branches alongside the derived diagnostics.
-        outcome = GainAnalysis(selected_gain=selected)
-        self._plot_result(plots, result, ratio, residual, outcome)
-        return outcome
+        self._plot_result(plots, result, ratio, residual, selected_index)
+        selected = None if selected_index is None else float(gains[selected_index])
+        return GainAnalysis(selected_gain=selected)
 
     def _plot_result(
         self,
@@ -346,9 +350,9 @@ class GainExp(Experiment[GainResult, GainCfg]):
         result: GainResult,
         ratio: NDArray[np.float64],
         residual: NDArray[np.float64],
-        selection: GainAnalysis,
+        selected_index: int | None,
     ) -> None:
-        """Plot I and Q with shot SEM and the unchanged residual selection."""
+        """Plot I/Q and derived diagnostics with shot SEM."""
         gains, signals = result.gains, result.signals
         fig, _ = plots.subplots(
             num="fit",
@@ -381,14 +385,20 @@ class GainExp(Experiment[GainResult, GainCfg]):
         q_ax.set_ylabel(_Q_LABEL)
         i_ax.legend(loc="lower center", bbox_to_anchor=(0.5, 1.01), ncols=2)
 
-        ratio_ax.plot(gains, ratio, ".-")
+        ratio_sem = (
+            None
+            if result.iq_moments is None
+            else flux_ratio_sem(signals, result.iq_moments, ratio)
+        )
+        plot_flux_ratio_residual(
+            (ratio_ax, residual_ax), gains, ratio, residual, ratio_sem, selected_index
+        )
         ratio_ax.set(xlabel=_XLABEL, ylabel="Contrast ratio r (a.u.)")
-        residual_ax.plot(gains, residual, ".-")
         residual_ax.set(xlabel=_XLABEL, ylabel="Residual with p₀ ≈ 0 (a.u.)")
-        selected = selection.selected_gain
-        if selected is None:
+        if selected_index is None:
             residual_ax.set_title("No finite gain candidate")
         else:
+            selected = float(gains[selected_index])
             residual_ax.set_title(f"Selected gain = {selected:.6g} a.u.")
             for ax in fig.axes:
                 ax.axvline(selected, color="gray", linestyle="--")

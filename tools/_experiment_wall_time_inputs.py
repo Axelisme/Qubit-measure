@@ -8,7 +8,7 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from hashlib import sha256
 from pathlib import Path
-from typing import Annotated
+from typing import Annotated, Literal
 
 from pydantic import (
     BaseModel,
@@ -30,7 +30,10 @@ _Key = Annotated[
 ]
 _Text = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1)]
 _Index = Annotated[StrictInt, Field(ge=0)]
+_PositiveCount = Annotated[StrictInt, Field(gt=0)]
 _Field = Annotated[StrictStr, StringConstraints(min_length=1)]
+_FormPath = Annotated[tuple[_Field | _Index, ...], Field(min_length=1)]
+_ResultField = Annotated[str, StringConstraints(pattern=r"^[A-Za-z][A-Za-z0-9_]*$")]
 
 
 class _ManifestItem(BaseModel):
@@ -40,22 +43,126 @@ class _ManifestItem(BaseModel):
 class Override(_ManifestItem):
     """One bounded Form write. The optional basis is for review only."""
 
-    path: Annotated[tuple[_Field | _Index, ...], Field(min_length=1)]
+    path: _FormPath
     value: JsonValue
     basis: object = None
+
+
+class ShotsMetric(_ManifestItem):
+    """Judge the whole core duration for a Run with shots and no sweep."""
+
+    kind: Literal["shots"] = "shots"
+
+
+class ResultAxis(_ManifestItem):
+    """Named public Result array and the dimension that stores one sweep axis."""
+
+    field: _ResultField
+    dimension: _Index = 0
+
+
+class ScanMetric(_ManifestItem):
+    """Judge core seconds per Cartesian point across Result axes, outermost first."""
+
+    kind: Literal["scan"]
+    axes: Annotated[list[ResultAxis], Field(min_length=1)]
+
+    @model_validator(mode="after")
+    def validate_axes(self) -> ScanMetric:
+        if len({(axis.field, axis.dimension) for axis in self.axes}) != len(self.axes):
+            raise ValueError("Duplicate Result sweep axis")
+        return self
+
+
+class EvaluationMetric(_ManifestItem):
+    """Count evaluations that acquired, not seeds or planned candidates.
+
+    For peak-gated candidates, set peak_field and counts_field to arrays with
+    candidates on the first axis. In a successful Run's Result, any written
+    seed counts mark acquisition. A recorded peak with all-NaN counts marks a
+    rejection. A NaN peak marks an unreached candidate.
+    Otherwise set single_acquire_candidate_field to the Result matrix of entered
+    candidate parameters, with NaN rows for candidates not reached. This mode
+    requires one main acquire per entered candidate and no rejections or retries.
+    """
+
+    kind: Literal["evaluation"]
+    peak_field: _ResultField | None = None
+    counts_field: _ResultField | None = None
+    single_acquire_candidate_field: _ResultField | None = None
+
+    @model_validator(mode="after")
+    def validate_evidence(self) -> EvaluationMetric:
+        peak_gate = self.peak_field is not None and self.counts_field is not None
+        single_acquire = (
+            self.single_acquire_candidate_field is not None
+            and self.peak_field is None
+            and self.counts_field is None
+        )
+        if not (
+            single_acquire
+            or (peak_gate and self.single_acquire_candidate_field is None)
+        ):
+            raise ValueError(
+                "Declare a peak/count pair or a single-acquire candidate field"
+            )
+        return self
+
+
+type SpeedMetric = Annotated[
+    ShotsMetric | ScanMetric | EvaluationMetric, Field(discriminator="kind")
+]
+
+
+class OuterAxisReduction(_ManifestItem):
+    """The Form override that shortens the outermost axis, and its full length."""
+
+    path: _FormPath
+    full_points: _PositiveCount
+
+
+class RoundsReduction(_ManifestItem):
+    """The integer Form override for reduced rounds, and the full round count."""
+
+    path: _FormPath
+    full_rounds: _PositiveCount
+
+    def scale(self, override_value: JsonValue) -> float:
+        """Return full / reduced rounds; raise for an absent or invalid reduction."""
+        if type(override_value) is not int or not 0 < override_value < self.full_rounds:
+            raise ValueError(
+                "Rounds reduction requires a positive integer Form override below full_rounds"
+            )
+        return self.full_rounds / override_value
+
+
+class Extrapolation(_ManifestItem):
+    """Declared reductions for projecting a complete measured Run to full work."""
+
+    outer_axis: OuterAxisReduction | None = None
+    rounds: RoundsReduction | None = None
+
+    @model_validator(mode="after")
+    def require_reduction(self) -> Extrapolation:
+        if self.outer_axis is None and self.rounds is None:
+            raise ValueError("Extrapolation requires an outer-axis or rounds reduction")
+        return self
 
 
 class Scene(_ManifestItem):
     """A scene's stable identity, live adapter and authored work.
 
-    The optional basis is for review only. A nonempty ftf_exclusion skips Run
-    and supplies the report reason.
+    The metric declares the speed denominator. The optional extrapolation
+    references Form overrides that shorten the Run. The optional basis is for
+    review only. A nonempty ftf_exclusion skips Run and supplies the reason.
     """
 
     scene_id: _Key
     adapter: _Key
     basis: object = None
+    metric: SpeedMetric
     overrides: list[Override] = Field(default_factory=list)
+    extrapolation: Extrapolation | None = None
     ftf_exclusion: _Text | None = None
 
     @model_validator(mode="after")
@@ -75,6 +182,27 @@ class Scene(_ManifestItem):
                         f"Overlapping override for {self.scene_id!r}: "
                         f"{parent!r} is a parent of {override.path!r}"
                     )
+        return self
+
+    @model_validator(mode="after")
+    def validate_reductions(self) -> Scene:
+        projection = self.extrapolation
+        if projection is None:
+            return self
+        overrides = {item.path: item.value for item in self.overrides}
+        outer, rounds = projection.outer_axis, projection.rounds
+        if outer is not None and (
+            self.metric.kind != "scan" or outer.path not in overrides
+        ):
+            raise ValueError(
+                "Outer-axis reduction requires a scan metric and a matching Form override"
+            )
+        if rounds is not None:
+            rounds.scale(overrides.get(rounds.path))
+            if outer is not None and rounds.path == outer.path:
+                raise ValueError(
+                    "Outer-axis and rounds reductions need distinct Form overrides"
+                )
         return self
 
 

@@ -10,6 +10,10 @@ logger = logging.getLogger(__name__)
 _ROUNDING_RTOL = 16 * np.finfo(np.float64).eps
 
 
+class IQCovarianceError(ValueError):
+    """Finite IQ sums cannot support a covariance or its projection."""
+
+
 def _validate_counts(counts: NDArray[np.float64] | NDArray[np.int64]) -> None:
     finite = counts[~np.isnan(counts)]
     if (
@@ -38,12 +42,12 @@ def _validate_centered_iq(
         centered_q = qq - q_mean_term
         centered_cross = iq - cross_mean_term
     if np.isinf([centered_i, centered_q, centered_cross]).any():
-        raise ValueError("centered IQ moments overflow float64")
+        raise IQCovarianceError("centered IQ moments overflow float64")
 
     i_tol = _ROUNDING_RTOL * np.maximum(np.abs(ii), i_mean_term)
     q_tol = _ROUNDING_RTOL * np.maximum(np.abs(qq), q_mean_term)
     if np.any(centered_i < -i_tol) or np.any(centered_q < -q_tol):
-        raise ValueError("IQ moments give a negative centered sum of squares")
+        raise IQCovarianceError("IQ moments give a negative centered sum of squares")
 
     cross_tol = _ROUNDING_RTOL * np.maximum(np.abs(iq), np.abs(cross_mean_term))
     # Allow rounding in each difference, including when a variance rounds to zero.
@@ -53,41 +57,17 @@ def _validate_centered_iq(
     with np.errstate(over="ignore"):
         cross_bound = i_bound * q_bound
     if np.any(np.abs(centered_cross) - cross_bound > cross_tol):
-        raise ValueError("centered IQ cross sum exceeds the covariance bound")
+        raise IQCovarianceError("centered IQ cross sum exceeds the covariance bound")
 
 
-def iq_shot_sem(
-    moments: NDArray[np.float64], *, direction: tuple[float, float]
+def _project_iq_sem(
+    moments: NDArray[np.float64],
+    n: NDArray[np.float64],
+    a: NDArray[np.float64],
+    b: NDArray[np.float64],
 ) -> NDArray[np.float64]:
-    """Estimate the standard error of the mean of ``a*I + b*Q`` per point.
-
-    ``moments`` has shape ``(..., 6)`` in shot-sums order (ADR-0074):
-    ``[N, ΣI, ΣQ, ΣI², ΣIQ, ΣQ²]``. The sums include only the ``N`` retained
-    shots at each point. ``direction=(a, b)`` gives finite linear weights.
-    Holding those weights fixed, the result has shape ``(...)`` and the units
-    of the projected observable. It is the sample standard deviation (ddof=1)
-    divided by sqrt(N).
-    Fewer than two retained shots or NaN moments leave the error undefined
-    (NaN). A rounding-scale negative centered sum of squares is clipped to zero.
-    Invalid shape, nonfinite weights, invalid counts, or infinite moments
-    raise ValueError. At defined points, both centered sums of squares and the
-    centered cross sum must describe a valid covariance up to rounding, even
-    outside the projection direction. Invalid covariance or overflow raises
-    ValueError.
-    """
-    if moments.shape[-1:] != (6,):
-        raise ValueError("IQ moments must have shape (..., 6)")
-    a, b = np.asarray(direction, dtype=np.float64)
-    if not np.isfinite(direction).all():
-        raise ValueError("IQ projection weights must be finite")
-
-    n, i, q, ii, iq, qq = np.moveaxis(moments, -1, 0)
-    _validate_counts(n)
-    if np.isinf(moments).any():
-        raise ValueError("IQ moments must not be infinite")
-    defined = (n >= 2) & ~np.isnan(moments).any(axis=-1)
-    n = np.where(defined, n, np.nan)
-    _validate_centered_iq(n, i, q, ii, iq, qq)
+    """Project validated sums; return NaN on overflow, reject negative variance."""
+    _, i, q, ii, iq, qq = np.moveaxis(moments, -1, 0)
     with np.errstate(over="ignore", invalid="ignore"):
         total = a * i + b * q
         i_term = a * (a * ii)
@@ -95,15 +75,116 @@ def iq_shot_sem(
         q_term = b * (b * qq)
         mean_term = total * (total / n)
         centered = i_term + iq_term + q_term - mean_term
-    if np.any(defined & ~np.isfinite(centered)):
-        raise ValueError("IQ projection overflows finite moments")
+    centered = np.where(np.isfinite(centered), centered, np.nan)
     # Cancellation can expose rounding of any of the four subtracted terms.
     scale = np.maximum.reduce(
         [np.abs(i_term), np.abs(iq_term), np.abs(q_term), mean_term]
     )
     if np.any(centered < -_ROUNDING_RTOL * scale):
-        raise ValueError("IQ moments give a negative centered sum of squares")
+        raise IQCovarianceError("IQ moments give a negative centered sum of squares")
     return np.asarray(np.sqrt(np.maximum(centered, 0)) / np.sqrt(n) / np.sqrt(n - 1))
+
+
+def iq_shot_sem(
+    moments: NDArray[np.float64],
+    *,
+    direction: tuple[float | NDArray[np.float64], float | NDArray[np.float64]],
+) -> NDArray[np.float64]:
+    """Estimate the standard error of the mean of ``a*I + b*Q`` per point.
+
+    ``moments`` has shape ``(..., 6)`` in shot-sums order (ADR-0074):
+    ``[N, ΣI, ΣQ, ΣI², ΣIQ, ΣQ²]``. The sums include only the ``N`` retained
+    shots at each point. ``direction=(a, b)`` gives finite I/Q weights. Each
+    weight is a scalar or an array broadcastable to the point shape ``(...)``.
+    Holding those weights fixed, the result has shape ``(...)`` and the units
+    of the projected observable. It is the sample standard deviation (ddof=1)
+    divided by sqrt(N).
+    Fewer than two retained shots or NaN moments leave the error undefined
+    (NaN). A rounding-scale negative centered sum of squares is clipped to zero.
+    Invalid shape, nonfinite weights, invalid counts, infinite moments or
+    negative squared sums at defined points raise ValueError. At defined points,
+    the centered moments must describe a valid covariance up to rounding, even
+    outside the projection direction. Inconsistent centered moments or
+    overflow that prevents estimation raise IQCovarianceError (a ValueError).
+    """
+    if moments.shape[-1:] != (6,):
+        raise ValueError("IQ moments must have shape (..., 6)")
+    a, b = (np.asarray(weight, dtype=np.float64) for weight in direction)
+    if not (np.isfinite(a).all() and np.isfinite(b).all()):
+        raise ValueError("IQ projection weights must be finite")
+    try:
+        a = np.broadcast_to(a, moments.shape[:-1])
+        b = np.broadcast_to(b, moments.shape[:-1])
+    except ValueError as error:
+        raise ValueError(
+            "IQ projection weights must broadcast to the point shape"
+        ) from error
+
+    n, i, q, ii, iq, qq = np.moveaxis(moments, -1, 0)
+    _validate_counts(n)
+    if np.isinf(moments).any():
+        raise ValueError("IQ moments must not be infinite")
+    defined = (n >= 2) & ~np.isnan(moments).any(axis=-1)
+    if np.any(defined & ((ii < 0) | (qq < 0))):
+        raise ValueError("IQ squared sums must be nonnegative")
+    n = np.where(defined, n, np.nan)
+    _validate_centered_iq(n, i, q, ii, iq, qq)
+    sem = _project_iq_sem(moments, n, a, b)
+    overflow = defined & ~np.isfinite(sem)
+    if np.any(overflow):
+        # Scale only overflowing projections by a power of two. With weights
+        # at most 1/4, even near-limit sums have headroom for the cross term.
+        a, b = a[overflow], b[overflow]
+        _, exponent = np.frexp(np.maximum(np.maximum(np.abs(a), np.abs(b)), 1.0))
+        shift = exponent + 1
+        scaled = _project_iq_sem(
+            moments[overflow], n[overflow], np.ldexp(a, -shift), np.ldexp(b, -shift)
+        )
+        with np.errstate(over="ignore"):
+            sem[overflow] = np.ldexp(scaled, shift)
+        if not np.isfinite(sem[overflow]).all():
+            raise IQCovarianceError("IQ projection overflows finite moments")
+    return sem
+
+
+def propagated_iq_shot_sem(
+    moments: NDArray[np.float64], *, gradients: NDArray[np.complex128]
+) -> NDArray[np.float64]:
+    """Combine first-order shot SEM for independent IQ means at each point.
+
+    ``moments`` has shape ``(..., groups, 6)`` with at least one group and
+    the shot-sums order and validation of ``iq_shot_sem``. ``gradients`` has
+    shape ``(..., groups)``; each complex entry holds the real observable's
+    partial derivatives with respect to that group's mean I and Q. Evaluate
+    these derivatives at the observed means. Preserve I/Q covariance within
+    each group and add independent group variances. Return ``(...)`` in the
+    observable's units. Missing group statistics leave the point's SEM NaN.
+    Nonfinite gradients or propagated SEM leave NaN and log a warning.
+    Invalid input raises ValueError; covariance estimation failures raise
+    IQCovarianceError, as in iq_shot_sem.
+    """
+    if (
+        moments.ndim < 2
+        or moments.shape[-2] == 0
+        or moments.shape[:-1] != gradients.shape
+    ):
+        raise ValueError("IQ gradients must match the point and group shape of moments")
+    finite = np.isfinite(gradients)
+    i = np.where(finite, gradients.real, 0.0)
+    q = np.where(finite, gradients.imag, 0.0)
+    # Normalize before projecting so a finite but large derivative is not squared.
+    scale = np.maximum(np.abs(i), np.abs(q))
+    divisor = np.where(scale == 0, 1.0, scale)
+    unit_sem = iq_shot_sem(moments, direction=(i / divisor, q / divisor))
+    with np.errstate(over="ignore"):
+        sem = np.hypot.reduce(unit_sem * scale, axis=-1)
+    unavailable = ~finite.all(axis=-1) | np.isinf(sem)
+    if np.any(unavailable):
+        logger.warning(
+            "Nonfinite IQ gradients or propagated shot SEM at %d point(s)",
+            np.count_nonzero(unavailable),
+        )
+    return np.where(unavailable, np.nan, sem)
 
 
 def class_probability_covariance(

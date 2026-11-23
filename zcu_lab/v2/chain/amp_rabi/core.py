@@ -301,7 +301,7 @@ class ChainAmpRabiExp(Experiment[CycleSums, ChainAmpRabiCfg]):
                 gains,
                 grid,
                 view,
-                ("Measured · all 65 numbers", "Joint model"),
+                ("Measured · all 65 numbers ± pooled SEM", "Joint model"),
             )
             projection_ax.set_ylabel("Projected signal (sigma)")
             residual_ax.set(

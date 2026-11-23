@@ -48,7 +48,7 @@ def make_form(
         "rounds": 320,
         "readout": readout,
         "relax_delay": t1_initial_time(ctx.parameters, multiplier=5),
-        "length": Range(0.2, 2.2, expts=11),
+        "length": Range(0.2, 2.2, expts=31),
     }
     if margin.value is not None:
         tree["length_margin"] = margin.value

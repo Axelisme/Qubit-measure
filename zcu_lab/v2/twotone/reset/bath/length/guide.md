@@ -12,9 +12,9 @@ Optional **Reset** → optional **Preparation pulse** → simultaneous cavity an
 
 ## Read the figures and choose a duration
 
-Live shows the four phase branches versus qubit-tone duration (µs) on one principal IQ axis estimated from all four branches. This projection is not a population. Analyze shows I and Q separately so you can see both components of the phase differences. Bars are shot SEM along the displayed axis: sample SD divided by √(retained shots), not fit error or round-to-round scatter. Mean-only files show no bars. With unequal shot counts across partial passes, means weight the passes equally and no pooled SEM is shown.
+Live shows the four phase branches versus qubit-tone duration (µs) on one principal IQ axis estimated from all four branches. This projection is not a population. Analyze shows I and Q separately so you can see both components of the phase differences. Bars are shot SEM along the displayed axis: sample SD divided by √(retained shots), not fit error. Mean-only files show no bars. With unequal shot counts across partial passes, means weight the passes equally and no pooled SEM is shown.
 
-The contrast panel shows |S180−S0|² + |S270−S90|² (a.u.²), with S the complex phase-branch mean. It has no direct shot SEM and is not a population or reset fidelity. Compare the acquired points; a flat trace with no resolved response does not establish a plateau.
+The contrast panel shows |S180−S0|² + |S270−S90|² (a.u.²), with S the complex phase-branch mean. The contrast bars use a first-order approximation from the four phase branches' shot moments in the same acquisition. The moments pool retained shots across rounds and include projection noise. Changes in the round means contribute to the pooled scatter; the bars neither estimate nor remove drift. A point with missing or insufficient phase moments keeps its marker but has no contrast bar. Contrast is not a population or reset fidelity. Compare the acquired points; a flat trace with no resolved response does not establish a plateau.
 
 Choose a duration once contrast has settled after a resolved change; extend **Stop** if contrast is still changing. Enter the duration manually, then verify state preparation in the bath phase step. There is no writeback.
 

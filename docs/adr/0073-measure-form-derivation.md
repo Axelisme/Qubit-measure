@@ -66,6 +66,16 @@ status: accepted
 - 2026-11-02，使用者：「我以為生成Form預設值的form_adapter就能處理這種if/else的複雜邏輯，這樣Form就只要呈現就好，或是搭配command或convert或即時計算」，並對 factory 接收宣告初值答「A」。同日問「Factory不能回傳新的樹嗎？他可以原地修改default並回傳吧？」，再以「採用建議」確認由 Form 整份採用回傳樹。原始討論未入庫，見 Git `a8c7eb66a`。
 - 2026-11-18，使用者過目輸入型別的推導、Hidden 與切換及描述規則：「我大概看了一遍，基本上是没问题」，並說明這類規則「并不算是裁决，而算是建议」。這些是 agent 的選擇，僅供參考。原始討論未入庫，見 Git `1f4b16aa0`。
 
+#### 掃描初值的點數
+
+**規則。** 每個等距 Range 掃描軸的初值至少 31 點，多軸掃描也逐軸適用。以參考值為中心的掃描用奇數，讓中心值成為一個取樣點。
+
+**例子。** Mux onetone 掃描 ±10 MHz、101 點；constructive phase 掃描 −180° 到 180°、51 點。`raman_gf` 的 detuning 和 gain 由 11×10 點改為 31×31 點。受影響的雙軸掃描預設格點數約為原來的 2 到 9 倍。每點採集設定不變時，每輪逐點採集的時間按格點數增加。模擬速度按每格點比較，見 [ADR-0078〈模擬器速度目標〉](0078-evolution-module-boundary.md#模擬器速度目標)。
+
+**邊界。** 只管初值。Form 不因操作者填偶數或少於 31 點而拒絕輸入，也不重寫已存 cfg 或開著的 tab。單邊 ramp 沒有要採樣的中心，奇數只是一種方便的選法，31 點下限仍適用。CPMG pulse count、RB 的 `LogPoints` depth，以及雙 qubit 普通與 heralded RB 的 depth／seed 清單是 protocol 決定的離散序列，不在此規則內。`Range(0, 0, expts=1)` 的待填佔位維持不變。
+
+**依據。** 2026-11-23，使用者：「可以加一個小慣例，掃描點數建議是奇數，這樣可以包含中心點」。看到 10 點的 ramp 初值時說「10點太少了，建議至少31點」，確認多軸也逐軸適用時答「都對」，對排除 protocol 的離散序列答「A」。見[掃描初值至少 31 點、用奇數](../discussions/2026-11-23-scan-defaults-min-31-odd.md)。
+
 ### 捕捉來源與使用時驗證
 
 **規則。** `TabFormResource` 擁有來源捕捉及 Form 狀態。Open／Reset 捕捉來源後呼叫 `make_form`，再綁定並驗證 Registry 的範本目錄。`FormContext` 只提供 `ctx.has(ref)` 查捕捉到的 library／alias，缺來源、缺 key 或 alias 未綁回 False，來源故障原樣拋出。`make_form` 回傳 `Form(Cfg, tree)`，不把 `ctx` 傳進 Form。Editor 只讀借用的 state，`write`、`run_command` 交回資源。Mutation guard、通知與撤銷由資源負責。

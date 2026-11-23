@@ -4,6 +4,9 @@
 
 Optional **Reset** → optional **Preparation pulse** → both reset tones → **Readout** after the longer tone.
 
+Use different generator channels when the reset tones overlap. The compiler rejects two overlapping ordinary `Pulse` playbacks on the same generator, even on separate timelines.
+See the [Program timeline rules](../../../../../../lib/zcu_tools/program/v2/README.md#原生寫法與具名-timeline) and the [`TwoPulseReset` timing rules](../../../../../../lib/zcu_tools/program/v2/modules/README.md#原生寫法).
+
 ## Key settings
 
 - Check preparation (if used) and readout. In **Tested reset**, use calibrated carriers and gains; the starting values are `$qubit.ext.reset_f1`, `$qubit.ext.reset_f2`, `$qubit.ext.reset_gain1` and `$qubit.ext.reset_gain2`.
