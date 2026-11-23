@@ -82,7 +82,7 @@ Recipe 只提交選定項目的 ID，並查寫回收據。`writeback_applied` �
 頂層 `fit_quality` 為 null。任一角色擬合不可用時，該角色的 `reason` 說明原因，另一角色的結果仍會回報。
 
 兩條擬合都給出 correction 才詢問是否寫入 `$coupler.ext.cz_phase`。候選的 `qubit1`、`qubit2` 是同次 Run 捕捉的元件名，兩個校正值是 `correction_qubit1_deg`、`correction_qubit2_deg`。
-寫回不改脈衝或 slot。參見 [擬合解讀](../v2/two_qubit/local_z/guide.md#phase-與-slope) 和 [候選內容](../v2/two_qubit/local_z/guide.md#preview-與-apply)。
+寫回不改脈衝或 slot。參見 [擬合解讀](../v2/two_qubit/local_z/guide.md#怎麼讀圖) 和 [候選內容](../v2/two_qubit/local_z/guide.md#preview-與-apply)。
 
 ## two_qubit_constructive_phase
 

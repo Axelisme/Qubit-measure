@@ -163,6 +163,11 @@ def plot_accumulated_phase(
                 color=color,
                 label=group.fit_label or f"{group.label} fit",
             )
+    format_accumulated_phase_axis(ax)
+
+
+def format_accumulated_phase_axis(ax: Axes) -> None:
+    """Label an accumulated phase axis (degrees versus integer CZ counts)."""
     ax.set(xlabel="CZ gates, n (count)", ylabel="Accumulated phase (deg)")
     ax.xaxis.set_major_locator(MaxNLocator(nbins=5, integer=True))
 

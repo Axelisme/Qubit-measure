@@ -27,7 +27,7 @@ class QuadraturePhase:
 
 @dataclass(frozen=True)
 class CountQuadratures:
-    """Target X/Y reductions in spectator × quadrature × n × frequency order.
+    """Aligned classified projection reductions on the leading axes of the counts.
 
     Values are dimensionless sigma; variances are count-derived sigma variances.
     Acquired is each projection's retained shot count. Empty counts give NaN
@@ -177,9 +177,9 @@ def phase_display_sem(
 
 
 def quadrature_phase_sem(group: CountQuadratures) -> NDArray[np.float64]:
-    """Return per-spectator shot SEM of phase in degrees, shaped (2,n,frequency).
+    """Return pointwise shot SEM of phase in degrees for batched X/Y reductions.
 
-    Group holds count reductions in spectator × X/Y × n × frequency order.
+    Group axes are series × X/Y × scan axes. The result omits the X/Y axis.
     Missing phase or fewer than two retained shots in either projection yield NaN.
     """
     variances = phase_variance(
