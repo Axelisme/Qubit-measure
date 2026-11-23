@@ -181,6 +181,12 @@ class FluxExp(Experiment[FluxResult, FluxCfg]):
         )
 
         def score(sums: NDArray[np.float64]) -> NDArray[np.float64]:
+            """Return the g/e separation score for one flux bias point.
+
+            Convert the two states' readout IQ sums through order three using
+            the configured skew penalty. Return a scalar float64 array, NaN
+            if either state has no shots.
+            """
             return snr_as_signal(sums, skew_penalty=cfg.skew_penalty)
 
         # 2. Move the external flux bias before each readout comparison.

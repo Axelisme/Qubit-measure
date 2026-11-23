@@ -111,7 +111,7 @@ class LookbackExp(Experiment[LookbackResult, LookbackCfg]):
         title = f"Lookback · ADC {run_cfg.readout.ro_ch} · Readout magnitude"
         fig, ax = context.plots.subplots(num="measurement", layout="tight")
         ax.set(
-            title=title,
+            title=f"{title}\nFull ADC window per shot",
             xlabel=_TIME_LABEL,
             ylabel=_MAGNITUDE_LABEL,
         )

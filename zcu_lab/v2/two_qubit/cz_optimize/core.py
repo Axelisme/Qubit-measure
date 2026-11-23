@@ -584,6 +584,12 @@ class CZOptimizeExp(Experiment[CZOptimizeResult, CZOptimizeCfg]):
         update = _start_live_view(context.plots, indices)
 
         def update_view() -> None:
+            """Refresh the live objective plot from the current evaluation data.
+
+            Use the captured targets, running best, envelope peaks and retained
+            shot counts to plot measured scores with shot SEM, the best trace
+            and markers for candidates exceeding the DAC limit. Return no value.
+            """
             update(np.stack((targets, best, _objective_sem(buffer.array), peak)))
 
         # 3. Measure evaluation 0 without a CMA update, then tell only complete populations.
