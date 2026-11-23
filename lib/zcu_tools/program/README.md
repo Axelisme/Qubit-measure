@@ -161,7 +161,10 @@ axis contributes a one-hot vector, while `v2.IQ` contributes
 appends `(I³, I²Q, IQ², Q³)` for a ten-component axis. Use one cubic axis
 on the terminal read to compute g/e separation SNR and skew from the same
 completed-round sums used for live updates. The reducer sums ordered outer
-products over kept shots. The first IQ component counts those shots. Two default IQ axes give a `(points, 6, 6)` array, including each
+products over kept shots. The first IQ component counts those shots. See
+[per-point shot SEM](../analysis/README.md#逐點-shot-sem) for how analysis uses
+raw sums from a single default IQ axis.
+Two default IQ axes give a `(points, 6, 6)` array, including each
 read's second moments and their cross moments. Classify uses a detached explicit
 classifier or the readout cfg's classifier. Both `Classify` and `IQ` with `tone=None` select a pulse
 readout or their mux readout's only tone. Multi-tone mux requires a zero-based cfg
