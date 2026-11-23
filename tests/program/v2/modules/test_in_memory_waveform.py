@@ -71,7 +71,7 @@ def test_in_memory_waveform_cannot_be_serialized(
             getattr(cfg, method)()
 
 
-def test_in_memory_waveform_cannot_be_parsed_or_used_as_a_ramp(
+def test_in_memory_waveform_cannot_be_parsed(
     samples: WaveformSamples,
 ) -> None:
     raw = {"style": "arb_memory", "samples": samples}
@@ -83,10 +83,6 @@ def test_in_memory_waveform_cannot_be_parsed_or_used_as_a_ramp(
         InMemoryArbWaveformCfg.model_validate_json(
             '{"style":"arb_memory","samples":{}}'
         )
-
-    waveform = InMemoryArbWaveformCfg(samples=samples)
-    with pytest.raises(ValueError, match="union_tag_invalid"):
-        FlatTopWaveformCfg.model_validate({"length": 1.0, "raise_waveform": waveform})
 
     raw_spec = {
         "style": "arb_memory",
@@ -113,9 +109,7 @@ def test_compiled_in_memory_envelopes_match_file_and_share_only_equal_samples(
 ) -> None:
     if not keep_q:
         samples = replace(samples, qdata=None)
-    path = tmp_path / "shape.npz"
-    path.write_bytes(encode_npz(WaveformFile(samples)))
-    file_cfg = ArbWaveformCfg(data="shape", path=str(path))
+    file_cfg = _file_arb(tmp_path, samples)
     memory_cfg = InMemoryArbWaveformCfg(samples=samples)
     same_cfg = InMemoryArbWaveformCfg(samples=deepcopy(samples))
     other_cfg = InMemoryArbWaveformCfg(
@@ -143,3 +137,43 @@ def test_compiled_in_memory_envelopes_match_file_and_share_only_equal_samples(
     file_iq, memory_iq, other_iq = (env["data"] for env in table.values())
     assert file_iq.shape == memory_iq.shape == other_iq.shape
     assert file_iq.tobytes() == memory_iq.tobytes() != other_iq.tobytes()
+
+
+def _file_arb(tmp_path: Path, samples: WaveformSamples) -> ArbWaveformCfg:
+    path = tmp_path / "shape.npz"
+    path.write_bytes(encode_npz(WaveformFile(samples)))
+    return ArbWaveformCfg(data="shape", path=str(path))
+
+
+def _flat_top_builder(
+    soccfg: QickConfig,
+    ramp: ArbWaveformCfg,
+    *lengths: float,
+) -> TimelineBuilder:
+    builder = TimelineBuilder(soccfg)
+    for length in lengths:
+        waveform = FlatTopWaveformCfg(length=length, raise_waveform=ramp)
+        pulse = PulseCfg(ch=0, nqz=1, freq=80, phase=15, gain=0.2, waveform=waveform)
+        builder.emit(Pulse("drive", pulse))
+    return builder
+
+
+def test_flat_top_asset_ramp_is_shared_across_plateau_lengths(
+    mock_soccfg: QickConfig, tmp_path: Path, samples: WaveformSamples
+) -> None:
+    ramp = _file_arb(tmp_path, samples)
+    prog = _flat_top_builder(mock_soccfg, ramp, 0.25, 0.4).build()
+
+    table = prog.envelopes[0]["envs"]
+    assert isinstance(table, dict)
+    assert len(table) == 1
+
+
+def test_short_flat_top_asset_ramp_fails_at_build(
+    mock_soccfg: QickConfig, tmp_path: Path, samples: WaveformSamples
+) -> None:
+    length = mock_soccfg.cycles2us(4, gen_ch=0)
+    short = replace(samples, time=np.array([0.0, length / 2, length]))
+    builder = _flat_top_builder(mock_soccfg, _file_arb(tmp_path, short), 0.25)
+    with pytest.raises(RuntimeError, match="shorter than the min of 3"):
+        builder.build()

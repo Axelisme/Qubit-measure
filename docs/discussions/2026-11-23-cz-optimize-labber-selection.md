@@ -1,7 +1,7 @@
 ---
 date: 2026-11-23
-status: active
-superseded_by: null
+status: superseded
+superseded_by: 2026-11-24-cz-optimize-native-labber-format.md
 related:
   - 2026-11-23-labber-scalar-index-axis.md
 basis:

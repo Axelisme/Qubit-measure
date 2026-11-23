@@ -275,6 +275,14 @@ EnvelopeWaveformCfg: TypeAlias = Annotated[
 
 
 class FlatTopWaveformCfg(AbsWaveformCfg):
+    """Native flat-top waveform with an envelope ramp and a constant plateau.
+
+    style is flat_top. length is the total duration in µs, as a scalar or QICK
+    sweep. raise_waveform supplies both ramp halves; its duration is subtracted
+    from length to get the plateau duration. QICK checks the quantized segment
+    lengths at program build.
+    """
+
     style: Literal["flat_top"] = "flat_top"
     length: float | QickParam
     raise_waveform: EnvelopeWaveformCfg
