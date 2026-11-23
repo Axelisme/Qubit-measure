@@ -82,7 +82,7 @@ Recipe 只提交選定項目的 ID，並查寫回收據。`writeback_applied` �
 頂層 `fit_quality` 為 null。任一角色擬合不可用時，該角色的 `reason` 說明原因，另一角色的結果仍會回報。
 
 兩條擬合都給出 correction 才詢問是否寫入 `$coupler.ext.cz_phase`。候選的 `qubit1`、`qubit2` 是同次 Run 捕捉的元件名，兩個校正值是 `correction_qubit1_deg`、`correction_qubit2_deg`。
-寫回不改脈衝或 slot。參見 [擬合解讀](../v2/two_qubit/local_z/guide.md#phase-與-slope) 和 [候選內容](../v2/two_qubit/local_z/guide.md#preview-與-apply)。
+寫回不改脈衝或 slot。參見 [擬合解讀](../v2/two_qubit/local_z/guide.md#怎麼讀圖) 和 [候選內容](../v2/two_qubit/local_z/guide.md#preview-與-apply)。
 
 ## two_qubit_constructive_phase
 
@@ -132,7 +132,7 @@ Recipe 的 `target` 物件仍用來綁定 aliases。
 使用同一組輸入欄位。Gate count 的間距須符合 [heralded adapter 的輸入條件](../v2/two_qubit/conditional_phase/guide_heralded.md#inputs-and-sequence)，例如 `[1, 2, 3]`。
 每發都在相位序列前做 mux herald。兩個 conditional phase adapter 的 `reset` 只接受一般 reset，不能套用上文的 mux-herald reset override。
 
-`frequency_mhz` 來自 [joint gg/ee 斜率的 π 交點](../v2/two_qubit/conditional_phase/guide_heralded.md#counts-and-plots)，不以只有 gg 的交點替代。
+`frequency_mhz` 來自 [joint gg/ee 斜率的 π 交點](../v2/two_qubit/conditional_phase/guide_heralded.md#read-the-joint-conditional-phase)，不以只有 gg 的交點替代。
 沒有唯一交點時同樣回 null 與 `frequency_reason`，不詢問寫回。
 有交點時，候選同樣是兩筆脈衝頻率和兩筆 slot 更新。
 

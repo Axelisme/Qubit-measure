@@ -147,7 +147,7 @@ Run 和 Analyze 的一維掃描用相同規則：沒有擬合曲線，就用折�
 Wrapped phase 的折線只連掃描順序中相鄰的有效點。圖上角度相差大於 180° 時，線會跨過分支切口；恰為 180° 時，無法判定方向。兩種情況都斷開該線段，保留兩個點和既有誤差棒。缺值也要斷線，不補插值點。
 
 - Rabi 的 live 圖用點、折線和 shot SEM。Analyze 加上擬合曲線後，量測資料只留點和 shot SEM。
-- Local Z 的 live 圖用點和折線顯示 X/Y 投影隨 CZ gate 數的變化。Analyze 的相位圖已有線性擬合，因此量測相位只畫點。
+- Local Z 的 live 圖用點和折線顯示累積相位隨 CZ gate 數的變化。缺值或半圈歧義處斷線。Analyze 主圖右格疊上線性擬合，量測相位只畫點與誤差棒。
 
 曲線圖沿用[共用樣式](../../lib/zcu_tools/plotting/experiment.mplstyle)的 `axes.grid: True`，不另外呼叫 `grid()`。影像與熱圖在 liveplot 和 Analyze 都明確呼叫 `grid(False)`。
 

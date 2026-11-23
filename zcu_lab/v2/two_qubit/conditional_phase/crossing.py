@@ -1,23 +1,11 @@
 """Adjacent-point phase unwrapping and in-window π crossing diagnostics."""
 
-from dataclasses import dataclass
 from math import ceil, floor
 
 import numpy as np
 from numpy.typing import NDArray
 
-
-@dataclass(frozen=True)
-class PhaseCrossings:
-    """All interpolated π modulo 2π frequencies in MHz and an identifiability reason.
-
-    A unique finite crossing has reason=None. No/multiple crossings, incomplete
-    phase or a degenerate π plateau retain a reason; no preferred root is chosen.
-    No uncertainty is inferred from interpolation without an uncertainty model.
-    """
-
-    frequencies_mhz: tuple[float, ...]
-    reason: str | None
+from .._phase import PhaseCrossings
 
 
 def phase_crossings(

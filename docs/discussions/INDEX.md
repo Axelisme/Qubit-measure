@@ -168,6 +168,7 @@
 
 ## Measure UI
 
+- 2026-11-23 [Conditional phase 與 Local Z 的圖照推導順序](2026-11-23-phase-figures-physics-order.md)：圖形呈現。主圖從 Bloch 向量、累積相位到條件相位；診斷量另放；Live 只畫已完整頻率。
 - 2026-11-23 [Singleshot T1 以振幅分 T1／T1b](2026-11-23-singleshot-t1-amplitude-naming.md)：讀圖語意。e→e 曲線振幅大的模是 T1、小的是 T1b；兩版都提議寫回主模。
 - 2026-11-23 [Single-shot T1 的兩個衰減時間與 tone Stop 初值](2026-11-23-singleshot-t1-relaxation-times.md)：讀圖語意。Superseded，由[振幅命名](2026-11-23-singleshot-t1-amplitude-naming.md)取代；Stop 初值仍取五倍。
 - 2026-11-23 [一維反演量的誤差棒與圖上事實](2026-11-23-inverted-error-bars-and-figure-facts.md)：圖形呈現。可傳遞 shot 共變異的一維反演量也畫棒；圖呈現品質值，寫回建議留在 Writeback。

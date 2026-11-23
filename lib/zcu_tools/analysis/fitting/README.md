@@ -17,8 +17,9 @@ coordinate slice. It delegates optimization and residual-scaled covariance to
 `PhaseSlopeFit` owns slopes, standard errors, backend results and failure reasons.
 Its `slopes_deg` values are in degrees per integer step: degrees per gate when
 `n` counts gates. Each fitted slope uses a representative in `[-180, 180]` of
-its 360° period. The guide's
-[single-point wrapped phase](../../../../zcu_lab/v2/two_qubit/conditional_phase/guide.md#read-phase-and-quadratures)
+its 360° period. `PhaseSlopeFit.accumulated_phase_deg` evaluates that slope
+and a selected group's fitted offset on an integer or dense count grid, without
+wrapping the result. The guide's [single-point wrapped phase](../../../../zcu_lab/v2/two_qubit/conditional_phase/guide.md#read-phase-and-quadratures)
 is an angle in `[-180, 180)`, not a per-gate change. The experiment, not the
 fitter, uses the slopes for
 [π crossing selection](../../../../zcu_lab/v2/two_qubit/conditional_phase/guide.md#select-a-frequency-and-apply).

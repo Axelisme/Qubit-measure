@@ -19,7 +19,7 @@ async def two_qubit_conditional_phase_heralded(
 ) -> ConditionalPhaseReport:
     """Scan CZ frequency with a mux herald and use the joint gg/ee crossing.
 
-    See [Counts and plots](../v2/two_qubit/conditional_phase/guide_heralded.md#counts-and-plots).
+    See [Read the joint conditional phase](../v2/two_qubit/conditional_phase/guide_heralded.md#read-the-joint-conditional-phase).
     Set ramsey_role (Form target), positive gate_count values, frequency_range
     in MHz and frequency_points (frequency.n → Expts). Omission keeps the Reset
     value. Null frequency_range clears both endpoints; other nulls go to the Form.

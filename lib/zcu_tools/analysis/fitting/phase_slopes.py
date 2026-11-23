@@ -27,6 +27,28 @@ class PhaseSlopeFit:
     fits: tuple[tuple[SharedFitResult | None, ...], ...]
     reasons: tuple[tuple[str | None, ...], ...]
 
+    def accumulated_phase_deg(
+        self,
+        n: NDArray[np.int64] | NDArray[np.float64],
+        *,
+        channel: int,
+        coordinate: int,
+        group: int,
+    ) -> NDArray[np.float64] | None:
+        """Evaluate the unwrapped fitted angle in degrees at each integer or real n.
+
+        Select a channel and coordinate slice of the shared fit, and an input
+        group for its fitted phase offset. Return None for an unavailable fit;
+        invalid array indices or missing group parameters raise IndexError or KeyError.
+        """
+        fit = self.fits[channel][coordinate]
+        if fit is None:
+            return None
+        return (
+            np.asarray(n, dtype=np.float64) * fit.values["slope"]
+            + fit.values[f"phase_{group}"]
+        )
+
 
 def _gate_count_alias_reason(n: NDArray[np.int64]) -> str | None:
     """Return the slope alias reason for fewer than two n or difference gcd≠1.
@@ -97,11 +119,14 @@ def fit_phase_slopes(
 ) -> PhaseSlopeFit:
     """Fit X=A_h cos(n*slope+φ_h), Y=A_h sin(n*slope+φ_h), without DC.
 
-    n is int64 (N,), an integer step axis. The three float64 inputs have
-    shape (G,2,2,N,F): group, channel, X/Y quadrature, step, coordinate slice.
-    quadratures are dimensionless; variances have squared quadrature units;
-    acquired_shots are totals for each independent projection. Each group's
-    amplitude/phase is independent; slope is shared within a channel/slice.
+    Supply n as an int64 (N,) integer step axis and three float64 arrays of
+    matching shape (G, 2, 2, N, F): group × spectator × X/Y × n × frequency
+    for conditional phase. Put spectator g before e and X before Y. For
+    other uses, the spectator and frequency axes represent two channels
+    and their coordinate slices. Quadratures are dimensionless, variances
+    have squared quadrature units, and acquired_shots are per-projection
+    shot totals. Each group has its own amplitude and offset; groups share
+    a slope within a spectator/frequency pair.
     Phases and slopes use degrees. Nonfinite acquired counts block that fit.
     Zero shots, nonfinite quadratures or nonpositive/nonfinite variance remove
     a step; every group must retain >=2 steps with difference gcd=1.
