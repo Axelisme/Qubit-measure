@@ -81,7 +81,7 @@ Result 欄位、儲存軸名與 label／unit 維持原樣。
 
 | 實驗 | 舊 cfg 欄位 | 目前欄位 |
 | --- | --- | --- |
-| `two_qubit/conditional_spectroscopy`、`two_qubit/idle_zz` | `dc_values` | `dc` |
+| `two_qubit/conditional_spectroscopy`、`two_qubit/conditional_spectroscopy_heralded`、`two_qubit/idle_zz` | `dc_values` | `dc` |
 | `two_qubit/conditional_phase`、`two_qubit/local_z` | `gate_counts` | `gate_count` |
 | `two_qubit/rb` | `depths`、`seeds` | `depth`、`seed` |
 

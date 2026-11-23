@@ -10,7 +10,7 @@
 
 - `qubit1` 和 `qubit2` 是位置，須綁不同元件。兩者須出現在同一 `mux` 的有序 qubit 清單；相同位置的 resonator 和 readout tone 須屬於同一 qubit。若 qubit 列表是 Qubit2、Qubit1，兩位置的 tone index 就是 1、0。表單核對完整 tone 數，不會從 ADC 編號或頻率猜順序。Notebook 用同名位置，但不讀取 GUI aliases。
 - **Mux readout** 引用 `$mux.module.readout`，缺 slot 時補全空白表單。保留完整 mux（包括其他 tones）。兩個位置都要有相同讀出設定下的 [mux GE 與 GE Post](../mux/singleshot_ge/guide.md) 圓形分類器及半徑；缺失或使用 linear classifier 會擋住 Run。更改讀出頻率、gain 或積分窗後重校。兩條 tone 必須來自同一 shot；不以各自的平均 IQ 代替聯合計數。
-- 除 joint readout、idle ZZ、conditional spectroscopy 外，其餘入口須綁 `coupler`，作為雙線 CZ 的 pulse、slot 或 local-Z 校準來源。核對兩線各自的 generator 與 bias 設定，而不只核對表單是否有效。
+- 除 joint readout、idle ZZ 及兩個 conditional spectroscopy 入口外，其餘入口須綁 `coupler`，作為雙線 CZ 的 pulse、slot 或 local-Z 校準來源。核對兩線各自的 generator 與 bias 設定，而不只核對表單是否有效。
 
 ### 重綁舊 point
 
@@ -18,7 +18,7 @@
 
 ## Herald reset 與獨立 heralded 入口
 
-一般入口的 **Reset** 留空則無 reset。在支援 mux herald 的入口，選 `reset/mux_herald` 並用與終端相同的完整讀出；`keep` 的鍵是完整 tone 的零起算位置（不是 ADC），例如所選位置為 0、1 才填 `{'0': g, '1': g}`。一般入口只計通過篩選的終端分布。獨立 heralded RB 與獨立 heralded conditional phase 都自帶 herald，各自按 herald 結果分出 gg、ee 兩組做聯合分析，不再加一層 herald reset。**Pass fraction** 是 herald gg 數除以所有取得的 shots，不是純度。
+一般入口的 **Reset** 留空則無 reset。在支援 mux herald 的入口，選 `reset/mux_herald` 並用與終端相同的完整讀出；`keep` 的鍵是完整 tone 的零起算位置（不是 ADC），例如所選位置為 0、1 才填 `{'0': g, '1': g}`。一般入口只計通過篩選的終端分布。獨立 heralded 入口不再加一層 herald reset。RB 與 conditional phase 按 herald 分出 gg、ee 兩組做聯合分析。[Heralded conditional spectroscopy](conditional_spectroscopy/guide_heralded.md) 在名目準備後 herald，按實測類別分成 gg、ge、eg、ee 四支頻譜。**Pass fraction** 是 herald gg 數除以所有取得的 shots，不是純度。
 
 從 `post_delay = 5/(2π·κ)` µs 開始。κ 是 [mux Onetone](../mux/onetone/guide.md) 量得的 linewidth（FWHM，MHz），共用等待取讀出中最小的 κ。等待從讀出波形結尾起算，不等 ADC 積分窗；herald 與終端共用此值。先用 [Joint readout](joint_readout/guide.md) 選 gg herald，對每顆取「該顆名目 Xπ、另一顆 I」的列，加總該顆終端為 e 的機率。只延長等待再比較。若較長等待仍提高 e 比例，先調等待再做 heralded 掃描；比例不是 gate fidelity。
 
@@ -31,7 +31,7 @@
 | 順序 | 用結果做什麼 |
 | --- | --- |
 | [Joint readout](joint_readout/guide.md) → [Idle ZZ](idle_zz/guide.md) | 先檢查四個名目準備的聯合計數，再比較 spectator I／Xπ 的 Ramsey 頻差。 |
-| [Conditional spectroscopy](conditional_spectroscopy/guide.md) → [Constructive phase](constructive_phase/guide.md) → [Chevron](chevron/guide.md) | 先找候選 RF，再定兩條線的相對相位，最後用回返谷選頻率與時長窗口。 |
+| [Conditional spectroscopy](conditional_spectroscopy/guide.md) 或 [heralded 入口](conditional_spectroscopy/guide_heralded.md) → [Constructive phase](constructive_phase/guide.md) → [Chevron](chevron/guide.md) | 先按名目準備或實測 herald 找候選 RF，再定兩條線的相對相位，最後用回返谷選頻率與時長窗口。 |
 | [CZ amplitude](cz_amplitude/guide.md) ↔ [Conditional phase](conditional_phase/guide.md) | 固定波形、時長與帶號 gain 比例，先量完整第一回返，再找唯一 π 交點。建議人工交替三輪；輪數不代替結果判準。 |
 | [Local Z](local_z/guide.md) → [Paired RB／IRB](rb/guide.md) | 分別測兩顆的每 gate phase，以其負值修正邏輯 frame，再用同 seed 成對序列比較衰減。 |
 
