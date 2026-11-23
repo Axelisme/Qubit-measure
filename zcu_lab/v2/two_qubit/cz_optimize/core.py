@@ -53,6 +53,7 @@ from ._analysis import (
     analyze_results,
     objective_sem,
 )
+from ._assets import capture_start_assets
 from ._result import CZOptimizeResult as CZOptimizeResult
 from ._result import axes_spec
 from ._shape import (
@@ -542,6 +543,7 @@ class CZOptimizeExp(Experiment[CZOptimizeResult, CZOptimizeCfg]):
         Invalid starts fail before acquiring. Stop leaves unmeasured entries NaN
         and does not tell CMA a partial generation.
         """
+        start_assets = capture_start_assets(cfg.drive)
         start = prepare_start(cfg.drive, context.soccfg, g_max=cfg.g_max)
         initial = _initial_coordinates(cfg, start)
         strategy, active = _make_strategy(cfg, initial)
@@ -563,6 +565,7 @@ class CZOptimizeExp(Experiment[CZOptimizeResult, CZOptimizeCfg]):
             carrier_hz=start.carrier_mhz * 1e6,
             arb_gains=start.arb_gains,
             field_at_one=float(start.field_at_one),
+            start_asset_fingerprints=start_assets,
         )
         progress = np.full((2, evaluations), np.nan)
         targets, best = progress

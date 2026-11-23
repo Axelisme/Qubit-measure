@@ -19,6 +19,7 @@ from zcu_tools.gui.app.measure.adapter import (
 )
 from zcu_tools.plotting.plots import Plots
 
+from ._assets import start_asset_issues, start_asset_paths
 from .core import (
     CZOptimizeAnalysis,
     CZOptimizeCfg,
@@ -42,12 +43,19 @@ def _get_writeback_items(
     req: WritebackRequest[_Run, CZOptimizeAnalysis | CZOptimizeUnavailable],
 ) -> Sequence[WritebackItem]:
     cfg, best = req.run_result.cfg, req.analyze_result
-    if isinstance(best, CZOptimizeUnavailable):
-        return []
     if cfg is None:
         raise ValueError(
             "CZ optimization writeback requires the saved starting cfg; see Load diagnostics"
         )
+    if isinstance(best, CZOptimizeUnavailable):
+        return []
+    if best.best_evaluation == 0:
+        issues = start_asset_issues(
+            req.run_result.result.start_asset_fingerprints,
+            paths=start_asset_paths(cfg.drive),
+        )
+        if issues:
+            raise ValueError("; ".join(issues))
     parameters = req.ctx.parameters
     if parameters is None:
         raise ValueError("CZ optimization writeback requires a Run/Load capture")
@@ -146,7 +154,12 @@ def run(cfg: CZOptimizeCfg, *, context: RunContext) -> _Run:
 def _summary_lines(source: _Run) -> tuple[str, ...]:
     cfg = source.cfg
     duration = f"Starting CZ duration {source.result.start_duration_s * 1e9:.6g} ns"
-    return (duration,) if cfg is None else (f"Reps×Rounds {cfg.reps}×1", duration)
+    acquisition = () if cfg is None else (f"Reps×Rounds {cfg.reps}×1",)
+    return (
+        *acquisition,
+        duration,
+        *start_asset_issues(source.result.start_asset_fingerprints),
+    )
 
 
 DEFINITION = Adapter(

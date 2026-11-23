@@ -7,6 +7,7 @@ import numpy as np
 from numpy.typing import NDArray
 from zcu_tools.cfg_model import ConfigBase
 from zcu_tools.core.waveform_format import WaveformSamples
+from zcu_tools.datafile import DataVariable
 from zcu_tools.experiment.axes_spec import (
     GroupedAxesSpec,
     GroupedLoadData,
@@ -52,6 +53,8 @@ class CZOptimizeResult:
     and cycle period are seconds; samples_per_cycle describes the display
     and CMA grid. carrier_hz is the shared carrier. arb_gains holds raw gains
     at physical g=1 for both lines; field_at_one gives Qubit1 DDS gain at g=1.
+    start_asset_fingerprints is the optional UTF-8 map from starting paths to
+    their Run-time SHA-256, retained when cfg cannot be restored.
     """
 
     seeds: NDArray[np.int64]
@@ -67,6 +70,7 @@ class CZOptimizeResult:
     carrier_hz: float
     arb_gains: NDArray[np.float64]
     field_at_one: float
+    start_asset_fingerprints: NDArray[np.uint8] | None = None
 
     def render_candidate(self, index: int) -> WaveformSamples:
         """Render the CMA sample grid at a finite parameter row (zero is the fit).
@@ -87,6 +91,7 @@ class CZOptimizeResult:
 
 
 _EVAL = VariableAxisSpec.generated_arange(label="Evaluation", unit="")
+_START_ASSETS = DataVariable("start_asset_fingerprints")
 
 
 def _scalar(
@@ -108,6 +113,7 @@ def _restore[CfgT: ConfigBase](data: GroupedLoadData[CfgT]) -> CZOptimizeResult:
             "CZ optimization result format has changed; this file lacks /vars/ramp_scale. Open an older run with the version that saved it."
         )
     sums = data.variable("sums")
+    fingerprints = data.variables.get(_START_ASSETS)
     return CZOptimizeResult(
         seeds=sums.axes[2],
         params=np.column_stack([data.variable(param.name).z for param in PARAMETERS]),
@@ -122,6 +128,7 @@ def _restore[CfgT: ConfigBase](data: GroupedLoadData[CfgT]) -> CZOptimizeResult:
         carrier_hz=float(data.variable("carrier_hz").z.item()),
         arb_gains=data.variable("arb_gains").z,
         field_at_one=float(data.variable("field_at_one").z.item()),
+        start_asset_fingerprints=fingerprints.z if fingerprints is not None else None,
     )
 
 
@@ -168,6 +175,17 @@ def axes_spec[CfgT: ConfigBase](
                 (VariableAxisSpec.generated_arange(label="DAC sample", unit=""),),
                 VariableZSpec(
                     "start_iq", label="Start display I/Q", unit="", dtype=np.complex128
+                ),
+                required=False,
+            ),
+            VariableSpec(
+                _START_ASSETS,
+                (VariableAxisSpec.generated_arange(label="Byte", unit=""),),
+                VariableZSpec(
+                    "start_asset_fingerprints",
+                    label="Starting CZ asset fingerprints",
+                    unit="",
+                    dtype=np.uint8,
                 ),
                 required=False,
             ),
