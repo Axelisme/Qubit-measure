@@ -29,6 +29,8 @@ CLI 以 `python -m migrations.migrate_storage` 執行。同來源、同宣告可
 
 Mux Ramsey、Mux Echo 與單 qubit Echo 的三個歷史 Labber 宣告由 [`migration_experiments.py`](migration_experiments.py) 固定，不從現行 Native 或 Labber 匯出選集推導。[合成等價驗收](../docs/discussions/2026-11-23-coherence-native-shot-moments.md#依據)只支持本次維持原 profile 版本，不是一般免升版規則。
 
+MIST gain 的歷史 `mist/gain / PowerDepCfg` 單 log 宣告同樣由 [`migration_experiments.py`](migration_experiments.py) 固定；[兩種 profile 的合成等價驗收](../docs/discussions/2026-11-23-mist-legacy-labber-equivalence.md#依據)只支持本次維持 fluxonium `1.28`、transmon `1.29`，不是一般免升版規則。
+
 Operator 的路徑、授權、dry-run、備份與重跑程序見 [storage migration CLI 指南](../docs/storage-migration.md#確認路徑與授權)，欄位與單位宣告見 [先執行 dry-run](../docs/storage-migration.md#先執行-dry-run)。
 磁通與樣本的來源優先序、pending 與覆寫規則由 [storage mapping](storage_migration/README.md#meta-欄位對照) 和 [samples mapping](storage_migration/README.md#samples-mapping) 擁有。
 

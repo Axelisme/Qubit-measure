@@ -3,6 +3,50 @@ import pytest
 from zcu_tools.analysis import shot_uncertainty
 
 
+def test_iq_mean_covariance_keeps_cross_term_and_uses_retained_counts() -> None:
+    # Paired shots (0, 0) and (3, 4), then the same two shots retained twice.
+    moments = np.array(
+        [
+            [2, 3, 4, 9, 12, 16],
+            [4, 6, 8, 18, 24, 32],
+            [1, 3, 4, 9, 12, 16],
+            [2, 3, 4, 9, np.nan, 16],
+        ],
+        dtype=np.float64,
+    )
+
+    covariance = shot_uncertainty.iq_mean_covariance(moments)
+
+    np.testing.assert_allclose(covariance[0], [[2.25, 3], [3, 4]])
+    np.testing.assert_allclose(covariance[1], [[0.75, 1], [1, 4 / 3]])
+    assert np.isnan(covariance[2:]).all()
+
+
+@pytest.mark.parametrize(("count", "i"), [(70, 0.3), (12_200, 1 / 3)])
+def test_iq_estimators_accept_serially_accumulated_constant_shots(
+    count: int, i: float
+) -> None:
+    # Accumulate in shot order rather than multiplying by the final count.
+    shot = np.array([1, i, 0, i * i, 0, 0], dtype=np.float64)
+    moments = np.zeros_like(shot)
+    for _ in range(count):
+        moments += shot
+
+    covariance = shot_uncertainty.iq_mean_covariance(moments)
+    np.testing.assert_array_equal(covariance, np.zeros((2, 2)))
+    assert shot_uncertainty.iq_shot_sem(moments, direction=(1, 0)) == 0
+
+
+def test_iq_estimators_keep_small_positive_scatter() -> None:
+    # Two shots around I=1, separated by 2**-24 (SEM is half the separation).
+    moments = np.array([2, 2, 0, 2 + 2.0**-49, 0, 0])
+    covariance = shot_uncertainty.iq_mean_covariance(moments)
+    np.testing.assert_array_equal(covariance, [[2.0**-50, 0], [0, 0]])
+    assert shot_uncertainty.iq_shot_sem(moments, direction=(1, 0)) == pytest.approx(
+        2.0**-25, abs=0
+    )
+
+
 def test_iq_sem_projects_cross_moment_and_uses_retained_count() -> None:
     # IQ shots (0, 0) and (3, 4) project to 0 and 5. The second point
     # retains the same two shots twice, even if both points started with 4 shots.
@@ -74,27 +118,37 @@ def test_iq_sem_leaves_missing_points_undefined_but_rejects_infinite_moments() -
         )
 
 
-def test_iq_sem_clips_only_rounding_scale_negative_centered_sums() -> None:
-    rounded = np.array([2, 2, 0, np.nextafter(2.0, 0.0), 0, 0])
-    assert shot_uncertainty.iq_shot_sem(rounded, direction=(1, 0)) == 0
-    with pytest.raises(ValueError, match="centered"):
-        shot_uncertainty.iq_shot_sem(
-            np.array([2, 0, 0, 2, 4, 2]), direction=(0.5, -0.5)
-        )
+@pytest.mark.parametrize(
+    ("raw", "reason"),
+    [
+        ([70, 0, 4, 2, 0, 0], "negative centered sum of squares"),
+        ([70, 0, 0, 2, 4, 2], "covariance bound"),
+    ],
+)
+def test_iq_estimators_classify_impossible_statistics_even_off_projection(
+    raw: list[float], reason: str
+) -> None:
+    moments = np.array(raw, dtype=np.float64)
+    with pytest.raises(shot_uncertainty.IQCovarianceError, match=reason):
+        shot_uncertainty.iq_mean_covariance(moments)
+    with pytest.raises(shot_uncertainty.IQCovarianceError, match=reason):
+        shot_uncertainty.iq_shot_sem(moments, direction=(1, 0))
 
 
 @pytest.mark.parametrize(
-    "moments",
+    ("raw", "reason"),
     [
-        [2.0, 0.0, 4.0, 2.0, 0.0, 2.0],  # Q has a negative centered sum.
-        [2.0, 2.0, 2.0, 4.0, -1.0, 4.0],  # Centered cross sum -3 exceeds 2.
+        ([2, 1, 0, 1, 0], "shape"),
+        ([1.5, np.nan, 0, 0, 0, 0], "count"),
+        ([1, 1, 0, np.inf, 0, 0], "infinite"),
     ],
 )
-def test_iq_sem_rejects_impossible_statistics_even_off_projection(
-    moments: list[float],
+def test_iq_covariance_distinguishes_invalid_input_from_unavailable_scatter(
+    raw: list[float], reason: str
 ) -> None:
-    with pytest.raises(ValueError, match="centered"):
-        shot_uncertainty.iq_shot_sem(np.array(moments), direction=(1, 0))
+    with pytest.raises(ValueError, match=reason) as failure:
+        shot_uncertainty.iq_mean_covariance(np.array(raw, dtype=np.float64))
+    assert not isinstance(failure.value, shot_uncertainty.IQCovarianceError)
 
 
 def test_iq_sem_accepts_rounding_in_unprojected_statistics() -> None:

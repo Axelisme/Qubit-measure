@@ -120,6 +120,20 @@ _ECHO_SCHEMA = (
     ),
 )
 
+_MIST_GAIN_SCHEMA = (
+    LegacyVariableSchema(
+        variable="data",
+        axes=(
+            LegacyAxisSchema(
+                name="Drive Power", unit="a.u.", dtype=np.dtype("float64")
+            ),
+        ),
+        signal_name="Signal",
+        signal_unit="a.u.",
+        signal_dtype=np.dtype("complex128"),
+    ),
+)
+
 _TONE_AXIS = LegacyAxisSchema(name="Tone", unit="", dtype=np.dtype("float64"))
 _MUX_COHERENCE_SCHEMA = (
     LegacyVariableSchema(
@@ -179,7 +193,10 @@ MIGRATION_EXPERIMENTS = (
     _declaration(lookback.LookbackExp.AXES_SPEC),
     _declaration(mist_flux_dep.FluxDepExp.AXES_SPEC),
     _declaration(mist_power_dep_drive_freq.DriveFreqExp.AXES_SPEC),
-    _declaration(mist_power_dep_single_trace.PowerDepExp.AXES_SPEC),
+    _declaration(
+        mist_power_dep_single_trace.PowerDepExp.AXES_SPEC,
+        schemas=_MIST_GAIN_SCHEMA,
+    ),
     _declaration(mux_amp_rabi.MuxAmpRabiExp.AXES_SPEC),
     _declaration(mux_twotone_spectrum.MuxFreqExp.AXES_SPEC, source_tag="mux/freq"),
     _declaration(mux_len_rabi.MuxLenRabiExp.AXES_SPEC),
