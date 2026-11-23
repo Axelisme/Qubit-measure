@@ -1,7 +1,7 @@
 ---
 date: 2026-11-23
-status: active
-superseded_by: null
+status: superseded
+superseded_by: 2026-11-23-coherence-native-shot-moments.md
 related:
   - ../adr/0069-experiment-core-and-frontends.md#呈現規範
   - 2026-11-22-mux-iq-moments-and-r11.md
