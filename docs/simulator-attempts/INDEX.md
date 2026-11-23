@@ -47,6 +47,8 @@ superseded_by: null
 
 ## Family 與 guard
 
+- 2026-11-23，[Sampled multitone RWA 探針提早判死](./2026-11-23-sampled-rwa-probe-early-rejection.md)，`rejected`。中途超標就退出會誤拒端點合格的列。D=4 正例在 10% span 的密度差為 `2.117e-4`，高於 `1e-4` 門檻（`8cd18afcd`，1.5 ns 的單一 spot-edge probe）。
+- 2026-11-22，[讓被拒的 sampled span 改走 common-frame](./2026-11-22-sampled-span-common-frame.md)，`rejected`。強制放行和加入包絡斜率修正都比留在 DP5(4) 慢。強制放行 0.877 s，DP5(4) 0.782 s（`47fbcf5e8`，heralded RB 的 400 ns 雙 tone 末段，單列 apply 牆鐘）。
 - 2026-11-19，[成形雙 tone 共同估價](./2026-11-19-shared-multitone-pricing.md)，`adopted`。以群總 CPU 秒數比較 gate 與 sampled RWA，建 gate 前按剩下的用量重算回本條件。只有選路核對，未量整次演化加速。
 - 2026-11-18，[Full-drive gate 的 CPU 競品估價](./2026-11-18-gate-direct-duration-price.md)，`adopted`。按 row duration 估算 CPU 競品，避免在不回本的列先建多 tone gate。留出案例仍有缺口。原收據未釘量測 commit。
 - 2026-11-18，[Sampled multitone RWA 恢復准入](./2026-11-18-sampled-multitone-rwa-admission.md)，`adopted`。用逐列條件與同形群抽查控制誤差，只有預估回本才付探針成本。正例 wall 中位加速 3.149 倍（`9a09218c` → `28afb820f`，CPU 7 workers、d=24 的 `simultaneous_drive_retained24` 24 點、三組 ABBA）。
@@ -60,9 +62,11 @@ superseded_by: null
 - 2026-11-14，[t6 的 direct 與 channel 分派](./2026-11-14-t6-direct-strategy.md)，`partial`。用 acquire 的 key 重用次數比較 channel 建構攤提與旋轉座標 direct 積分。原計時未釘各側量測 commit。
 - 2026-10-18，[Two-tone Floquet](./2026-10-18-two-tone-floquet.md)，`adopted`。保留近共振 sidebands，短段另比較 direct 的成本。早期 frame builder 版為 9.214 s（`58ca8b968`，S9 五點、兩 workers，暖機後交錯三次的 acquire wall 中位數）。
 - 2026-10-17，[Dyson 的輕量分類與事後檢查](./2026-10-17-ftf-dyson-guard-and-classification.md)，`adopted`。分類不預先跑整段演化；Dyson 的結果超過偏差門檻時記錄而不重算。多輪驗收未逐筆釘量測 commit。
+- 2026-10-17，[退役早期 reduced RWA](./2026-10-17-retire-reduced-rwa.md)，`adopted`。移除在當時 FTF 輸入上未增加覆蓋的 constant-tone 後援。沒有可追溯的前後計時。
 
 ## 跨點重用與快取
 
+- 2026-11-23，[放寬 RB 跨 depth 的前綴候選](./2026-11-23-rb-prefix-candidates.md)，`rejected`。允許更多共同邊界未顯示整輪收益。放寬及只留最長邊界都約 103.4 s，原規則 97.6 s（`8cd18afcd`，離線 plain RB depth `[0,12,24]`、兩臂，單 worker，每規則一次 `run_stage` 牆鐘，Numba 暖度不同）。
 - 2026-11-23，[FTF sampled RWA 探針快取](./2026-11-23-ftf-rwa-probe-memo.md)，`adopted`。一次 preparation 內重用完全相同的 sampled RWA 探針結果，每次 evolve 仍獨立選路。基準的 full-drive DOP853 探針用 175.29 CPU s（`ffd2a0c6`，離線 `two_qubit/chevron` 四點、單 worker 的一次 warm Run，呼叫執行緒 CPU 總和）。這不是快取後的耗時。
 - 2026-11-22，[ADC raw plan 在 acquire 內重用](./2026-11-22-adc-raw-plan-acquire-owner.md)，`adopted`。把確定性的 ADC raw plan 綁到 acquire session，換批或結束才退役。Raw materialize 343.737 → 159.082 s（`e602f0dc6` → `a4cd9f1bd`，同 fixture 的完整 `chain_power`，非排他單 worker、各一個 Run 的 materialize 累計）。
 - 2026-11-21，[Projective 腔場 span 重用](./2026-11-21-projective-span-reuse.md)，`adopted`。由 ADC 一次取二階矩與各態端點場，完全相同的 span 才重用。獨立端點解從 29,921 次降到 0（`afbed1182` → `aef142668`，seed 123、`chain_length` 2.2 µs 首點、Engine ordinal 0–4 前綴的計數）。
@@ -77,12 +81,15 @@ superseded_by: null
 
 ## 參考積分
 
+- 2026-11-22，[CPU DP5(4) 縮短每個區間的起始步長](./2026-11-22-dp54-interval-step-seed.md)，`adopted`。每個區間從更小的第一步開始，以減少重試，不改容差。0.803 → 0.616 s（`47fbcf5e8` 上的原型，heralded RB 的 400 ns 雙 tone 末段，排他 CPU 的單列 apply 中位數）。
+- 2026-11-21，[Heralded RB 的 DP5(4) 列內重用與共同步長](./2026-11-21-rb-dp54-row-reuse.md)，`rejected`。列內重用和批量交換子沒有足夠收益。辨認出的重用項目樂觀估省 14.29%（`666eb48ac`，heralded RB 的 400 ns 雙 tone 末段，從單列 apply 分項耗時估計，非實作加速）。
 - 2026-11-18，[短 dop853 row 改用 DP5(4)](./2026-11-18-short-dop853-dp54.md)，`adopted`。保留 family 契約，合格的短 row 在 CPU 和 OpenCL 走 DP5(4)。CPU wall 中位加速 1.4986 倍（`d45e87637` → `62844ad96`，d=24 的 `simultaneous_drive` 24 點、7 workers、三組排他 ABBA）。
 - 2026-10-21，[Joint Fock CKP 的 RK4 與 cutoff](./2026-10-21-joint-fock-performance-study.md)，`partial`。每個 rf 共用準備產物，用保守步長與自適應 cutoff 壓低兩能階解的成本。成本為外推，研究量測未釘 commit。
 - 2026-10-18，[Direct integration](./2026-10-18-direct-integration.md)，`partial`。保留自適應控制，合適的單 tone row 改用 interaction picture。原型少 31.50%（`b0cb487f3` 上的 IP 加 gain grouping 原型，F5 201 點、兩 workers 的一組完整 acquire wall 對照，非正式版）。
 
 ## 表示與合併
 
+- 2026-11-23，[同頻多線摺成單 tone](./2026-11-23-same-carrier-drive-merge.md)，`investigating`。同形線合成一對 I/Q 算符，改走單 tone family。27.693 → 1.731 CPU s（`3e86bba6d` 上的原型，plain RB 兩臂、depth `[0,4,8]`、CPU 單 worker，各一次 profile process；不是 S 實作驗收）。
 - 2026-11-22，[FTF 真空續演化與 Markov chain](./2026-11-22-ftf-projective-markov.md)，`partial`。投影後清零腔場，讓同點、同層、同 DC 態只續演化一次。獨立同模型參考通過 41／75 個 key（`e602f0dc6`，兩個 floor，兩個縮樣讀出掃描及 heralded conditional phase 的首讀）。
 - 2026-11-18，[FTF 的 Engine 內子空間約化](./2026-11-18-ftf-subspace-reduction.md)，`rejected`。比較低能截斷、逐點選態與誤差界，尋找便宜又可靠的自動約化。低能 24 態有 15／15 點過預算（`c04fb3823` 上的研究原型，固定 DC、F1 單一常數 tone 的三組五點掃描，相對 32 態的完整 density）。
 - 2026-11-18，[FTF acquire 動態維度](./2026-11-18-ftf-dynamic-dimension.md)，`adopted`。用最強一點做上限 pilot，只有預估節省足以抵驗算時才試小維度。原討論未對各輪釘量測 commit。
@@ -93,6 +100,8 @@ superseded_by: null
 
 ## 平行化與排程
 
+- 2026-11-23，[Chevron 先減少 caller 準備成本，再評估程序池](./2026-11-23-chevron-parallelism-order.md)，`paused`。直接換 `loky` 無法序列化現有工作。既有執行緒由 1 改 7 workers 快 1.28 倍（`ffd2a0c6c`，離線 2×2 gg herald chevron、非排他 4 CPU、各一次完整 Run 牆鐘）。
+- 2026-11-21，[FTF 同點同 span 的投影續算合批](./2026-11-21-projective-continuation-batches.md)，`adopted`。同點同 span 的就緒 histories 一起送到 Engine，保留各列初態。配對重播設計把 8 次 evolve 改為 3 次（固定兩態無驅動序列；原始計時版本未釘，不列加速）。
 - 2026-11-18，[dop853 的 OpenCL GPU 後端](./2026-11-18-ftf-gpu-dop853-backend.md)，`adopted`。把合格的獨立 row 批次送到 FP64 GPU，沒有可用裝置時保留 CPU。CPU／auto 中位 wall 比 5.677 倍（`544af11bf`，Intel Arc、d=32 的 `simultaneous_drive` 24 點、7 workers、三組獨占 ABBA 的整次 evolve）。
 - 2026-11-17，[DOP853 路線比較](./2026-11-17-dop853-speed-route-summary.md)，`partial`。配對比較同批次的 worker 寬度，另查載波積分、前導共用與 GPU 是否值得續做。8 workers 的 wall 加速中位數為 4.002307 倍（`2514d94be`，pinned DOP853 的 64 點 Gaussian 單段，對 1 worker、8 輪 warm_clear_history 的 evolve 配對）。
 - 2026-10-18，[Planner 的 evidence admission](./2026-10-18-planner-evidence-and-overhead.md)，`rejected`。按完整 acquire 評估候選路徑，未通過效能驗收。候選版的確切量測 commit 不明，不列代表數字。
