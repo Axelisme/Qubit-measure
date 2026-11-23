@@ -17,7 +17,7 @@ For each gain and exposure time: optional **Reset** → no pulse for g preparati
 
 Run shows six population maps (preparation by column, final class by row) versus probe gain and duration. The bottom two panels connect the measured fractions versus probe duration at the current gain, one per preparation.
 
-Analyze drops incomplete outer rows and applies the saved readout correction if available. Its six population maps put g and e preparations in separate rows, and final g/e/Other in columns. Color shows population, not shot SEM. The bottom panels compare Γ₀L with Γ₀₁, Γ₁L with Γ₁₀, then Γ₁L with Γ₀L. Lines join rates fitted separately at each sweep point on log-scale axes. Bars at the first and every fifth point after it are the rates' fit SE from their covariance, not shot SEM or run-to-run variation. The Analyze maps and rates use the same outer coordinate; if transformed as above, do not read it as raw gain.
+Analyze drops incomplete outer rows and applies the saved readout correction if available. A singular matrix or a nonfinite solve at a valid point logs one warning, then Analyze fits the classified fractions. Its six population maps put g and e preparations in separate rows, and final g/e/Other in columns. Color shows population, not shot SEM. The bottom panels compare Γ₀L with Γ₀₁, Γ₁L with Γ₁₀, then Γ₁L with Γ₀L. Lines join rates fitted separately at each sweep point on log-scale axes. Bars at the first and every fifth point after it are the rates' fit SE from their covariance, not shot SEM or run-to-run variation. The Analyze maps and rates use the same outer coordinate; if transformed as above, do not read it as raw gain.
 
 ## Next step
 

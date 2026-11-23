@@ -200,9 +200,9 @@ QND 軸固定 0..1，但回報不裁切。Score 軸只按 score 值決定，不�
 | `mux_onetone` | `mux/onetone` | `participants` 收完整 readout 的原始整數 index，依清單順序執行，不以名稱查位置。`df:{start,stop}` 是共同 MHz offset，`n` 是共用點數。回覆每 tone 的 index、name、freq、kappa、fit_quality 與 identity 診斷。 |
 | `onetone_range_find` | `onetone/range_find` | 必填絕對 MHz `freq:{start,stop}`、`n` 與非空 `resonators` 名單。名稱數是預期峰數，初始依頻率升序配對，不進 acquisition cfg。傳入實際元件名稱，例如 `["R1"]`；未辨識的峰可用暫用名稱。GUI Analysis 預設為 `["R1"]`，recipe 仍須明填名單，不沿用此預設。單一 Interactive 入口預設不平滑、自動依名稱數求 prominence factor、FWHM 上限 25 MHz，以 depth / FWHM 排序。`min_separation` 為有限正數 MHz，初值 1 MHz，與名單經同一 Analyze updates 傳入。Recipe 等待 agent 經 `tab_interact` 調整或確認並送 done，才詢問 writeback，不自動送 done。每個具名 dip 都提議 `<name>.freq`，不依 capture 篩選，Unassigned 不提案。接受後在作用中文件覆寫既有 freq，或建立只指定 freq 的 resonator，其餘使用 model defaults。名稱打錯會建立多餘元件，可在接受前取消該候選。回覆最終 name、freq、depth、fwhm、score、實際 `prominence_factor` 與 `identity_diagnostic`。手動非候選點的 metrics 為 null。 |
 | `stirap_amplitude` | `twotone/stirap/amplitude` | `pump_start/pump_stop/pump_n` 與 `stokes_start/stokes_stop/stokes_n` 指定兩條獨立 gain 軸，兩組 `n → expts`。支援 signed gain 與零值，超出 [-1, 1] 在 Run 編譯時報錯。同一 program 用兩個硬體 sweep 取得二維 g/e/f counts。Pump/Stokes 各選 gauss、cosine、drag 或 arb，`pump_waveform_ref/stokes_waveform_ref` 選 library key 或 inline Form 選項，overrides 設波形參數。載波用 MHz，固定 `stokes_lead_us` 正值表示 Stokes 先。Run、Analyze、Save，不提出 writeback。 |
-| `stirap_delay` | `twotone/stirap/delay` | `start_us/stop_us/n` 掃描 Stokes lead，正值 Stokes 先、負值 Pump 先。兩條各自選 gauss、cosine、drag 或 arb 與各自時長。必填量得的 `pump_freq_mhz/stokes_freq_mhz` 與 signed gains。完整 Run、Analyze、Save，分析只用保存的 centroid3，不提出 writeback。 |
+| `stirap_delay` | `twotone/stirap/delay` | `start_us/stop_us/n` 掃描 Stokes lead，正值 Stokes 先、負值 Pump 先。兩條各自選 gauss、cosine、drag 或 arb 與各自時長。必填量得的 `pump_freq_mhz/stokes_freq_mhz` 與 signed gains。完整 Run、Analyze、Save，分析保存的分類計數，只套用保存的校正，不提出 writeback。 |
 | `stirap_detuning` | `twotone/stirap/detuning` | Pump 與 Stokes 各自選 gauss、cosine、drag 或 arb。`pump_start_mhz/pump_stop_mhz/pump_n` 掃內層 Pump，`stokes_start_mhz/stokes_stop_mhz/stokes_n` 掃外層 Stokes。兩軸都是加到量得載波的 MHz offset。`pump_waveform_ref/stokes_waveform_ref` 選 library key 或 `Inline: cosine` 等 Form 選項，overrides 設所選波形參數。完整 Run、Analyze、Save，不提出 writeback。 |
-| `raman_gf` | `twotone/raman_gf` | `carrier_mhz` 由操作者提供；drive 接受任何受支援波形，`waveform_asset` 可指定已建立的 arbitrary envelope（sqrt(sin) 形狀需 arb）。`scan_mode` 使用 frequency、gain、frequency_gain；detuning 使用 two-photon MHz，正值使單 carrier 增加一半 detuning，gain 直接使用 DAC full-scale fraction（a.u.）。分析只用 Run 保存的 centroid3 readout，完整 Run、Analyze、Save，不提出 writeback。 |
+| `raman_gf` | `twotone/raman_gf` | `carrier_mhz` 由操作者提供；drive 接受任何受支援波形，`waveform_asset` 可指定已建立的 arbitrary envelope（sqrt(sin) 形狀需 arb）。`scan_mode` 使用 frequency、gain、frequency_gain；detuning 使用 two-photon MHz，正值使單 carrier 增加一半 detuning，gain 直接使用 DAC full-scale fraction（a.u.）。Analyze 讀保存的分類計數，只套用保存的校正。完整 Run、Analyze、Save，不提出 writeback。 |
 | `ro_optimize_chain_power` | `twotone/ro_optimize/chain_power` | 可省略 `gain_start`／`gain_stop`（a.u.）、`points`、`relax_delay`（µs）、`reps`、`rounds`。每 shot 等待 K 後連讀 16 次，無 drive。回報最佳 `gain`、`score`、`score_error`、`qnd`、`qnd_error`、`correlation`、`amplification`、`mist`（M 診斷）。完整 Run、Analyze、Save，不提出 writeback。 |
 | `ro_optimize_chain_freq` | `twotone/ro_optimize/chain_freq` | 同上，掃描端點為 `freq_start_mhz`／`freq_stop_mhz`（MHz），回報 `freq_mhz`。 |
 | `ro_optimize_chain_length` | [`twotone/ro_optimize/chain_length`](../v2/twotone/ro_optimize/chain_length/guide.md) | 同上，`length_start_us`／`length_stop_us` 設 ADC window 掃描端點（µs）。Run 用各 window 加表單的 `length_margin` 設 pulse 長度，回報 `length_us`。 |
@@ -224,10 +224,9 @@ QND 軸固定 0..1，但回報不裁切。Score 軸只按 score 值決定，不�
 
 有 writeback proposal 的流程先 Run、Analyze，再依各 recipe 的條件詢問寫回，只接受回答選定的候選，最後 Save。
 CPMG report 回傳 `t2_1_us`、`t2_1_err_us`、`gamma`、`gamma_err` 與 `fit_rows`。可加權列少於三列時四個擬合值為 null，仍保存圖與原始資料；分析失敗時 `fit_rows=0` 並附原因。
-STIRAP 與 Raman 沒有 writeback proposal，不詢問寫回。
-它們回報 saved confusion matrix 的 condition number 與 minimum singular value。
-STIRAP 另回 `f_population_estimate`，即本次網格內最大有限的 corrected f population。同值取最早取數的點。
-它不裁切到 [0, 1]，不是 fidelity，也不代表全域最佳脈衝。逐點 g/e/f fractions 仍只畫在圖中。
+STIRAP 與 Raman 的 Run 都要求 centroid3 classifier。Analyze 讀已分類的 g/e/f counts，沒有可用校正時只畫分類圖。Report 的 condition number 與 minimum singular value 指本次套用的矩陣；未校正時兩者都是 null。四個 recipe 都不詢問寫回。
+
+STIRAP 的 `f_population_estimate` 是本次掃描內最大的有限校正 f 值，不裁切到 [0, 1]。未校正時，此值和校正峰座標都為 null；改由 `classified_f_peak` 回報 `f_label_fraction`（0–1）及同名掃描座標。有校正時不報分類峰。兩種峰都取首個最大值，與圖上的 marker 共用，並不代表 fidelity 或全域最佳脈衝。
 
 | STIRAP recipe | 峰值座標 |
 | --- | --- |
@@ -235,7 +234,7 @@ STIRAP 另回 `f_population_estimate`，即本次網格內最大有限的 correc
 | `stirap_detuning` | `pump_detuning_mhz`、`stokes_detuning_mhz`，相對量得載波的 offset |
 | `stirap_amplitude` | `pump_gain`、`stokes_gain`，a.u. |
 
-沒有有限值或 Analyze 無結果時，回報的峰值與座標都是 null。
+沒有可用峰或 Analyze 無結果時，峰值與座標都是 null。
 Analyze 拋錯仍保留原錯誤，且成功 Run 後仍 Save g/e/f counts。三態 reference 不另加工具。
 `stirap_delay`、`stirap_amplitude` 與 `stirap_detuning` 使用各自獨立的 adapter 與表單。
 舊合併實驗的 run 不做遷移，也不支援載入。

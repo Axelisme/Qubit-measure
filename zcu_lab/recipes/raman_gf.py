@@ -79,15 +79,15 @@ class RamanGFInputs(RecipeInputs):
 
 
 class RamanGFReport(RecipeReport):
-    """Saved-readout matrix quality; population arrays remain in analysis artifacts."""
+    """Applied readout matrix quality; population arrays stay in analysis artifacts."""
 
     condition_number: float | None = Field(
         default=None,
-        description="Saved training confusion matrix 2-norm condition number; null if analysis failed.",
+        description="2-norm condition number of the applied readout matrix; null without correction or if unrepresentable.",
     )
     minimum_singular_value: float | None = Field(
         default=None,
-        description="Saved training confusion matrix minimum singular value; null if analysis failed.",
+        description="Smallest singular value of the applied readout matrix; null without correction.",
     )
 
 
@@ -110,8 +110,9 @@ async def raman_gf(session: RecipeSession, inputs: RamanGFInputs) -> RamanGFRepo
     An explicit waveform asset converts drive and waveform to inline without
     replacing their family; choose an arbitrary waveform source first.
     Ordered overrides follow the named inputs. Missing/invalid inputs are
-    reported by the Form before Run. Analyze uses only this run's saved
-    readout centroid3 calibration, not live calibration or simulator truth.
+    reported by the Form before Run. Analyze uses classified counts from this
+    run and applies its saved centroid3 matrix only when usable. It never reads
+    live calibration or simulator truth.
     No writeback is proposed or requested. Analysis failure still saves g/e/f counts;
     owner errors propagate after Save. Save receipts identify failed outputs.
     """

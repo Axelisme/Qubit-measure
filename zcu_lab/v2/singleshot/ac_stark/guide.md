@@ -14,7 +14,7 @@ Optional **Reset** and **Initial preparation pulse** → overlapping **Cavity St
 
 ## How to read the results
 
-Compare the g/e/Other maps on the common 0–1 scale. Analyze applies readout correction only with the confusion matrix in the selected result's saved cfg; without it, the maps show classified fractions. Old files without class counts cannot be converted on Load; acquire again.
+Compare the g/e/Other maps on the common 0–1 scale. Analyze applies readout correction only with the confusion matrix in the selected result's saved cfg; without a usable matrix, the maps and resonance fit use classified fractions. A singular matrix or a nonfinite solve at a valid point logs one warning. Old files without class counts cannot be converted on Load; acquire again.
 
 In the fit, points mark resonance frequencies extracted from the baseline-subtracted g/e contrast, and the line plots their shift versus gain². R² is the fraction of resonance variation explained by the line. Neither map colors nor resonance locations carry shot SEM bars. Check for a single ridge fully within the span; extend the frequency limit if the selected ridge hits it.
 

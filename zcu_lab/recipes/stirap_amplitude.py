@@ -14,7 +14,10 @@ from zcu_tools.mcp.measure.recipe_api import (
     report_number,
 )
 
-from zcu_lab.v2.twotone.stirap.amplitude.core import StirapAmplitudeSummary
+from zcu_lab.v2.twotone.stirap.amplitude.core import (
+    StirapAmplitudeClassifiedPeak,
+    StirapAmplitudeSummary,
+)
 
 
 class StirapAmplitudeInputs(RecipeInputs):
@@ -75,7 +78,7 @@ class StirapAmplitudeInputs(RecipeInputs):
 
 
 class StirapAmplitudeReport(RecipeReport):
-    """Saved readout diagnostics and the peak within the measured scan grid."""
+    """Applied readout diagnostics and a sampled f peak on one population basis."""
 
     f_population_estimate: float | None = Field(
         default=None,
@@ -90,11 +93,16 @@ class StirapAmplitudeReport(RecipeReport):
         description="Stokes gain in a.u. at the grid peak; null when unavailable.",
     )
 
+    classified_f_peak: StirapAmplitudeClassifiedPeak | None = Field(
+        default=None,
+        description="Largest sampled fraction of shots labeled f (0–1) and its coordinates; null if corrected or unavailable.",
+    )
+
     condition_number: float | None = Field(
-        description="Saved training confusion condition number; null if analysis is unavailable."
+        description="2-norm condition number of the applied readout matrix; null without correction or if unrepresentable."
     )
     minimum_singular_value: float | None = Field(
-        description="Saved training confusion minimum singular value; null if analysis is unavailable."
+        description="Smallest singular value of the applied readout matrix; null without correction."
     )
 
 
@@ -148,6 +156,7 @@ async def stirap_amplitude(
             )
         return StirapAmplitudeReport(
             f_population_estimate=analysis.result.f_population_estimate,
+            classified_f_peak=analysis.result.classified_f_peak,
             pump_gain=analysis.result.pump_gain,
             stokes_gain=analysis.result.stokes_gain,
             condition_number=report_number(analysis.result.condition_number),

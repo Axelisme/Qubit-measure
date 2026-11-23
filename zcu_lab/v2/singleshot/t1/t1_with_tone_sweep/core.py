@@ -434,7 +434,9 @@ class T1WithToneSweepExp(Experiment[T1WithToneSweepResult, T1WithToneSweepCfg]):
         xs = xs[valid_mask]
         populations = populations[valid_mask]
 
-        populations = correct_populations(populations, confusion_matrix)
+        populations = correct_populations(
+            populations, confusion_matrix, fallback_on_nonfinite=True
+        )
 
         # 2. Fit both preparations together, then choose the displayed outer axis.
         rates, rate_Covs = _fit_transition_rates(Ts, populations)

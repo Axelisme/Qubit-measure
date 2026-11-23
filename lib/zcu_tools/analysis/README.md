@@ -221,12 +221,12 @@ radius=None 時由 `optimize_ge_radius` 選半徑。選項預設值與畫圖留�
 
 `analyze_reference_iq` 只收三組 acquired IQ 與準備標籤。它與 centroid3 processor 共用 `utils.shot_classification.nearest_centroid3` 的 g/e/f 最近中心與等距規則。前半訓練 nearest-centroid classifier 與 confusion matrix，後半獨立計算 raw/corrected fractions 與準備標籤錯誤率。最小分離度是最近兩個中心的 IQ 距離除以共用等向 σ。σ² 為 pooled training covariance 的 trace/2；σ 必須為正且有限。矩陣品質由 training confusion 的 condition number 與最小 singular value 表示。Correction 回到準備標籤座標，保留負值與大於 1 的值，不推論參考態純度。`correct_populations` 的既有預設仍 clipping；caller 可用 `clip=False` 保留線性解。
 
-`try_correct_populations` 為一維 circle 分析提供不裁切的數值解。矩陣奇異或原本有限的分類點反解溢位時，記下原因並回傳 `None`。原先缺測的點不算反解溢位。沒有矩陣時原樣回傳；矩陣形狀不符或含非有限值則拋出 `ValueError`。是否只發布分類比例診斷圖由實驗決定，不改 `correct_populations` 的既有契約。
+Lab 的 saved-matrix reader 把奇異矩陣當成缺席並記一筆 warning。`correct_populations(..., fallback_on_nonfinite=True)` 在裁切前檢查反解。只要一個原本有限的分類點解成非有限值，就記一筆 warning 並回傳整份原分類陣列，與沒有矩陣時相同。原先缺測的點不算反解失敗。Caller 用物件身分判斷是否實際套用了矩陣，再選用對應的 shot SEM 與圖名。
 
 `classify_reference_iq(signals, centroids)` 將固定三中心套用到任意 scan axes 加最後 shot axis 的 acquired IQ，輸出 scan axes 加 g/e/f fraction axis。它也使用共用 nearest kernel。中心與 IQ 使用相同 ADC 單位，不重訓、不修正。Exact ties 歸最低 label。Caller 用 `correct_populations(..., clip=False)` 套用 reference training confusion；結果仍是 preparation-label 座標，不是 latent energy-state population。
 
-`analyze_centroid3_populations(populations, calibration)` 接收已正規化的 g/e/f fractions 與 caller 從 saved run cfg 取得的 `Centroid3Classifier`。它回傳 `Centroid3IQAnalysis`，包含 raw/unclipped corrected fractions、training confusion 副本及其 condition number/minimum singular value。它保留任意 scan axes，依 prepared rows／measured columns 解矩陣，singular matrix 拋出 LinAlgError。STIRAP 的 delay、amplitude、detuning 三個實驗與 Raman 各自將 counts 正規化，再共用此入口。各實驗自己畫圖，不共用分析圖。
+`analyze_centroid3_populations(populations, calibration)` 接收已正規化的 g/e/f fractions 與 caller 從 saved run cfg 取得的 `Centroid3Classifier`。它回傳 `Centroid3IQAnalysis`，包含 raw/unclipped corrected fractions、training confusion 副本及其 condition number/minimum singular value。它保留任意 scan axes，依 prepared rows／measured columns 解矩陣，singular matrix 拋出 LinAlgError。這個入口要求 caller 提供校準；Raman 和 STIRAP 的 saved-counts Analyze 另走可選校正，只共用數值 solver。
 `analyze_centroid3_iq(signals, calibration)` 先以 saved centers 分類 acquired IQ，再呼叫同一個 population 入口。兩個入口都不讀 library、Form、program 或硬體，不重新訓練校準，也不重宣告數值結果型別。
 完整的 `Centroid3IQAnalysis` 留給 caller 畫 raw／unclipped corrected fractions。
 `summarize_centroid3(result)` 產生 `Centroid3Summary`，複製 3×3 training confusion，保留 condition number 與 minimum singular value，不重算分析。摘要大小不隨 scan axes 或 shot 數成長，供實驗回傳與 recipe 解碼。
-`Centroid3Summary` 的 owner 註解支援 TypeAdapter 從 native summary 重建 float64 confusion matrix；壞 dtype、shape 或 null／非有限 matrix 值明確拒絕。這不改 summary 或儲存格式。
+`Centroid3Summary.from_applied_matrix` 描述這次實際套用的矩陣。沒有校正時，矩陣、condition number 和最小 singular value 都是 null。TypeAdapter 可解碼 null 或重建有限的 float64 3×3 matrix；矩陣內的 null、非有限值與錯 dtype 或 shape 仍拒絕。Saved cfg 不變。

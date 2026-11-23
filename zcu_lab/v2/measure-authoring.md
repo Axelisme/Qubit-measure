@@ -532,6 +532,8 @@ Core 回傳分析品質，圖依 [R3b](figure-style.md#r3b結果旁寫-fit-品�
 
 兩個 service 都把 proposals 交給 `WritebackService.create_draft`。`analysis_stage` 只呼叫 core，不經 adapter，也不建立 draft。
 
+已分類 counts 的 Analyze 只可使用該次保存的 confusion matrix。Saved-matrix reader 處理奇異矩陣；數值 solver 若發現有效點解成非有限值，整次回到分類比例。兩種情形各警告一次，不因只缺 shot SEM 取消校正。畫圖、摘要和寫回使用同一份分析資料，不各自重新判斷校正。Raman 與 STIRAP 的 Run 仍要求 centroid3，Analyze 只要完整 saved cfg 與合規 counts 即可在缺 classifier 時出圖；錯型仍拒絕。
+
 [Singleshot GE adapter](singleshot/ge/gui.py) 與 [mux GE adapter](mux/singleshot_ge/gui.py) 各以
 `ge_calibration_review_note` 判斷 Analyze 的初選與理由。它讀取 joint `FitQuality`，包括
 `relative_parameter_errors` 裡的寬度 `s` 和中心 `sg`、`se` 的相對誤差。

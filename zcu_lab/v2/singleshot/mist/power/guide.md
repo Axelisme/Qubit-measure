@@ -17,7 +17,7 @@ Optional **Reset** → optional **Initial preparation pulse** → **MIST tone** 
 
 Live shows classified fractions. Analyze corrects them only with the confusion matrix saved with this result; without it, expect classified fractions, not corrected populations. Look for a change in P(Other) across the scan. Compare it against the bars, one shot SEM from counts retained at each point (absent below two shots). Analyze uses the linear correction without clipping, so estimates can be below 0 or above 1. It propagates shot-count covariance with the saved calibration matrix treated as known. The bars do not show fit errors or round-to-round variation.
 
-If the saved matrix cannot produce finite corrected fractions, Analyze shows **Readout correction unavailable** and only the G/E/Other classified fractions from this Run, with shot SEM where available. These are counts after classification, before correction. When only a corrected bar is unavailable, the corrected point remains.
+If the saved matrix is singular or solving it gives a nonfinite value at a valid point, Analyze logs one warning and uses classified populations for the whole scan. An unavailable shot SEM bar does not by itself disable correction.
 
 ## Next step
 

@@ -7,11 +7,7 @@ import numpy as np
 from numpy.typing import NDArray
 from pydantic import Field, model_validator
 from zcu_tools.analysis.shot_uncertainty import class_probability_covariance
-from zcu_tools.analysis.singleshot import (
-    Centroid3Summary,
-    analyze_centroid3_populations,
-    summarize_centroid3,
-)
+from zcu_tools.analysis.singleshot import Centroid3Summary
 from zcu_tools.cfg_model import ConfigBase, FieldMeta
 from zcu_tools.experiment import AxesSpec, Experiment, RunRecord
 from zcu_tools.experiment.context import RunContext
@@ -30,6 +26,11 @@ from zcu_tools.program.v2.modules.readout import centroid3_classifier
 from zcu_tools.program.v2.modules.waveform import EnvelopeWaveformCfg
 
 from zcu_lab.v2.support import live_errorbar
+from zcu_lab.v2.support.singleshot.centroid3_analysis import (
+    centroid3_title,
+    centroid3_trace_sems,
+    correct_saved_centroid3,
+)
 
 from .._population_peak import first_finite_peak
 from .._pulses import drive_pulse
@@ -49,15 +50,26 @@ class StirapDelayResult:
 
 
 @dataclass(frozen=True)
-class StirapDelaySummary(Centroid3Summary):
-    """Saved confusion diagnostics and the largest finite corrected f population.
+class StirapDelayClassifiedPeak:
+    """Largest finite fraction of shots labeled f (0–1), at a sampled lead in µs."""
 
-    The population estimate is dimensionless and unclipped, not fidelity.
-    Peak coordinates use Stokes lead (us). With no finite value, all peak fields are None.
+    f_label_fraction: float
+    stokes_lead_us: float
+
+
+@dataclass(frozen=True)
+class StirapDelaySummary(Centroid3Summary):
+    """Applied matrix diagnostics and the sampled f peak.
+
+    f_population_estimate is an unclipped corrected fraction, not fidelity.
+    Its coordinate is Stokes lead in µs. Both fields are None without a
+    corrected peak. classified_f_peak is separate: only report it when no
+    correction was applied and a finite classified f fraction is available.
     """
 
     f_population_estimate: float | None
     stokes_lead_us: float | None
+    classified_f_peak: StirapDelayClassifiedPeak | None
 
 
 class StirapDelayCfg(ConfigBase):
@@ -221,63 +233,45 @@ class StirapDelayExp(Experiment[StirapDelayResult, StirapDelayCfg]):
         *,
         plots: Plots,
     ) -> StirapDelaySummary:
-        """Plot measured and corrected g/e/f fractions against lead in us.
+        """Plot saved g/e/f fractions against Stokes lead in µs.
 
-        options is None; there are no analysis controls. Use only the source's
-        saved centroid3 centers and training confusion matrix, never live
-        calibration. Skip unfinished/zero-count points and retain unclipped
-        corrected estimates. Publish one populations figure and return the
-        fixed-size confusion diagnostics and the corrected f peak. Missing
-        cfg/calibration or no usable points raises ValueError; singular confusion
-        raises LinAlgError.
+        Require valid saved cfg and at least one completed, nonzero-count
+        point. Skip unfinished points. Plot classified fractions with shot
+        SEM where available; also show unclipped estimates and their shot SEM
+        if saved centroid3 correction is usable. Return applied matrix
+        diagnostics and the corrected or classified sampled f peak.
         """
-        # 1. Correct completed timing points with the saved g/e/f readout calibration.
         del options
         if source.cfg is None:
             raise ValueError("STIRAP delay analysis requires saved cfg")
-        calibration = centroid3_classifier(
-            source.cfg.readout, ro_ch=source.cfg.readout.ro_ch
-        )
         counts = source.result.counts
         totals = counts.sum(axis=-1)
         complete = np.isfinite(counts).all(axis=-1) & (totals > 0)
         if not np.any(complete):
             raise ValueError("STIRAP delay analysis requires completed counts")
         leads = source.result.stokes_leads[complete]
-        raw = counts[complete] / totals[complete, None]
-        result = analyze_centroid3_populations(raw, calibration)
-
-        # 2. Propagate shot-sampling covariance through the fixed readout correction.
-        raw_covariance = class_probability_covariance(counts[complete])
-        correction = np.linalg.inv(result.confusion_matrix.T)
-        corrected_covariance = correction @ raw_covariance @ correction.T
-        confusion = summarize_centroid3(result)
-        corrected_f = result.corrected_populations[..., 2]
-        peak = first_finite_peak(corrected_f)
+        classified = counts[complete] / totals[complete, None]
+        corrected, confusion = correct_saved_centroid3(source.cfg.readout, classified)
+        series = (
+            [(classified, "Classified")]
+            if corrected is None
+            else [(classified, "Measured"), (corrected, "Corrected")]
+        )
+        sems = centroid3_trace_sems(counts[complete], confusion)
+        f_values = series[-1][0][..., 2]
+        peak = first_finite_peak(f_values)
+        peak_value = None if peak is None else float(f_values[peak])
+        peak_lead = None if peak is None else float(leads[peak])
 
         fig, _ = plots.subplots(
             num="populations",
-            nrows=2,
+            nrows=len(series),
             sharex=True,
             layout="constrained",
             figsize=(7, 7),
         )
-        raw_ax, corrected_ax = fig.axes
-        fig.suptitle(
-            "STIRAP delay · g → f · preparation-label fractions\n"
-            f"Readout condition number: {confusion.condition_number:.3g} · "
-            f"Minimum singular value: {confusion.minimum_singular_value:.3g}"
-        )
-        for ax, values, covariance, ylabel in (
-            (raw_ax, result.raw_populations, raw_covariance, "Measured label fraction"),
-            (
-                corrected_ax,
-                result.corrected_populations,
-                corrected_covariance,
-                "Corrected label fraction",
-            ),
-        ):
-            sem = np.sqrt(np.maximum(np.diagonal(covariance, axis1=-2, axis2=-1), 0.0))
+        fig.suptitle(centroid3_title("STIRAP delay", confusion))
+        for ax, (values, label), sem in zip(fig.axes, series, sems, strict=True):
             for index, state in enumerate(STATE_LABELS):
                 ax.errorbar(
                     leads,
@@ -288,23 +282,30 @@ class StirapDelayExp(Experiment[StirapDelayResult, StirapDelayCfg]):
                     color=f"C{index}",
                     label=f"{state} label",
                 )
-            ax.set_ylabel(ylabel)
-        raw_ax.legend(loc="upper center", bbox_to_anchor=(0.5, 1.16), ncols=3)
-        corrected_ax.set_xlabel("Stokes lead (µs)")
-        if peak is not None:
-            corrected_ax.axvline(leads[peak], color="C2", linestyle=":")
-            f_sem = np.sqrt(max(float(corrected_covariance[peak, 2, 2]), 0.0))
+            ax.set_ylabel(f"{label} label fraction")
+        fig.axes[0].legend(loc="upper center", bbox_to_anchor=(0.5, 1.16), ncols=3)
+        peak_ax = fig.axes[-1]
+        peak_ax.set_xlabel("Stokes lead (µs)")
+        if peak is not None and peak_value is not None and peak_lead is not None:
+            peak_ax.axvline(peak_lead, color="C2", linestyle=":")
+            f_sem = sems[-1][peak, 2]
             uncertainty = f" ± {f_sem:.3f}" if np.isfinite(f_sem) else ""
-            corrected_ax.set_title(
-                f"Peak corrected f fraction = {corrected_f[peak]:.3f}{uncertainty}\n"
-                f"Stokes lead = {leads[peak]:.4g} µs"
+            basis = "classified" if corrected is None else "corrected"
+            peak_ax.set_title(
+                f"Peak {basis} f fraction = {peak_value:.3f}{uncertainty}\n"
+                f"Stokes lead = {peak_lead:.4g} µs"
             )
         return StirapDelaySummary(
             confusion_matrix=confusion.confusion_matrix,
             condition_number=confusion.condition_number,
             minimum_singular_value=confusion.minimum_singular_value,
-            f_population_estimate=(
-                None if peak is None else float(corrected_f.flat[peak])
+            f_population_estimate=peak_value if corrected is not None else None,
+            stokes_lead_us=peak_lead if corrected is not None else None,
+            classified_f_peak=(
+                StirapDelayClassifiedPeak(peak_value, peak_lead)
+                if corrected is None
+                and peak_value is not None
+                and peak_lead is not None
+                else None
             ),
-            stokes_lead_us=None if peak is None else float(leads[peak]),
         )

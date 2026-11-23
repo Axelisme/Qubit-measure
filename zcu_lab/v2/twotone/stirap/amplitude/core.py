@@ -6,11 +6,7 @@ from typing import Annotated, ClassVar, Self
 import numpy as np
 from numpy.typing import NDArray
 from pydantic import Field, model_validator
-from zcu_tools.analysis.singleshot import (
-    Centroid3Summary,
-    analyze_centroid3_populations,
-    summarize_centroid3,
-)
+from zcu_tools.analysis.singleshot import Centroid3Summary
 from zcu_tools.cfg_model import ConfigBase, FieldMeta
 from zcu_tools.experiment import Experiment
 from zcu_tools.experiment.axes_spec import (
@@ -35,6 +31,11 @@ from zcu_tools.program.v2 import (
 from zcu_tools.program.v2.modules.readout import centroid3_classifier
 from zcu_tools.program.v2.modules.waveform import EnvelopeWaveformCfg
 
+from zcu_lab.v2.support.singleshot.centroid3_analysis import (
+    centroid3_title,
+    correct_saved_centroid3,
+)
+
 from .._population_peak import first_finite_peak
 from .._pulses import drive_pulse
 
@@ -56,16 +57,31 @@ class StirapAmplitudeResult:
 
 
 @dataclass(frozen=True)
-class StirapAmplitudeSummary(Centroid3Summary):
-    """Saved confusion diagnostics and the largest finite corrected f population.
+class StirapAmplitudeClassifiedPeak:
+    """Largest finite fraction of shots labeled f (0–1) and its sampled coordinates.
 
-    The population estimate is dimensionless and unclipped, not fidelity.
-    Peak coordinates are Pump and Stokes gains (a.u.). With no finite value, all peak fields are None.
+    The coordinates are Pump and Stokes gains (a.u.).
+    """
+
+    f_label_fraction: float
+    pump_gain: float
+    stokes_gain: float
+
+
+@dataclass(frozen=True)
+class StirapAmplitudeSummary(Centroid3Summary):
+    """Applied matrix diagnostics and the sampled f peak.
+
+    f_population_estimate is an unclipped corrected fraction, not fidelity.
+    Its coordinates are Pump and Stokes gains (a.u.). These fields are None without a
+    corrected peak. classified_f_peak is separate: only report it when no
+    correction was applied and a finite classified f fraction is available.
     """
 
     f_population_estimate: float | None
     pump_gain: float | None
     stokes_gain: float | None
+    classified_f_peak: StirapAmplitudeClassifiedPeak | None
 
 
 class StirapAmplitudeCfg(ConfigBase):
@@ -291,90 +307,88 @@ class StirapAmplitudeExp(Experiment[StirapAmplitudeResult, StirapAmplitudeCfg]):
         *,
         plots: Plots,
     ) -> StirapAmplitudeSummary:
-        """Plot raw and unclipped corrected g/e/f maps on both gain axes in a.u.
+        """Plot saved g/e/f counts on the requested scan grid.
 
-        Use only the run's saved readout confusion. Return training confusion
-        diagnostics and the corrected f peak, not fidelity. Missing
-        cfg/classifier, incomplete or empty counts and singular confusion fail
-        explicitly; no current calibration is read.
+        Require valid saved cfg and finite, nonempty counts at every point.
+        Plot classified fractions only when no saved centroid3 correction
+        is usable. Otherwise also plot unclipped preparation-label estimates.
+        Return applied matrix diagnostics and the corrected or classified
+        sampled f peak, not fidelity. No live calibration is used.
         """
-        # 1. Recover g/e/f transfer populations using the saved readout confusion calibration.
         del options
         cfg = source.cfg
         if cfg is None:
             raise ValueError(
                 "STIRAP amplitude analysis requires the saved run readout cfg"
             )
-        calibration = centroid3_classifier(cfg.readout, ro_ch=cfg.readout.ro_ch)
         counts = source.result.counts
         if not np.isfinite(counts).all() or np.any(counts.sum(axis=-1) <= 0):
             raise ValueError(
                 "STIRAP amplitude analysis requires finite, nonempty counts at every point"
             )
-        raw = counts / counts.sum(axis=-1, keepdims=True)
-        result = analyze_centroid3_populations(raw, calibration)
-        # 2. Compare raw and corrected population maps across pump and Stokes gains.
+        classified = counts / counts.sum(axis=-1, keepdims=True)
+        corrected, confusion = correct_saved_centroid3(cfg.readout, classified)
+        series = (
+            [(classified, "Classified")]
+            if corrected is None
+            else [(classified, "Measured"), (corrected, "Corrected")]
+        )
+        f_values = series[-1][0][..., 2]
+        peak = first_finite_peak(f_values)
+        peak_value = pump_gain = stokes_gain = None
+        if peak is not None:
+            pump_index, stokes_index = divmod(peak, f_values.shape[1])
+            peak_value = float(f_values.flat[peak])
+            pump_gain = float(source.result.pump_gains[pump_index])
+            stokes_gain = float(source.result.stokes_gains[stokes_index])
+
         figure, _ = plots.subplots(
             num="fit",
-            nrows=2,
+            nrows=len(series),
             ncols=len(STATE_LABELS),
             figsize=(12, 8),
             layout="constrained",
         )
-        corrected = result.corrected_populations
-        peak = first_finite_peak(corrected[..., 2])
-        pump_gain = stokes_gain = None
-        if peak is not None:
-            pump_index, stokes_index = divmod(peak, corrected.shape[1])
-            pump_gain = float(source.result.pump_gains[pump_index])
-            stokes_gain = float(source.result.stokes_gains[stokes_index])
-        corrected_f_ax = figure.axes[5]
-        for row, values, title in zip(
-            (figure.axes[: len(STATE_LABELS)], figure.axes[len(STATE_LABELS) :]),
-            (result.raw_populations, corrected),
-            ("Measured", "Corrected"),
-            strict=True,
-        ):
-            for state, (ax, label) in enumerate(zip(row, STATE_LABELS, strict=True)):
+        axes = figure.axes
+        for row, (values, label) in enumerate(series):
+            for column, state in enumerate(STATE_LABELS):
+                ax = axes[row * len(STATE_LABELS) + column]
                 ax.grid(False)
-                heatmap = ax.pcolormesh(
+                image = ax.pcolormesh(
                     source.result.pump_gains,
                     source.result.stokes_gains,
-                    values[:, :, state].T,
+                    values[..., column].T,
                     shading="nearest",
                     vmin=min(0.0, float(values.min())),
                     vmax=max(1.0, float(values.max())),
                 )
+                figure.colorbar(image, ax=ax, label=f"{label} label fraction")
                 ax.set(
                     xlabel="Pump gain (a.u.)",
                     ylabel="Stokes gain (a.u.)",
-                    title=f"{title} {label} label",
+                    title=f"{label} {state} label",
                 )
-                figure.colorbar(heatmap, ax=ax, label=f"{title} label fraction")
-        confusion = summarize_centroid3(result)
-        corrected_f = corrected[..., 2]
-        headline = (
-            "STIRAP amplitude · g → f · preparation-label fractions\n"
-            f"Readout condition number: {confusion.condition_number:.3g} · "
-            f"Minimum singular value: {confusion.minimum_singular_value:.3g}"
-        )
-        if pump_gain is not None and stokes_gain is not None and peak is not None:
-            corrected_f_ax.plot(
-                pump_gain, stokes_gain, "x", color="white", markeredgewidth=2
-            )
+        headline = centroid3_title("STIRAP amplitude", confusion)
+        classified_peak = None
+        if peak_value is not None and pump_gain is not None and stokes_gain is not None:
+            axes[-1].plot(pump_gain, stokes_gain, "x", color="white", markeredgewidth=2)
+            basis = "classified" if corrected is None else "corrected"
             headline += (
-                f"\nPeak corrected f fraction = {corrected_f.flat[peak]:.3f} · "
+                f"\nPeak {basis} f fraction = {peak_value:.3f} · "
                 f"Pump = {pump_gain:.4g} a.u. · Stokes = {stokes_gain:.4g} a.u."
             )
+            if corrected is None:
+                classified_peak = StirapAmplitudeClassifiedPeak(
+                    peak_value, pump_gain, stokes_gain
+                )
         figure.suptitle(headline)
         figure.show()
         return StirapAmplitudeSummary(
             confusion_matrix=confusion.confusion_matrix,
             condition_number=confusion.condition_number,
             minimum_singular_value=confusion.minimum_singular_value,
-            f_population_estimate=(
-                None if peak is None else float(corrected_f.flat[peak])
-            ),
-            pump_gain=pump_gain,
-            stokes_gain=stokes_gain,
+            f_population_estimate=peak_value if corrected is not None else None,
+            pump_gain=pump_gain if corrected is not None else None,
+            stokes_gain=stokes_gain if corrected is not None else None,
+            classified_f_peak=classified_peak,
         )

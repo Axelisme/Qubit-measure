@@ -12,7 +12,11 @@ from zcu_tools.analysis.fitting.multi_decay import (
     fit_dual_transition_rates,
     model_func,
 )
-from zcu_tools.analysis.shot_uncertainty import class_probability_covariance
+from zcu_tools.analysis.shot_uncertainty import (
+    class_probability_covariance,
+    corrected_population_sem,
+)
+from zcu_tools.analysis.singleshot import correct_populations
 from zcu_tools.cfg_model import ConfigBase, FieldMeta
 from zcu_tools.datafile import DataVariable
 from zcu_tools.experiment import AxesSpec, Experiment
@@ -35,12 +39,6 @@ from zcu_tools.program.v2 import (
 )
 
 from zcu_lab.v2.support import live_errorbar
-from zcu_lab.v2.support.singleshot.population_analysis import (
-    CLASSIFIED_FIGURE,
-    UNAVAILABLE_NOTICE,
-    ReadoutSeries,
-    circle_readout_series,
-)
 from zcu_lab.v2.support.singleshot.util import readout_confusion_matrix
 
 POPULATION_STATES = (0, 1, 2)
@@ -55,35 +53,6 @@ _PANELS = (
     ("With π pulse", "e", "tab:red"),
     ("With π pulse", "other", "tab:green"),
 )
-
-
-def _plot_classified_fractions(
-    plots: Plots, delays: NDArray[np.float64], series: ReadoutSeries
-) -> None:
-    fig, _ = plots.subplots(
-        num=CLASSIFIED_FIGURE, nrows=2, ncols=3, figsize=(10, 6), layout="constrained"
-    )
-    fig.suptitle(f"Single-shot T1 · qubit · classified fractions\n{UNAVAILABLE_NOTICE}")
-    for index, (ax, (branch, state, color)) in enumerate(
-        zip(fig.axes, _PANELS, strict=True)
-    ):
-        prep, outcome = divmod(index, 3)
-        ax.errorbar(
-            delays,
-            series.values[:, prep, outcome],
-            yerr=series.sem[:, prep, outcome],
-            fmt="o-",
-            markersize=3,
-            capsize=2,
-            color=color,
-            label="Data ± shot SEM",
-        )
-        ax.set(
-            xlabel="Free evolution time (µs)",
-            ylabel=f"Fraction ({state})",
-            title=branch,
-        )
-    fig.axes[2].legend(loc="best", fontsize=10)
 
 
 @dataclass(frozen=True)
@@ -335,8 +304,7 @@ class T1Exp(Experiment[T1Result, T1Cfg]):
         source supplies delay times in us and G/E/Other counts, normalized per row. Skip the first
         options.skip points, optionally correct readout with the saved cfg classifier's
         confusion matrix, and fit the two traces together. Publish the fit in
-        plots; fitting errors propagate. For an unsolvable correction, publish
-        only classified fractions without fitting.
+        plots; fitting errors propagate.
         """
         # 1. Select delays and correct measured G/E/Other populations.
         result = source.result
@@ -353,14 +321,12 @@ class T1Exp(Experiment[T1Result, T1Cfg]):
         lens = lens[skip:]
         populations = populations[skip:]
 
-        series = circle_readout_series(
-            populations, result.counts[skip:], confusion_matrix
+        classified = populations
+        populations = correct_populations(
+            classified, confusion_matrix, clip=False, fallback_on_nonfinite=True
         )
-        if series.correction_unavailable:
-            _plot_classified_fractions(plots, lens, series)
-            return
-
-        populations, sem = series.values, series.sem
+        confusion_matrix = None if populations is classified else confusion_matrix
+        sem = corrected_population_sem(result.counts[skip:], confusion_matrix)
 
         populations1 = populations[:, 0]  # init in g
         populations2 = populations[:, 1]  # init in e

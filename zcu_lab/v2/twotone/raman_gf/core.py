@@ -12,12 +12,7 @@ from matplotlib.figure import Figure
 from numpy.typing import NDArray
 from pydantic import Field
 from zcu_tools.analysis.shot_uncertainty import class_probability_covariance
-from zcu_tools.analysis.singleshot import (
-    Centroid3IQAnalysis,
-    Centroid3Summary,
-    analyze_centroid3_populations,
-    summarize_centroid3,
-)
+from zcu_tools.analysis.singleshot import Centroid3Summary
 from zcu_tools.cfg_model import ConfigBase, FieldMeta
 from zcu_tools.experiment import Experiment
 from zcu_tools.experiment.axes_spec import (
@@ -44,6 +39,11 @@ from zcu_tools.program.v2 import (
 from zcu_tools.program.v2.modules.readout import centroid3_classifier
 
 from zcu_lab.v2.support import live_errorbar, live_heatmap
+from zcu_lab.v2.support.singleshot.centroid3_analysis import (
+    centroid3_title,
+    centroid3_trace_sems,
+    correct_saved_centroid3,
+)
 
 STATE_LABELS = ("g", "e", "f")
 
@@ -320,78 +320,74 @@ class RamanGFExp(Experiment[RamanGFResult, RamanGFCfg]):
         *,
         plots: Plots,
     ) -> Centroid3Summary:
-        """Normalize acquired counts and correct with the saved readout confusion.
+        """Plot saved g/e/f counts on their actual scan coordinates.
 
-        Require source.cfg and its centroid3 ADC classifier. Missing cfg,
-        missing classifier or circle/linear mode raises ValueError. No live
-        Form, library, reference acquisition or simulator truth is consulted.
-        Plot raw/unclipped corrected g/e/f preparation-label estimates and
-        return only training confusion and its quality. The e label estimates leakage, not a pure
-        energy-state population or gate fidelity. Incomplete/nonfinite or empty
-        counts and singular confusion fail explicitly. Plot actual coordinates.
+        Require valid saved cfg and finite, nonempty counts at every point.
+        Wrong classifier type raises ValueError. Without usable saved centroid3
+        correction, plot classified fractions only. Otherwise also plot
+        unclipped preparation-label estimates. One-dimensional traces include
+        shot SEM where available; grids show heatmaps. Return only diagnostics
+        for the matrix actually applied. No live calibration or truth is used.
         """
-        # 1. Recover g/e/f populations from counts using the saved readout confusion calibration.
         del options
         cfg = source.cfg
         if cfg is None:
             raise ValueError("Raman analysis requires the saved run readout cfg")
-        calibration = centroid3_classifier(cfg.readout, ro_ch=cfg.readout.ro_ch)
         counts = source.result.counts
         if not np.isfinite(counts).all() or np.any(counts.sum(axis=-1) <= 0):
             raise ValueError(
                 "Raman analysis requires finite, nonempty counts at every point"
             )
-        raw = counts / counts.sum(axis=-1, keepdims=True)
-        result = analyze_centroid3_populations(raw, calibration)
+        classified = counts / counts.sum(axis=-1, keepdims=True)
+        corrected, confusion = correct_saved_centroid3(cfg.readout, classified)
+        series = (
+            [(classified, "Classified")]
+            if corrected is None
+            else [(classified, "Measured"), (corrected, "Corrected")]
+        )
         grid = cfg.scan_mode == "frequency_gain"
-        # 2. Compare raw and corrected populations along the scanned gain or detuning axes.
         figure, _ = plots.subplots(
             num="fit",
-            nrows=2 if grid else 1,
-            ncols=len(STATE_LABELS) if grid else 2,
+            nrows=len(series) if grid else 1,
+            ncols=len(STATE_LABELS) if grid else len(series),
             figsize=(11, 7) if grid else (10, 5),
             layout="constrained",
         )
 
         if grid:
-            self._draw_maps(figure, source.result, cfg, result)
+            self._draw_maps(figure, source.result, cfg, series)
         else:
-            self._draw_traces(figure, source.result, cfg, result)
-        figure.suptitle(
-            "Raman spectroscopy · g → f · preparation-label fractions\n"
-            f"Readout condition number: {result.condition_number:.3g} · "
-            f"Minimum singular value: {result.minimum_singular_value:.3g}"
-        )
+            self._draw_traces(
+                figure,
+                source.result,
+                cfg,
+                series,
+                centroid3_trace_sems(counts, confusion),
+            )
+        figure.suptitle(centroid3_title("Raman spectroscopy", confusion))
         figure.show()
-        return summarize_centroid3(result)
+        return confusion
 
     def _draw_maps(
         self,
         figure: Figure,
         data: RamanGFResult,
         cfg: RamanGFCfg,
-        result: Centroid3IQAnalysis,
+        series: list[tuple[NDArray[np.float64], str]],
     ) -> None:
-        """Draw measured and corrected label fractions on the same scan axes."""
+        """Draw label-fraction maps on the same scan axes."""
         shape = (cfg.detuning.expts, cfg.gain.expts)
         detunings = data.detunings.reshape(shape)[:, 0]
         gains = data.gains.reshape(shape)[0, :]
-        corrected = result.corrected_populations
-        for row, (values, title, limits) in enumerate(
-            (
-                (result.raw_populations, "Measured", (0.0, 1.0)),
-                (
-                    corrected,
-                    "Corrected",
-                    (
-                        min(0.0, float(corrected.min())),
-                        max(1.0, float(corrected.max())),
-                    ),
-                ),
+        axes = figure.axes
+        for row, (values, title) in enumerate(series):
+            limits = (
+                (min(0.0, float(values.min())), max(1.0, float(values.max())))
+                if title == "Corrected"
+                else (0.0, 1.0)
             )
-        ):
             for label, state in enumerate(STATE_LABELS):
-                ax = figure.axes[row * len(STATE_LABELS) + label]
+                ax = axes[row * len(STATE_LABELS) + label]
                 ax.grid(False)
                 image = ax.pcolormesh(
                     gains,
@@ -414,23 +410,14 @@ class RamanGFExp(Experiment[RamanGFResult, RamanGFCfg]):
         figure: Figure,
         data: RamanGFResult,
         cfg: RamanGFCfg,
-        result: Centroid3IQAnalysis,
+        series: list[tuple[NDArray[np.float64], str]],
+        sems: tuple[NDArray[np.float64], ...],
     ) -> None:
-        """Draw one-dimensional scans with shot SEM before and after correction."""
+        """Draw one-dimensional scans with available shot SEM."""
         frequency = cfg.scan_mode == "frequency"
         xs = data.detunings if frequency else data.gains
         xlabel = "Two-photon detuning (MHz)" if frequency else "Drive gain (a.u.)"
-        measured_cov = class_probability_covariance(data.counts)
-        correction = np.linalg.inv(result.confusion_matrix.T)
-        corrected_cov = correction @ measured_cov @ correction.T
-        for ax, values, covariance, label in zip(
-            figure.axes,
-            (result.raw_populations, result.corrected_populations),
-            (measured_cov, corrected_cov),
-            ("Measured", "Corrected"),
-            strict=True,
-        ):
-            sem = np.sqrt(np.maximum(np.diagonal(covariance, axis1=-2, axis2=-1), 0.0))
+        for ax, (values, label), sem in zip(figure.axes, series, sems, strict=True):
             for index, state in enumerate(STATE_LABELS):
                 ax.errorbar(
                     xs,

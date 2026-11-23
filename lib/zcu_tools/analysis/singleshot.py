@@ -264,10 +264,8 @@ def correct_populations(
     confusion_matrix: NDArray[np.float64] | None,
     *,
     clip: bool = True,
+    fallback_on_nonfinite: bool = False,
 ) -> NDArray[np.float64]:
-    # Apply readout confusion-matrix correction. None -> returned unchanged
-    # (deliberate no-op contract). A singular/non-square matrix raises via
-    # np.linalg.solve (Fast-Fail preserved).
     """Correct final-axis state fractions with the readout confusion matrix.
 
     populations has arbitrary leading dimensions and a final state axis.
@@ -275,60 +273,37 @@ def correct_populations(
     returns populations unchanged. Otherwise solve its transpose, returning
     float64 with the same shape. clip=True limits estimates to [0, 1];
     clip=False preserves negative and above-one estimates. Singular/non-square or
-    incompatible matrices raise NumPy linear-algebra/value errors."""
+    incompatible matrices raise NumPy linear-algebra/value errors.
+
+    With fallback_on_nonfinite=True, require a finite matrix. If any fully
+    finite input point solves to nonfinite values before clipping, log once
+    and return the original populations object unchanged, just as for None.
+    Callers can use object identity to tell whether a matrix was applied.
+    Already missing input points do not trigger this fallback.
+    """
     if confusion_matrix is None:
         return populations
 
     matrix = np.asarray(confusion_matrix, dtype=np.float64)
+    if fallback_on_nonfinite and not np.isfinite(matrix).all():
+        raise ValueError("confusion matrix must be finite")
     state_count = populations.shape[-1]
     flat_populations = populations.reshape(-1, state_count)
     corrected = np.linalg.solve(matrix.T, flat_populations.T).T
     corrected = corrected.reshape(populations.shape)
+    if fallback_on_nonfinite:
+        failed = np.isfinite(populations).all(axis=-1) & ~np.isfinite(corrected).all(
+            axis=-1
+        )
+        if failed.any():
+            logger.warning(
+                "Readout correction: skipping correction; nonfinite corrected values for %d finite classified points",
+                np.count_nonzero(failed),
+            )
+            return populations
     return np.asarray(
         np.clip(corrected, 0.0, 1.0) if clip else corrected, dtype=np.float64
     )
-
-
-def try_correct_populations(
-    populations: NDArray[np.float64], confusion_matrix: NDArray[np.float64] | None
-) -> NDArray[np.float64] | None:
-    """Solve for unclipped populations, or return None for numerical unavailability.
-
-    Populations has shape (..., K), K >= 2, with nonfinite rows marking missing
-    points. A missing matrix leaves the input unchanged. Otherwise supply a
-    finite (K, K) matrix with true-state rows and classified-state columns.
-    A singular matrix or a nonfinite solution for a fully finite row logs the
-    reason and returns None; missing points do not count as solve overflow.
-    Invalid population shape or malformed calibration raises ValueError.
-    """
-    if populations.ndim == 0 or populations.shape[-1] < 2:
-        raise ValueError("populations must have shape (..., K) with K >= 2")
-    if confusion_matrix is None:
-        return populations
-    classes = populations.shape[-1]
-    if confusion_matrix.shape != (classes, classes):
-        raise ValueError("confusion matrix must match both population class axes")
-    if not np.isfinite(confusion_matrix).all():
-        raise ValueError("confusion matrix must be finite")
-
-    try:
-        corrected = correct_populations(populations, confusion_matrix, clip=False)
-    except np.linalg.LinAlgError as error:
-        logger.warning(
-            "Readout correction unavailable: singular confusion matrix (%s)", error
-        )
-        return None
-
-    failed = np.isfinite(populations).all(axis=-1) & ~np.isfinite(corrected).all(
-        axis=-1
-    )
-    if failed.any():
-        logger.warning(
-            "Readout correction unavailable: nonfinite corrected values for %d finite classified points",
-            np.count_nonzero(failed),
-        )
-        return None
-    return corrected
 
 
 @dataclass(frozen=True)
@@ -500,17 +475,39 @@ class Centroid3IQAnalysis:
 class Centroid3Summary:
     """Fixed-size saved-readout diagnostics in preparation-label coordinates.
 
-    Confusion rows are prepared g/e/f, columns measured g/e/f. TypeAdapter
-    decodes finite numeric lists to a float64 (3, 3) confusion matrix.
-    condition_number is its 2-norm condition number; minimum_singular_value
-    is its smallest singular value. No purity or fidelity is inferred.
+    The fields describe the matrix actually applied. All three are None when
+    no correction was applied. Rows are prepared g/e/f, columns measured g/e/f.
+    TypeAdapter decodes finite numeric lists to a float64 (3, 3) matrix.
+    condition_number is the 2-norm condition number (None if it exceeds
+    float64 range); minimum_singular_value is the smallest singular value.
+    No purity or fidelity is inferred.
     """
 
-    confusion_matrix: Annotated[
-        NDArray[np.float64], PlainValidator(_centroid3_confusion)
-    ]
-    condition_number: float
-    minimum_singular_value: float
+    confusion_matrix: (
+        Annotated[NDArray[np.float64], PlainValidator(_centroid3_confusion)] | None
+    )
+    condition_number: float | None
+    minimum_singular_value: float | None
+
+    @staticmethod
+    def from_applied_matrix(matrix: NDArray[np.float64] | None) -> Centroid3Summary:
+        """Describe an applied g/e/f correction, or report no correction for None."""
+        if matrix is None:
+            return Centroid3Summary(None, None, None)
+        matrix = _centroid3_confusion(matrix)
+        condition, minimum = _confusion_quality(matrix)
+        return Centroid3Summary(
+            matrix.copy(),
+            condition if np.isfinite(condition) else None,
+            minimum if np.isfinite(minimum) else None,
+        )
+
+
+def _confusion_quality(matrix: NDArray[np.float64]) -> tuple[float, float]:
+    singular_values = np.linalg.svd(matrix, compute_uv=False)
+    with np.errstate(divide="ignore", over="ignore", invalid="ignore"):
+        condition = singular_values[0] / singular_values[-1]
+    return float(condition), float(singular_values[-1])
 
 
 def summarize_centroid3(result: Centroid3IQAnalysis) -> Centroid3Summary:
@@ -564,12 +561,14 @@ def analyze_centroid3_populations(
     """
     raw = _centroid3_populations(populations)
     matrix = np.asarray(calibration.confusion_matrix, dtype=np.float64)
+    corrected = correct_populations(raw, matrix, clip=False)
+    condition, minimum = _confusion_quality(matrix)
     return Centroid3IQAnalysis(
         raw_populations=raw,
-        corrected_populations=correct_populations(raw, matrix, clip=False),
+        corrected_populations=corrected,
         confusion_matrix=matrix,
-        condition_number=float(np.linalg.cond(matrix)),
-        minimum_singular_value=float(np.linalg.svd(matrix, compute_uv=False).min()),
+        condition_number=condition,
+        minimum_singular_value=minimum,
     )
 
 

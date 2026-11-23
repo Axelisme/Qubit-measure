@@ -18,7 +18,7 @@ Live shows raw g/e/Other fractions versus exposure. Analyze uses only the select
 
 **Relaxation times (short to long)** lists the two model decay times in µs. Each is the inverse of the negative real part of a nonstationary mode's eigenvalue. The numbers are not separate lifetimes of the g and e preparations, and neither is singled out as qubit T₁. The times can be equal. For a complex-conjugate pair they describe the same e-folding time of the oscillation envelope.
 
-If the saved matrix cannot produce finite corrected fractions, Analyze shows **Readout correction unavailable** and only the G/E/Other classified fractions from this Run, with shot SEM where available. These are counts after classification, before correction. There is no rate-model fit or decay time. Writeback is unavailable for that analysis. When only a corrected bar is unavailable, the corrected point remains.
+If the saved matrix is singular or solving it gives a nonfinite value at a valid point, Analyze logs one warning and uses classified populations for the whole scan. Analyze still fits both preparations and can propose writeback. An unavailable shot SEM bar does not by itself disable correction.
 
 ## Next step
 

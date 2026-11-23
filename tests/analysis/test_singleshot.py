@@ -17,7 +17,6 @@ from zcu_tools.analysis.singleshot import (
     correct_populations,
     raw_population_signal,
     summarize_centroid3,
-    try_correct_populations,
 )
 from zcu_tools.cfg_model import Centroid3Classifier
 from zcu_tools.gui.app.measure.summary import summarize_analysis
@@ -162,6 +161,7 @@ def test_centroid3_analysis_summary_decodes_to_owner_arrays(
     summary = summarize_analysis(compact)
     decoded = TypeAdapter(Centroid3Summary).validate_python(summary.summary)
 
+    assert isinstance(decoded.confusion_matrix, np.ndarray)
     assert decoded.confusion_matrix.dtype == np.float64
     np.testing.assert_array_equal(
         decoded.confusion_matrix, calibration.confusion_matrix
@@ -222,61 +222,36 @@ def test_correction_can_preserve_unphysical_estimates_without_changing_default()
     assert correct_populations(measured, None, clip=False) is measured
 
 
-def test_optional_population_correction_keeps_unclipped_values_and_missing_rows() -> (
-    None
-):
-    populations = np.array([[0.25, 0.75, 0], [np.nan, np.nan, np.nan]])
-    matrix = np.array([[0.75, 0.25, 0], [0.5, 0.5, 0], [0, 0, 1]])
-
-    corrected = try_correct_populations(populations, matrix)
-
-    assert corrected is not None
-    np.testing.assert_allclose(corrected, [[-1, 2, 0], [np.nan, np.nan, np.nan]])
-    assert try_correct_populations(populations, None) is populations
-
-
-@pytest.mark.parametrize(
-    ("matrix", "reason"),
-    [
-        (np.full((3, 3), 1 / 3), "singular"),
-        (np.diag([1.0, 1.0, 1e-310]), "nonfinite corrected values"),
-    ],
-)
-def test_optional_population_correction_reports_valid_solve_failure(
-    matrix: np.ndarray, reason: str, caplog: pytest.LogCaptureFixture
+@pytest.mark.parametrize("clip", [True, False])
+def test_saved_correction_falls_back_for_whole_batch_before_clipping(
+    clip: bool, caplog: pytest.LogCaptureFixture
 ) -> None:
-    populations = np.array([0.5, 0.0, 0.5])
-
-    assert try_correct_populations(populations, matrix) is None
-    assert reason in caplog.text
-
-
-def test_missing_population_row_alone_does_not_trigger_overflow_fallback(
-    caplog: pytest.LogCaptureFixture,
-) -> None:
-    populations = np.full((1, 3), np.nan)
+    classified = np.array([[0.5, 0.0, 0.5], [0.25, 0.75, 0.0]])
     matrix = np.diag([1.0, 1.0, 1e-310])
 
-    corrected = try_correct_populations(populations, matrix)
+    corrected = correct_populations(
+        classified, matrix, clip=clip, fallback_on_nonfinite=True
+    )
 
-    assert corrected is not None
-    np.testing.assert_allclose(corrected, populations)
-    assert not caplog.records
+    assert corrected is classified
+    (warning,) = caplog.records
+    assert "nonfinite" in warning.getMessage()
+    assert "skipping correction" in warning.getMessage()
 
 
-@pytest.mark.parametrize(
-    ("matrix", "message"),
-    [
-        (np.eye(2), "confusion matrix.*class axes"),
-        (np.diag([1.0, np.nan, 1.0]), "confusion matrix.*finite"),
-        (np.diag([1.0, np.inf, 1.0]), "confusion matrix.*finite"),
-    ],
-)
-def test_optional_population_correction_rejects_malformed_calibration(
-    matrix: np.ndarray, message: str
+def test_saved_correction_keeps_finite_solutions_with_missing_points(
+    caplog: pytest.LogCaptureFixture,
 ) -> None:
-    with pytest.raises(ValueError, match=message):
-        try_correct_populations(np.array([0.5, 0.0, 0.5]), matrix)
+    classified = np.array([[0.25, 0.5, 0.25], [np.nan, np.nan, np.nan]])
+    matrix = np.diag([1.0, 1.0, 1e-16])
+
+    corrected = correct_populations(
+        classified, matrix, clip=False, fallback_on_nonfinite=True
+    )
+
+    assert corrected is not classified
+    np.testing.assert_allclose(corrected, [[0.25, 0.5, 2.5e15], [np.nan] * 3])
+    assert not caplog.records
 
 
 def test_reference_iq_uses_training_only_and_reports_heldout_label_fractions() -> None:
