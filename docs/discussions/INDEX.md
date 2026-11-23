@@ -23,6 +23,8 @@
 
 ## 模擬量測環境
 
+- 2026-11-23 [FTF sampled RWA 探針的快取壽命](2026-11-23-ftf-rwa-probe-memo.md)：快取壽命。一次 FTF preparation 重用精確的探針證明；每次 evolve 仍選路、記帳、演化與發佈 capture。
+
 - 2026-11-22 [舊實測數字當現況](2026-11-22-stale-measured-numbers.md)：量測新鮮度。引用數字附 commit、輸入與範圍，驅動決策前查被測路徑的後續改動；未完成列未走到的階段記 null。
 - 2026-11-22 [模擬器接收雜訊只保留等向設定](2026-11-22-isotropic-receiver-noise.md)：刪除或收窄。模型 YAML 每個 receiver 改填單一 PSD，I 和 Q 獨立且變異數相同。
 - 2026-11-22 [FTF 樣板的 projective floor](2026-11-22-ftf-projection-weight-floor.md)：精度取捨。FTF 樣板 floor 改為 `1e-5`；舊 history 模型下原設定第一點的 1,800 s 參考缺口，在 Markov 同模型驗收後不再適用。

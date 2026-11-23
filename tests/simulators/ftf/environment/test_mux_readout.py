@@ -22,6 +22,7 @@ from zcu_tools.simulate.evolution import (
     EvolutionResult,
     ModelSource,
     PathDiagnostics,
+    SampledRWAProbeMemo,
     TimelineBatch,
 )
 from zcu_tools.simulators.ftf import environment as ftf_module
@@ -428,6 +429,7 @@ class MixedEngine(Engine):
         telemetry: bool = False,
         reuse_key: bytes | None = None,
         capture: CaptureBuffer | None = None,
+        probe_memo: SampledRWAProbeMemo | None = None,
     ) -> EvolutionResult:
         points = np.concatenate([batch.points for batch in batches])
         densities = np.tile(np.diag([0.4, 0.6])[None], (len(points), 1, 1))

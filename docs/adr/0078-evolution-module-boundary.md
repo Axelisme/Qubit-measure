@@ -323,16 +323,17 @@ FTF cavity drive 使相鄰態能量反轉時，原色散模型仍能算，不重
 
 ### 損耗漂移下的結構與 preparation lifetime
 
-**規則。** Single、six 與 FTF 都支援損耗漂移，預設關閉。每次 acquisition 開始取一次有效損耗，整次固定。只在 acquisition 之間命中，不足以保留沒有同次命中的快取層。Engine 不保留跨 evolve 的數值 preparation 或 exact result，source 不保留跨 preparation 的 ADC solver。Engine 的 routing-facts cache 只以 inventory 與 pricing facts 驗證 caller-owned preparation 的當前路由，不存傳播結果。
+**規則。** Single、six 與 FTF 都支援損耗漂移，預設關閉。每次 acquisition 開始取一次有效損耗，整次固定。只在 acquisition 之間命中，不足以保留沒有同次命中的快取層。Engine 不保留跨 evolve 的數值 preparation 或 exact result，source 不保留跨 preparation 的 ADC solver。Engine 的 routing-facts cache 只以 inventory 與 pricing facts 驗證 caller-owned preparation 的當前路由，不存傳播結果。唯一例外是 FTF 在一次完整 preparation 內借給 Engine 的 sampled multitone RWA guard memo。Evolution 擁有精確探針鍵和不可變證明，只保存每個探針的差值與通過與否。FTF 在 preparation 完成、取消或失敗時丟棄 memo。
 
-**例子。** Single 的物理模型擁有損耗無關的結構，experiment 只組合結果。損耗改變時，source 保留該結構，關閉舊 ModelSource，丟棄完整 models 與 preparation，按本次固定的 losses 建 rates。溫度、DC、truncation 等結構依賴改變時才丟棄結構。FTF 漂移開啟時不拆結構，按每次 acquisition 的 effective settings 重建完整 facts，包含 eigensystem，並清掉舊的完整 preparation；points 與 rounds 共用這次的 losses。漂移關閉時不採這套重建策略。見 [Single reuse and lifetime](../../lib/zcu_tools/simulators/single_fluxonium/environment/README.md#reuse-and-lifetime)、[FTF acquisition clock and loss drift](../../lib/zcu_tools/simulators/ftf/environment/README.md#acquisition-clock-and-loss-drift)與 [FTF preparation reuse](../../lib/zcu_tools/simulators/ftf/environment/README.md#preparation-reuse)。
+**例子。** Single 的物理模型擁有損耗無關的結構，experiment 只組合結果。損耗改變時，source 保留該結構，關閉舊 ModelSource，丟棄完整 models 與 preparation，按本次固定的 losses 建 rates。溫度、DC、truncation 等結構依賴改變時才丟棄結構。FTF 漂移開啟時不拆結構，按每次 acquisition 的 effective settings 重建完整 facts，包含 eigensystem，並清掉舊的完整 preparation；points 與 rounds 共用這次的 losses。漂移關閉時不採這套重建策略。相同物理 span 在兩個 FTF 點可取得同一份探針證明，兩次 evolve 仍各自選路、演化、計入 routing 用量並發佈 capture。見 [Single reuse and lifetime](../../lib/zcu_tools/simulators/single_fluxonium/environment/README.md#reuse-and-lifetime)、[FTF acquisition clock and loss drift](../../lib/zcu_tools/simulators/ftf/environment/README.md#acquisition-clock-and-loss-drift)與 [FTF preparation reuse](../../lib/zcu_tools/simulators/ftf/environment/README.md#preparation-reuse)。
 
-**邊界。** Rates、dissipative propagator、density 與完整 preparation 不跨不同 losses 重用。同輸入的不可變完整 preparation 可按設定、losses 與路由條件重用。FTF 的 complete preparation LRU、envelope fingerprints 與 acquire-local `CavityAverageCache` 仍可重用。即使不開漂移，FTF 重複 acquisition 也可能要重算。中途 projective readout 由環境在 read 起點投影並續演化；分支 density 只活在一次 span preparation，不作下一 shot、round 或 acquisition 的初態。能重用的是 FTF、single 與 six 的不可變初始分佈、轉移表和 conditional sums，不是抽樣後的 herald 結果。已交付 raw source 仍持有自己的不可變抽樣輸入。抽樣 RNG 與 raw 契約不因這項 lifetime 決定而變。數值、設定與 truth 的 owner 見 [[0072]]；C8、C9、C12、C19 不添依賴或例外。
+**邊界。** Rates、dissipative propagator、density 與完整 preparation 不跨不同 losses 重用。同輸入的不可變完整 preparation 可按設定、losses 與路由條件重用。FTF 的 complete preparation LRU、envelope fingerprints 與 acquire-local `CavityAverageCache` 仍可重用。即使不開漂移，FTF 重複 acquisition 也可能要重算。中途 projective readout 由環境在 read 起點投影並續演化；分支 density 只活在一次 span preparation，不作下一 shot、round 或 acquisition 的初態。能重用的是 FTF、single 與 six 的不可變初始分佈、轉移表和 conditional sums，不是抽樣後的 herald 結果。已交付 raw source 仍持有自己的不可變抽樣輸入。抽樣 RNG 與 raw 契約不因這項 lifetime 決定而變。數值、設定與 truth 的 owner 見 [[0072]]；C8、C9、C12、C19 不添依賴或例外。探針 memo 不是完整 preparation cache，不保留 payload、density 或 production 結果，也不改 probe 選取、物理輸入或門檻。
 
 **依據。**
 - 2026-10-27（UTC），advisor 對快取分工的原話（不作現行契約）：「保留 single 的 _models／_prepared 與 FTF acquire-local 的 CavityAverageCache；拆 _facts 為結構與 rates。」同日使用者裁決：「我預期都會加入漂移機制」、「沒有不漂移的時候，我考慮C，應該是說，用不到的就可以移除」。原裁決未附入庫討論，見 Git `c6ff3f173` 的裁決與量測紀錄。
 - 2026-10-27，advisor 依使用者授權「B你可以自己開task，不用我看過」訂定 FTF 重建策略。原裁決未附入庫討論，見 Git `257e8cc3a`；未見使用者覆核這項策略的紀錄。
 - 2026-10-28，使用者以「A我認為可以完整版。」授權 single、six、FTF 的中途 projective readout。這句決定支援範圍，lifetime 沿用本節規則。原裁決未附入庫討論；[模擬環境草稿](draft/simulation-environments.md#acquire-接線與-projective-readout)也記有這項裁決。
+- 2026-11-23，使用者選單次 preparation 的精確探針證明暫存：「A，我再次聲明，只有可維護性與速度是模擬器的唯一要求，其他的都只是建議」。見 [FTF sampled RWA 探針的快取壽命](../discussions/2026-11-23-ftf-rwa-probe-memo.md)。
 
 ### Projective read 的 Markov chain 表示
 

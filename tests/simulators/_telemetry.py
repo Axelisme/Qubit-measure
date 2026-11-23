@@ -11,6 +11,7 @@ from zcu_tools.simulate.evolution import (
     FamilyRouting,
     ModelSource,
     PathDiagnostics,
+    SampledRWAProbeMemo,
     TimelineBatch,
 )
 
@@ -65,6 +66,7 @@ class TelemetryEngine(EngineDouble):
         telemetry: bool = False,
         reuse_key: bytes | None = None,
         capture: CaptureBuffer | None = None,
+        probe_memo: SampledRWAProbeMemo | None = None,
     ) -> EvolutionResult:
         result = super().evolve(
             source,
@@ -74,6 +76,7 @@ class TelemetryEngine(EngineDouble):
             telemetry=telemetry,
             reuse_key=reuse_key,
             capture=capture,
+            probe_memo=probe_memo,
         )
         return replace(
             result,
