@@ -53,7 +53,7 @@ from zcu_lab.v2.support import live_errorbar
 from zcu_lab.v2.support.detune import actual_detune
 
 _DELAY_LABEL = "Total echo delay (µs)"
-_IQ_LABEL = "Principal-axis mean IQ (a.u.)"
+_IQ_LABEL = "IQ projection (a.u.)"
 
 
 @dataclass(frozen=True)
