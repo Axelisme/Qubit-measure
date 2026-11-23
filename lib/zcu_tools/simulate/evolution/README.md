@@ -87,6 +87,15 @@ exclude `dop853`, in which case both inspection and evolution raise
 `NoValidKernel`; neither falls back to a secular approximation. Explicit
 operators never use OpenCL, including on an Engine configured for that device.
 
+[`EnvelopeSpec` and `DriveTrack`](engine.py) separate envelope sampling from
+pulse timing. `EnvelopeSpec.values(local_ns)` returns unity for a constant
+envelope. A sampled envelope linearly interpolates the real and imaginary parts
+at pulse-local ns, using its increasing `sample_ns` grid starting at zero.
+The grid need not be uniform. The final sample is held through pulse end.
+Tracks and segments enforce pulse support, not the evaluator.
+`DriveTrack.phase_rad` defines the carrier phase at the shot's absolute time
+zero, not at the start of the pulse or a continuation span.
+
 `TimelineBatch.segment_boundaries` adds point-aligned absolute ns boundaries.
 `segment_spans(batch)` is a pure query of the same final partition used by
 `evolve`, including active microwave plateaus and flux events. Callers can
