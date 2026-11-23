@@ -84,11 +84,23 @@ class PulseRegistry:
                 sorted_dict[key] = value
             return sorted_dict
 
-        if isinstance(cfg.waveform, InMemoryArbWaveformCfg):
+        waveform = cfg.waveform
+        if isinstance(waveform, InMemoryArbWaveformCfg):
             cfg_dict = cfg.model_dump(
                 mode="python", exclude={"waveform"}, exclude_none=True
             )
-            cfg_dict["waveform"] = _memory_envelope_definition(cfg.waveform)
+            cfg_dict["waveform"] = _memory_envelope_definition(waveform)
+        elif isinstance(waveform, FlatTopWaveformCfg) and isinstance(
+            waveform.raise_waveform, InMemoryArbWaveformCfg
+        ):
+            cfg_dict = cfg.model_dump(
+                mode="python",
+                exclude={"waveform": {"raise_waveform"}},
+                exclude_none=True,
+            )
+            cfg_dict["waveform"]["raise_waveform"] = _memory_envelope_definition(
+                waveform.raise_waveform
+            )
         else:
             cfg_dict = cfg.to_dict()
         filter_cfg = {
