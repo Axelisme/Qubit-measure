@@ -267,12 +267,8 @@ def resolve_waveform_ref(value: Any, info: ValidationInfo) -> Any:
     return value
 
 
-_SerializableEnvelopeCfg: TypeAlias = (
-    CosineWaveformCfg | GaussWaveformCfg | DragWaveformCfg | ArbWaveformCfg
-)
-
 EnvelopeWaveformCfg: TypeAlias = Annotated[
-    _SerializableEnvelopeCfg,
+    CosineWaveformCfg | GaussWaveformCfg | DragWaveformCfg | ArbWaveformCfg,
     BeforeValidator(resolve_waveform_ref),
     Field(discriminator="style"),
 ]
@@ -283,17 +279,13 @@ class FlatTopWaveformCfg(AbsWaveformCfg):
 
     style is flat_top. length is the total duration in µs, as a scalar or QICK
     sweep. raise_waveform supplies both ramp halves; its duration is subtracted
-    from length to get the plateau duration. An in-memory arb ramp prevents cfg
-    serialization. QICK checks the quantized segment lengths at program build.
+    from length to get the plateau duration. QICK checks the quantized segment
+    lengths at program build.
     """
 
     style: Literal["flat_top"] = "flat_top"
     length: float | QickParam
-    raise_waveform: Annotated[
-        _SerializableEnvelopeCfg | InMemoryArbWaveformCfg,
-        BeforeValidator(resolve_waveform_ref),
-        Field(discriminator="style"),
-    ]
+    raise_waveform: EnvelopeWaveformCfg
 
     def build(self, name: str) -> FlatTopWaveform:
         return FlatTopWaveform(name, self)
