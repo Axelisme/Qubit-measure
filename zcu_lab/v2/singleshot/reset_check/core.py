@@ -192,7 +192,7 @@ class ResetCheckExp(Experiment[ResetCheckResult, ResetCheckCfg]):
             figsize=(10, 4.5),
             layout="constrained",
         )
-        progress = figure.suptitle("Reset check · qubit · classified populations")
+        figure.suptitle("Reset check · qubit · classified populations")
         viewers = [live_errorbar(ax, num_lines=POPULATION_COUNT) for ax in figure.axes]
         for ax, branch in zip(figure.axes, BRANCH_LABELS, strict=True):
             ax.set(
@@ -209,22 +209,15 @@ class ResetCheckExp(Experiment[ResetCheckResult, ResetCheckCfg]):
 
         @context.plots.on_plot_thread
         def update(data: NDArray[np.float64]):
-            """Render one branch per panel and count the acquired gain/branch cells."""
+            """Show class fractions and their shot SEM in a panel per branch."""
             totals = data.sum(axis=-1)
-            progress.set_text(
-                "Reset check · qubit · classified populations\n"
-                f"{np.count_nonzero(totals > 0)}/{totals.size} gain–branch points acquired"
-            )
             populations = data / totals[..., None]
             covariance = class_probability_covariance(data)
             sem = np.sqrt(np.diagonal(covariance, axis1=-2, axis2=-1))
-            return (
-                progress,
-                *(
-                    artist
-                    for i, viewer in enumerate(viewers)
-                    for artist in viewer.set(gains, populations[:, i].T, sem[:, i].T)
-                ),
+            return tuple(
+                artist
+                for i, viewer in enumerate(viewers)
+                for artist in viewer.set(gains, populations[:, i].T, sem[:, i].T)
             )
 
         figure.show()

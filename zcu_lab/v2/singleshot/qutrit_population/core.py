@@ -121,13 +121,10 @@ class QutritPopulationExp(Experiment[QutritPopulationResult, QutritPopulationCfg
 
         @context.plots.on_plot_thread
         def update(signals: NDArray[np.complex128]):
-            """Display each acquired preparation cloud and accumulated count."""
+            """Display each preparation's IQ cloud."""
             ax.clear()
             _plot_reference_clouds(ax, signals)
-            ax.set_title(
-                "Qutrit population · qubit · IQ references\n"
-                f"Accumulated shots = {np.count_nonzero(np.isfinite(signals))} count"
-            )
+            ax.set_title("Qutrit population · qubit · IQ references")
             return (figure,)
 
         figure.show()
