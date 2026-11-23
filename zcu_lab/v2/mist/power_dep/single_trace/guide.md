@@ -14,7 +14,7 @@ For inline **Resonator probe** and **Readout** (`Inline: readout/pulse`), set ea
 
 For each pulse, **Pre-delay** runs from that segment's start to RF playback. **Waveform › Length** sets how long the RF plays, and **Post-delay** starts when playback ends. In **Readout**, **RO ch** selects the ADC and **RO length** sets its integration time. Set **Trig offset** so the ADC window opens when the readout signal reaches it. Measure that offset from the readout segment's start, not from the end of **Pre-delay**. **Post-delay** does not extend the ADC window. All these times are in µs.
 
-Only the probe gain is swept. **Readout › Gain** stays fixed. The terminal **Classifier**, including its centers, radius and confusion matrix, does not contribute to the mean IQ or set the Ground IQ reference.
+Only the probe gain is swept. **Readout › Gain** stays fixed. Use one readout ADC with one integration per shot and no shot mask. The terminal **Classifier**, including its centers, radius and confusion matrix, does not contribute to the mean IQ or set the Ground IQ reference.
 
 ## Set the gain window
 

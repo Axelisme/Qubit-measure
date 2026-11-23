@@ -116,6 +116,13 @@ def _distance_sem(
             np.count_nonzero(zero),
         )
         variance[zero] = np.linalg.eigvalsh(covariance[zero])[:, -1]
+    failed = defined & ~np.isfinite(variance)
+    if failed.any():
+        logger.warning(
+            "Omitting shot SEM: non-finite projected variance at zero-based gain indices %s",
+            np.flatnonzero(failed).tolist(),
+        )
+        variance[failed] = np.nan
     return np.sqrt(np.maximum(variance, 0))
 
 

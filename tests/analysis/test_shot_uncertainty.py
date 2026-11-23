@@ -1,5 +1,6 @@
 import numpy as np
 import pytest
+from numpy.typing import NDArray
 from zcu_tools.analysis import shot_uncertainty
 
 
@@ -20,6 +21,37 @@ def test_iq_mean_covariance_keeps_cross_term_and_uses_retained_counts() -> None:
     np.testing.assert_allclose(covariance[0], [[2.25, 3], [3, 4]])
     np.testing.assert_allclose(covariance[1], [[0.75, 1], [1, 4 / 3]])
     assert np.isnan(covariance[2:]).all()
+
+
+@pytest.fixture
+def serial_constant_shot_moments() -> NDArray[np.float64]:
+    # Each round contributes one identical calibrated shot. Accumulate in round
+    # order rather than building the moments from products with the final count.
+    shot = np.array([1, 0.3, 0, 0.3 * 0.3, 0, 0], dtype=np.float64)
+    moments = np.zeros_like(shot)
+    for _ in range(70):
+        moments += shot
+    return moments
+
+
+def test_iq_mean_covariance_accepts_serially_accumulated_constant_shots(
+    serial_constant_shot_moments: NDArray[np.float64],
+) -> None:
+    covariance = shot_uncertainty.iq_mean_covariance(serial_constant_shot_moments)
+    np.testing.assert_array_equal(covariance, np.zeros((2, 2)))
+
+
+def test_iq_sem_accepts_serially_accumulated_constant_shots(
+    serial_constant_shot_moments: NDArray[np.float64],
+) -> None:
+    sem = shot_uncertainty.iq_shot_sem(serial_constant_shot_moments, direction=(1, 0))
+    assert sem == 0
+
+
+def test_iq_mean_covariance_rejects_impossible_cross_moment() -> None:
+    # The centered diagonal sums are both 2, so a cross sum of 4 is impossible.
+    with pytest.raises(ValueError, match="covariance bound"):
+        shot_uncertainty.iq_mean_covariance(np.array([70.0, 0, 0, 2, 4, 2]))
 
 
 def test_iq_sem_projects_cross_moment_and_uses_retained_count() -> None:

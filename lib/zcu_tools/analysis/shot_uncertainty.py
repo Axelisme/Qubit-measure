@@ -7,7 +7,18 @@ from numpy.typing import NDArray
 
 logger = logging.getLogger(__name__)
 
-_ROUNDING_RTOL = 16 * np.finfo(np.float64).eps
+
+def _iq_rounding_rtol(n: NDArray[np.float64]) -> NDArray[np.float64]:
+    # A shot product and up to N-1 serial additions give the sum bound
+    # gamma_N = N*u/(1-N*u), with unit roundoff u = eps/2. Centering also
+    # multiplies two first sums and divides by N. Cauchy-Schwarz bounds
+    # the absolute sums of I, Q and IQ by the corresponding second moments,
+    # even for cancellation. In this small-error regime, 8*N*u covers the
+    # sum and centering errors relative to those scales.
+    u = np.finfo(np.float64).eps / 2
+    # Cap the error budget at the scale of losing half the significand:
+    # very large stored counts must not turn PSD checks into no-ops.
+    return 8 * np.clip(n * u, 4 * u, np.sqrt(u))
 
 
 def _validate_counts(counts: NDArray[np.float64] | NDArray[np.int64]) -> None:
@@ -22,13 +33,12 @@ def _validate_counts(counts: NDArray[np.float64] | NDArray[np.int64]) -> None:
 
 def _centered_iq(
     n: NDArray[np.float64],
-    i: NDArray[np.float64],
-    q: NDArray[np.float64],
-    ii: NDArray[np.float64],
-    iq: NDArray[np.float64],
-    qq: NDArray[np.float64],
+    sums: NDArray[np.float64],
+    *,
+    rtol: NDArray[np.float64],
 ) -> tuple[NDArray[np.float64], NDArray[np.float64], NDArray[np.float64]]:
-    """Return centered sums after checking both variances and the cross term."""
+    """Return centered sums from the five raw sums on the first axis."""
+    i, q, ii, iq, qq = sums
     with np.errstate(over="ignore", invalid="ignore"):
         i_mean_term = i * (i / n)
         q_mean_term = q * (q / n)
@@ -40,12 +50,13 @@ def _centered_iq(
     if np.isinf([centered_i, centered_q, centered_cross]).any():
         raise ValueError("centered IQ moments overflow float64")
 
-    i_tol = _ROUNDING_RTOL * np.maximum(np.abs(ii), i_mean_term)
-    q_tol = _ROUNDING_RTOL * np.maximum(np.abs(qq), q_mean_term)
+    i_tol = rtol * np.maximum(np.abs(ii), i_mean_term)
+    q_tol = rtol * np.maximum(np.abs(qq), q_mean_term)
     if np.any(centered_i < -i_tol) or np.any(centered_q < -q_tol):
         raise ValueError("IQ moments give a negative centered sum of squares")
 
-    cross_tol = _ROUNDING_RTOL * np.maximum(np.abs(iq), np.abs(cross_mean_term))
+    # The cross sum may have canceled; use a bound on the sum of |I*Q|.
+    cross_tol = (rtol * np.sqrt(np.abs(ii))) * np.sqrt(np.abs(qq))
     # Allow rounding in each difference, including when a variance rounds to zero.
     # Bound |cross| by the product of square roots, not the overflowing determinant.
     i_bound = np.hypot(np.sqrt(np.maximum(centered_i, 0)), np.sqrt(i_tol))
@@ -57,7 +68,7 @@ def _centered_iq(
     return centered_i, centered_cross, centered_q
 
 
-def _iq_moments_and_counts(moments: NDArray[np.float64]) -> NDArray[np.float64]:
+def _iq_defined_counts(moments: NDArray[np.float64]) -> NDArray[np.float64]:
     """Validate six-column moments and return counts masked at undefined points."""
     if moments.shape[-1:] != (6,):
         raise ValueError("IQ moments must have shape (..., 6)")
@@ -79,9 +90,9 @@ def iq_mean_covariance(moments: NDArray[np.float64]) -> NDArray[np.float64]:
     excesses are clipped to keep the matrix positive semidefinite. Invalid
     shape, counts, covariance, infinite moments or overflow raise ValueError.
     """
-    n = _iq_moments_and_counts(moments)
-    _, i, q, ii, iq, qq = np.moveaxis(moments, -1, 0)
-    i_sq, cross, q_sq = _centered_iq(n, i, q, ii, iq, qq)
+    n = _iq_defined_counts(moments)
+    sums = np.moveaxis(moments[..., 1:], -1, 0)
+    i_sq, cross, q_sq = _centered_iq(n, sums, rtol=_iq_rounding_rtol(n))
     i_var = np.maximum(i_sq, 0) / n / (n - 1)
     q_var = np.maximum(q_sq, 0) / n / (n - 1)
     bound = np.sqrt(i_var) * np.sqrt(q_var)
@@ -110,13 +121,15 @@ def iq_shot_sem(
     outside the projection direction. Invalid covariance or overflow raises
     ValueError.
     """
-    n = _iq_moments_and_counts(moments)
+    n = _iq_defined_counts(moments)
     a, b = np.asarray(direction, dtype=np.float64)
     if not np.isfinite(direction).all():
         raise ValueError("IQ projection weights must be finite")
 
-    _, i, q, ii, iq, qq = np.moveaxis(moments, -1, 0)
-    _centered_iq(n, i, q, ii, iq, qq)
+    sums = np.moveaxis(moments[..., 1:], -1, 0)
+    rtol = _iq_rounding_rtol(n)
+    _centered_iq(n, sums, rtol=rtol)
+    i, q, ii, iq, qq = sums
     with np.errstate(over="ignore", invalid="ignore"):
         total = a * i + b * q
         i_term = a * (a * ii)
@@ -130,7 +143,7 @@ def iq_shot_sem(
     scale = np.maximum.reduce(
         [np.abs(i_term), np.abs(iq_term), np.abs(q_term), mean_term]
     )
-    if np.any(centered < -_ROUNDING_RTOL * scale):
+    if np.any(centered < -rtol * scale):
         raise ValueError("IQ moments give a negative centered sum of squares")
     return np.asarray(np.sqrt(np.maximum(centered, 0)) / np.sqrt(n) / np.sqrt(n - 1))
 
