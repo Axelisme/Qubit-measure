@@ -23,6 +23,7 @@ from zcu_tools.simulate.evolution import (
     FluxSchedule,
     ModelSource,
     PathDiagnostics,
+    SampledRWAProbeMemo,
     SecularModel,
     TimelineBatch,
 )
@@ -63,6 +64,7 @@ class AnswerEngine(EngineDouble):
         telemetry: bool = False,
         reuse_key: bytes | None = None,
         capture: CaptureBuffer | None = None,
+        probe_memo: SampledRWAProbeMemo | None = None,
     ) -> EvolutionResult:
         """Supply the answer for each point, deliberately in reverse point order."""
         (batch,) = batches
@@ -93,6 +95,7 @@ class AnswerEngine(EngineDouble):
             telemetry=telemetry,
             reuse_key=reuse_key,
             capture=capture,
+            probe_memo=probe_memo,
         )
 
 

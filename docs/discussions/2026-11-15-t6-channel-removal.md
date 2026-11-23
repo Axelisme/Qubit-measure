@@ -65,3 +65,7 @@ N-long 的 343 列有 196 種相位，類 CPMG 的 1,616 個 π pulse 有 1,565 
 - [Evolution README](../../lib/zcu_tools/simulate/evolution/README.md) 擁有現行 kernel 總表與數值契約。
 - [t6 Kernel contract](../../tests/simulate/evolution/kernels/test_t6.py) 驗證高重用 direct 路徑及完整 density。
 - [精度矩陣](../../tests/README.md#evolution-精度矩陣) 擁有跨 family 的最終誤差驗收方式。
+
+## 後記
+
+現行 `t6` 局部選路規則已搬到 [Evolution README〈t6 只保留 direct〉](../../lib/zcu_tools/simulate/evolution/README.md#t6-只保留-direct)。[ADR-0078](../adr/0078-evolution-module-boundary.md#t6-只保留-direct) 保留指標。

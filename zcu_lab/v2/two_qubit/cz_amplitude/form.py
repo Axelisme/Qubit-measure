@@ -1,7 +1,5 @@
 """Fixed-capture two-line CZ amplitude inputs, never borrowed from another Form."""
 
-from dataclasses import replace
-
 from zcu_tools.cfg_model import Expr, Hidden, Range, Slot, Template
 from zcu_tools.gui.form_adapter import Form, FormContext
 
@@ -19,7 +17,7 @@ def make_form(ctx: FormContext) -> Form[CZAmplitudeCfg]:
 
     Qubit1/Qubit2 require circle classifiers with radius from GE Post. Reset starts None.
 
-    Coupler CZ slots supply ordinary pulse templates when present. Otherwise
+    Existing coupler CZ slots supply library references. Otherwise
     explicit cosine inputs require operator frequency/gain/duration/Nyquist zone;
     only generator wiring comes from capture. No simulator truth or drive preset
     supplies missing calibrations. A common scale range is required explicitly.
@@ -29,7 +27,7 @@ def make_form(ctx: FormContext) -> Form[CZAmplitudeCfg]:
     for role in ("qubit1", "qubit2"):
         # CZ slots: $coupler.module.cz_qubit1 and $coupler.module.cz_qubit2.
         slot = f"$coupler.module.cz_{role}"
-        node = source(
+        drive[role] = source(
             ctx,
             slot,
             Template(
@@ -44,9 +42,6 @@ def make_form(ctx: FormContext) -> Form[CZAmplitudeCfg]:
                 },
             ),
         )
-        if isinstance(node, Slot):
-            node = replace(node, copy=True)
-        drive[role] = node
     readout = mux_readout_initial(ctx)
     return TwoQubitForm(
         CZAmplitudeCfg,
@@ -59,8 +54,8 @@ def make_form(ctx: FormContext) -> Form[CZAmplitudeCfg]:
             "qubit2_tone": Hidden(qubits.qubit2_tone),
             "reset": None,
             "drive": drive,
-            "x180_qubit1": Slot("$qubit1.module.x180", copy=True),
-            "x180_qubit2": Slot("$qubit2.module.x180", copy=True),
+            "x180_qubit1": Slot("$qubit1.module.x180"),
+            "x180_qubit2": Slot("$qubit2.module.x180"),
             "readout": readout,
             "scale": Range(None, None, expts=101),
         },

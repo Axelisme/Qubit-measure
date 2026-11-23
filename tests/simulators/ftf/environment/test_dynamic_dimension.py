@@ -24,6 +24,7 @@ from zcu_tools.simulate.evolution import (
     EvolutionResult,
     ModelSource,
     PathDiagnostics,
+    SampledRWAProbeMemo,
     SecularModel,
     TimelineBatch,
 )
@@ -68,6 +69,7 @@ class PilotEngine(EngineDouble):
         telemetry: bool = False,
         reuse_key: bytes | None = None,
         capture: CaptureBuffer | None = None,
+        probe_memo: SampledRWAProbeMemo | None = None,
     ) -> EvolutionResult:
         points = np.concatenate([batch.points for batch in batches])
         n = len(source.initial_density)

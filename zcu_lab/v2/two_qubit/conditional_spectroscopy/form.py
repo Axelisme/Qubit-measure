@@ -12,15 +12,23 @@ from zcu_lab.v2.support.measure.mux_forms import (
 
 from .._measure import TwoQubitForm, captured_qubits
 from .core import SpectroscopyCfg
+from .core_heralded import HeraldedSpectroscopyCfg
 
 
 def make_form(ctx: FormContext) -> Form[SpectroscopyCfg]:
-    """Seed spectroscopy from GUI aliases $qubit1, $qubit2 and $mux.
+    """Seed the ordinary spectroscopy form from the fixed capture."""
+    return spectroscopy_form(ctx, SpectroscopyCfg)
+
+
+def spectroscopy_form[Cfg: SpectroscopyCfg | HeraldedSpectroscopyCfg](
+    ctx: FormContext, cfg_type: type[Cfg]
+) -> Form[Cfg]:
+    """Seed either spectroscopy form from GUI aliases $qubit1, $qubit2 and $mux.
 
     The fixed capture seeds hidden tone indices; no $coupler binding is needed.
     Notebook bindings of the same names are separate. Missing or inconsistent
-    qubit/mux bindings raise ValueError. Available coupler CZ slots are editable
-    starting points, not assumed weak probes. Without a slot, offer a cosine
+    qubit/mux bindings raise ValueError. Available coupler CZ slots start as
+    references, not assumed weak probes. Without a slot, offer a cosine
     on the qubit's captured channel; gain, duration and Nyquist zone remain
     required. Run supplies both drive frequencies from the common scan.
     No model truth or safe-drive defaults are supplied. The frequency scan must
@@ -31,8 +39,7 @@ def make_form(ctx: FormContext) -> Form[SpectroscopyCfg]:
     for position in ("qubit1", "qubit2"):
         # CZ slots: $coupler.module.cz_qubit1 and $coupler.module.cz_qubit2.
         slot = f"$coupler.module.cz_{position}"
-        # The run overrides both pulse frequencies with the common sweep.
-        node = source(
+        pulse = source(
             ctx,
             slot,
             Template(
@@ -40,19 +47,17 @@ def make_form(ctx: FormContext) -> Form[SpectroscopyCfg]:
                 set={
                     "ch": Expr(f"${position}.wiring.ch"),
                     "nqz": None,
-                    "freq": Hidden(0.0),
                     "gain": None,
                     "waveform.style": "cosine",
                     "waveform.length": None,
                 },
             ),
         )
-        if isinstance(node, Slot):
-            node = replace(node, copy=True, set={"freq": Hidden(0.0)})
-        drive[position] = node
+        # Hide the swept frequency in inline without changing a captured ref.
+        drive[position] = replace(pulse, set={**pulse.set, "freq": Hidden(0.0)})
     readout = mux_readout_initial(ctx)
     return TwoQubitForm(
-        SpectroscopyCfg,
+        cfg_type,
         readout_of=lambda cfg: cfg.readout,
         tree={
             "reps": 1000,
@@ -61,8 +66,8 @@ def make_form(ctx: FormContext) -> Form[SpectroscopyCfg]:
             "qubit1_tone": Hidden(qubits.qubit1_tone),
             "qubit2_tone": Hidden(qubits.qubit2_tone),
             "reset": None,
-            "x180_qubit1": Slot("$qubit1.module.x180", copy=True),
-            "x180_qubit2": Slot("$qubit2.module.x180", copy=True),
+            "x180_qubit1": Slot("$qubit1.module.x180"),
+            "x180_qubit2": Slot("$qubit2.module.x180"),
             "readout": readout,
             "drive": drive,
             "frequency": Range(None, None, expts=101),

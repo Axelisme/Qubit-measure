@@ -24,6 +24,7 @@ from zcu_tools.simulate.evolution import (
     FluxWaveform,
     NoValidKernel,
     PathDiagnostics,
+    SampledRWAProbeMemo,
     SegmentShift,
     StarkOrderInversion,
     TimelineBatch,
@@ -108,6 +109,8 @@ class CavityEvolutionOptions:
     reading: Callable[[], AbstractContextManager[None]] = nullcontext
     round_index: int = 0
     projective_capture: ProjectiveCapture | None = None
+    probe_memo: SampledRWAProbeMemo | None = None
+    """Preparation-owned sampled guard memo, or None to use only evolve-local facts."""
 
 
 @dataclass
@@ -401,6 +404,7 @@ def _evolve_outcomes(
                     cancel=options.cancel,
                     telemetry=options.telemetry,
                     capture=options.capture,
+                    probe_memo=options.probe_memo,
                     reuse_key=key,
                 )
             except Cancelled:
@@ -654,6 +658,7 @@ class _ChainSolves:
                     cancel=options.cancel,
                     telemetry=options.telemetry,
                     capture=options.capture,
+                    probe_memo=options.probe_memo,
                     reuse_key=key,
                 )
             except Cancelled:
@@ -865,6 +870,7 @@ def evolve_plans(
                 cancel=options.cancel,
                 telemetry=options.telemetry,
                 capture=options.capture,
+                probe_memo=options.probe_memo,
                 reuse_key=options.key,
             ), (options.key,)
     # ADR-0078: this composition alone owns the ADC memo's lifetime.
@@ -915,6 +921,7 @@ def _evolve_cavities(
                 cancel=options.cancel,
                 telemetry=options.telemetry,
                 capture=options.capture,
+                probe_memo=options.probe_memo,
                 reuse_key=plain_key,
             )
         paths.append(result.paths)
@@ -937,6 +944,7 @@ def _evolve_cavities(
                 cancel=options.cancel,
                 telemetry=options.telemetry,
                 capture=options.capture,
+                probe_memo=options.probe_memo,
                 reuse_key=reuse_key,
             )
         paths.append(result.paths)

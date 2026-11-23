@@ -6,7 +6,7 @@
 
 ## 設定表單
 
-- 核對 [qubit 位置與 mux tone 次序](../guide.md#綁定位置與讀出-tones)；不需綁 coupler。**Ramsey target** 初選 Qubit1。兩顆的 Xπ 與 Xπ/2 從各自的 `x180`、`x90` slot 複製，缺 slot 留空。同一顆的脈衝須在同一 drive channel、兩顆分用不同 channel。用校準脈衝與完整 **Mux readout**，兩個位置須有同讀出設定下的 GE circles 與 GE Post 半徑。
+- 核對 [qubit 位置與 mux tone 次序](../guide.md#綁定位置與讀出-tones)；不需綁 coupler。**Ramsey target** 初選 Qubit1。兩顆的 Xπ 與 Xπ/2 引用各自的 `x180`、`x90` slot，缺 slot 留空。同一顆的脈衝須在同一 drive channel、兩顆分用不同 channel。用校準脈衝與完整 **Mux readout**，兩個位置須有同讀出設定下的 GE circles 與 GE Post 半徑。
 - **Programmed Ramsey detuning** 留白待填。第二個 π/2 的相位是第一個的相位加 `360° × detuning (MHz) × actual delay (µs)`，不改 RF。取絕對值大於近期 Ramsey 頻率誤差與預估 |ζ| 之和的非零 detuning，確保兩分支同頻率符號側。
 - **Ramsey free-evolution delay** 從 0–10 µs、101 點起填，需至少六個不同且等距的實際延遲。最快 fringe 每週期至少 10 點（2 MHz 時步距不超過 0.05 µs）；若要看衰減，窗口取約 3×T2*。太短只看到部分振盪或衰減，fit 得外推；太疏會把快速條紋看成低頻。
 - **Coupler DC source** 留空不動 DC；若掃 bias，用 **DC source unit** 選 A、V 或 native，並以同單位填 **Coupler DC bias sweep**。不補償其他 loop，結束或 Stop 不復原偏壓。**Reset** 留空不發射；若選 mux herald，核對[讀出與等待](../guide.md#herald-reset-與獨立-heralded-入口)。

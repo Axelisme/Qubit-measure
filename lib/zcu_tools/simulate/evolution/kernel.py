@@ -21,6 +21,7 @@ from .workplan import WorkPlan
 
 if TYPE_CHECKING:
     from ._capture import CaptureRun
+    from ._probe_memo import SampledRWAProbeMemo
     from .kernels._dop853_opencl import OpenCLBackend, OpenCLDOP853
 
 
@@ -310,6 +311,7 @@ class KernelContext:
     complete_row_offset maps contiguous prefix-table rows back to complete-table
     rows by addition. It is zero for complete geometry and standalone work.
     capture optionally records debug observations in complete-table coordinates.
+    probe_memo borrows exact sampled guard certificates for one FTF preparation.
     """
 
     source: ModelSource
@@ -322,6 +324,7 @@ class KernelContext:
     complete_row_offset: int = 0
     capture: CaptureRun | None = None
     prefix_opencl: PrefixOpenCLQuote | None = None
+    probe_memo: SampledRWAProbeMemo | None = None
 
     def __post_init__(self) -> None:
         if not np.isfinite(self.budget) or self.budget <= 0:

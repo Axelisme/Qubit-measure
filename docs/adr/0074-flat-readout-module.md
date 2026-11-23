@@ -42,6 +42,7 @@ status: accepted
 **邊界。** 沒有捕捉的 library 目標，或非更新欄位與實測 readout 不符時，writeback 失敗，不建也不猜目標。這項比對只防止新校準寫到不同設定；已存 classifier 不附校準時的 readout 設定，改設定不清除它，取用時也不比對。改 readout 後，操作員重新做相應校準再 Apply：circle 做 singleshot GE 與 Post，centroid3 做三態 reference。舊條目沒有 classifier 時讀作 `None`，不讀寫 point 的 `readout_cal` 或搬用舊值。
 
 - Raman 與上述三個 STIRAP 的 Analyze 讀保存的 g/e/f counts，不再分類。它們要求合法完整的 saved cfg，錯 classifier 型別或未知 ADC 仍拒絕。合法 cfg 缺 classifier 時只畫分類比例；矩陣奇異或把有效點解成非有限值時，記一筆 warning 後走相同路徑。兩階段都不退回 circle、不查 live library，也不讀 simulator truth。Training confusion 包含準備污染。成功校正回到 preparation-label 座標，保留負值與大於 1 的結果，不代表 pure energy-state population 或 readout fidelity。
+  Run 的嚴格 ADC lookup 見 [`centroid3_classifier`](../../lib/zcu_tools/program/v2/modules/readout.py)。[Analysis 子模組](../../lib/zcu_tools/analysis/README.md#子模組)說明 `analyze_centroid3_populations` 與 `Centroid3Summary.from_applied_matrix`；實際欄位見 [recipe 回報](../../zcu_lab/recipes/README.md#操作文件與驗收)。
 - 雙 qubit 分類實驗在 Run 前驗證兩個角色 tone 都有 circle 與 GE Post 的 radius，否則 cfg 驗證報錯。一般入口保存終端讀出的 9 類計數，獨立 heralded 入口保存含 herald 的 81 類計數。Result 存原 float64 總和，不存逐 shot IQ，也不在 Analyze 分類，見 [雙 qubit guide](../../zcu_lab/v2/two_qubit/guide.md)。Readout 的單 ADC circle lookup 不解讀 lab 角色。
 - T1 需要 other，不收 linear 或 centroid3。舊 cfg 沒有 classifier 時略過 confusion 修正。需要 radius 的 consumer 提示做 Post。其餘 singleshot population consumers 在取數時分類，confusion correction 只用 saved cfg。Amplitude／Length Rabi 保留單 ADC raw IQ 與聯合 fit；未校準只略過 live population preview。有效 fit 透過同一中立 builder 更新捕捉的 resonator readout，Pulse 改 `classifier`，單 tone Mux 改 `tones.0.classifier`，不支援多 tone 分析。Check 的 raw Run 不要求 classifier，Analyze 才從 saved cfg 要求 circle 與 radius，見 [Check guide](../../zcu_lab/v2/singleshot/check/guide.md)。
 
@@ -96,7 +97,7 @@ status: accepted
 
 **例子。** Mux 實驗以 `reset/mux_herald` 選 `keep: {'0': g, '2': g}`。鍵是完整 tones 清單的位置，不是 ADC 編號。只在兩個 tone 都是 g 時保留該 shot，所有 ADC 一起保留或排除。`reset/herald` 搭配 `readout/pulse`，`keep` 是單一態。可選 `prepare` 是一個 `pulse`、`reset/pulse`、`reset/two_pulse` 或 `reset/bath`，可 inline 或引用 library key。先 prepare，再做 herald 讀取、實驗序列和終端讀取。Herald 的 `readout` 可 inline 或引用 library key。Herald 沿用 readout 的 `pre_delay`／`post_delay`。共享 readout 物件的兩種建法見 [Herald resets](../../lib/zcu_tools/program/v2/modules/README.md#herald-resets)。
 
-**邊界。** `ResetWithHeraldCfg` 才包含兩種 herald，普通 `Reset.Cfg` 不含。一般入口的 RB、chevron、constructive phase、CZ amplitude、conditional spectroscopy、local Z、idle ZZ 與 joint readout 都用 mux 終端讀取，只收普通 reset 或 `reset/mux_herald`。T1 cov 不收 herald，遮罩會改變它用來自校準的聯合二階矩。只有 `two_qubit/rb_heralded` 與 `two_qubit/conditional_phase_heralded` 保留獨立入口，見[下一節](#保留獨立-heralded-實驗的條件)。
+**邊界。** `ResetWithHeraldCfg` 才包含兩種 herald，普通 `Reset.Cfg` 不含。一般入口的 RB、chevron、constructive phase、CZ amplitude、conditional spectroscopy、local Z、idle ZZ 與 joint readout 都用 mux 終端讀取，只收普通 reset 或 `reset/mux_herald`。T1 cov 不收 herald，遮罩會改變它用來自校準的聯合二階矩。獨立實驗入口的取捨見 [Two-qubit 實驗清單〈何時保留獨立 heralded 入口〉](../../zcu_lab/v2/README.md#何時保留獨立-heralded-入口)。
 
 - Circle 可選 g、e、other，需 radius；linear 可選 g、e；不接受 centroid3。Mux `keep` 鍵須為非負十進位整數的字串，否則 cfg 驗證報錯。Build 拒絕與終端不同或有掃描的 herald readout、未知 tone、缺少 classifier 或 circle radius、非法 `keep` 態，以及各可行路徑消耗的實體讀取不一致。掃描會改變已校準 classifier 所對應的設定，所以不收 swept herald readout。
 - 硬體觸發照實計數。Mux 的 herald 讀取包括未列入 `keep` 的 tone；每個觸發的 ADC 都移除這一次讀取。實驗用可見的 label 和索引，`shot_sums` 按邏輯讀取數檢查，不必改實驗的 converter。平均、reducer、`ShotResult` 不含來源消耗的讀取，沒有剩餘讀取的 ADC 也省略。`get_raw()` 仍含全部 trigger。`run_acquire_shots` 給可見讀取的原始 int64 積分 IQ 與 bool mask，不由框架套遮罩；實驗決定如何使用。
@@ -115,13 +116,7 @@ status: accepted
 
 #### 保留獨立 heralded 實驗的條件
 
-**規則。** 只有分析在 gg 和 ee 兩組共用一個參數，且準備誤差只進各組自己的振幅或偏移、不移動共用參數，才保留獨立的 heralded 入口。
-
-**例子。** RB 的兩組各自擬合振幅與偏移，共用衰減參數 `p`。Conditional phase 只用 π 交點寫回；兩組在 π 交點相符，不代表離開 π 時也等效。
-
-**邊界。** 準備誤差若會拉動共用參數，或分析本就不共用參數，就用 `reset/mux_herald` 只留 gg。例如 idle ZZ 的 ζ 會受準備污染拉動，joint readout 矩陣也直接含準備誤差。
-
-**依據。** 2026-11-20，使用者說：「有一些实验呢，它天生不在意 GG 还是 EE，它在意的是 GE 的交换，或者是保留在 GGEE 的属性。这种情况下，利用 hurdling 去。诶，具体来说，用交叉矩以及 hurdling 这两种方案去分析，有助于提高拟合可信度。那其他实验就用 reset 模块就好了。」使用者追問 gg／ee 是否等效，核對後同意保留獨立的 RB 與 conditional phase。語音用詞、數值及選項比較見[只為共用參數保留獨立 heralded 實驗](../discussions/2026-11-20-heralded-experiment-pruning.md)。
+實驗入口的決策見 [Two-qubit 實驗清單〈何時保留獨立 heralded 入口〉](../../zcu_lab/v2/README.md#何時保留獨立-heralded-入口)。
 
 ### Owner 不變，caller 不重建舊配置
 

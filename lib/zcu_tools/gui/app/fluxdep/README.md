@@ -1,6 +1,6 @@
 # `zcu_tools.gui.app.fluxdep` flux-dependence analysis GUI
 
-**Last updated:** 2026-11-20
+**Last updated:** 2026-11-23，MCP 等待與流程依賴
 
 **讀者：** framework-dev。通量頻譜分析 GUI 的狀態、互動與搜尋分工。
 
@@ -171,6 +171,12 @@ EventBus 供 app 內部事件使用，不提供業務事件的 RPC 訂閱；cont
 `Controller.control_identity` 是控制身份的唯一 owner。
 Fluxdep 沒有硬體緊急 Stop，使用者必須先點燈收回再取消。
 
+#### Auto Align 與 search 的等待
+
+Auto Align 與 search 中途沒有 agent 可影響結果的判斷。兩者沿用 [ADR-0075〈長操作看 agent 中途能否影響結果〉](../../../../../docs/adr/0075-agent-interface-layers.md#長操作看-agent-中途能否影響結果) 的共用等待規則，由 MCP 等到操作結束才回覆。
+
+GUI 持有 context lifetime、operation、完整 inputs、recorded quality 與 fit freshness。GUI Show 和 MCP 使用同一 fit renderer。MCP 不回過期結果的疊圖，GUI 仍顯示過期與原因。
+
 ### 跟隨遠端操作
 
 依 [ADR-0075](../../../../../docs/adr/0075-agent-interface-layers.md#tool-即意圖)，視窗顯示成功 RPC 命令的目標：
@@ -199,6 +205,16 @@ Hide 或 detach 不取消，重新 activate 讀 owner snapshot。
 關窗先拒絕新 search 並提出 cancel，search runner 未 drain 就拒絕關窗，保留 Qt owners 與圖。
 
 [Search owner](search.py) · [Fit service](services/fit.py) · [依賴圖與版本](state.py)
+
+#### Fluxdep 的依賴模型不是跨 app 原則
+
+**規則。** Fluxdep 的流程依賴與品質判定是 app 的契約，不升成共用 MCP 原則。
+
+**例子。** Alignment → points → Filter → fit 決定下游失效；recorded quality、過期圖與匯出限制由 Fluxdep owner 管理，見[本頁的等待規則](#auto-align-與-search-的等待)與 [Fluxdep MCP README](../../../mcp/fluxdep/README.md#fit-and-recorded-evidence)。
+
+**邊界。** 其他 app 按各自的需求決定失效模型，不套用 Fluxdep 的依賴鏈。
+
+**依據。** 2026-10-12，使用者對提升為通用範式裁定：「這點還不確定，先不進範式。」見 [Fluxdep MCP 設計](../../../../../docs/discussions/2026-10-12-fluxdep-mcp-design.md#討論中使用者的判斷與修正)。
 
 ### Checkpoints and export
 

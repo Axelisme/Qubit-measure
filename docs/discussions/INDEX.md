@@ -23,6 +23,9 @@
 
 ## 模擬量測環境
 
+- 2026-11-23 [模擬器優化嘗試記在哪裡](2026-11-23-simulator-attempts-log.md)：文件組織。優化嘗試一檔一筆，依主題索引，並補登過去採用和未採用的做法。
+- 2026-11-23 [FTF sampled RWA 探針的快取壽命](2026-11-23-ftf-rwa-probe-memo.md)：快取壽命。一次 FTF preparation 重用精確的探針證明；每次 evolve 仍選路、記帳、演化與發佈 capture。
+
 - 2026-11-22 [舊實測數字當現況](2026-11-22-stale-measured-numbers.md)：量測新鮮度。引用數字附 commit、輸入與範圍，驅動決策前查被測路徑的後續改動；未完成列未走到的階段記 null。
 - 2026-11-22 [模擬器接收雜訊只保留等向設定](2026-11-22-isotropic-receiver-noise.md)：刪除或收窄。模型 YAML 每個 receiver 改填單一 PSD，I 和 Q 獨立且變異數相同。
 - 2026-11-22 [FTF 樣板的 projective floor](2026-11-22-ftf-projection-weight-floor.md)：精度取捨。FTF 樣板 floor 改為 `1e-5`；舊 history 模型下原設定第一點的 1,800 s 參考缺口，在 Markov 同模型驗收後不再適用。
@@ -168,6 +171,7 @@
 
 ## Measure UI
 
+- 2026-11-23 [Heralded RB 與 conditional phase 合併顯示 gg、ee](2026-11-23-heralded-pooled-display.md)：圖形呈現。兩個 heralded 入口合併主圖與 Live，分組診斷及原分析不變。
 - 2026-11-23 [CZ phase 的 contrast 標準誤](2026-11-23-phase-contrast-sem.md)：圖形呈現。Live 與 Analyze 傳遞獨立 X/Y 投影的 shot SEM，恰零時取最大方向。
 - 2026-11-23 [Conditional phase 與 Local Z 的圖照推導順序](2026-11-23-phase-figures-physics-order.md)：圖形呈現。主圖從 Bloch 向量、累積相位到條件相位；診斷量另放；Live 只畫已完整頻率。
 - 2026-11-23 [Singleshot T1 以振幅分 T1／T1b](2026-11-23-singleshot-t1-amplitude-naming.md)：讀圖語意。e→e 曲線振幅大的模是 T1、小的是 T1b；兩版都提議寫回主模。
@@ -206,6 +210,7 @@
 - 2026-11-23 [平均 IQ 圖的投影慣例](2026-11-23-mean-iq-plot-projection.md)：呈現規則。同類實驗沿用同一 IQ 轉換，一維預設用主軸投影，二維 flux／頻率圖逐 bias 扣背景再取幅值。
 - 2026-11-22 [Two-qubit mux 綁定與編輯後的檢查](2026-11-22-two-qubit-mux-binding-checks.md)：驗證位置。Open／Reset 驗有序元件連結，提交時按同次 capture 驗實際 readout tone 數。
 - 2026-11-23 [掃描初值至少 31 點、用奇數](2026-11-23-scan-defaults-min-31-odd.md)：預設值。等距掃描初值每軸 ≥31 點，以中心為準者用奇數；只改初值不擋輸入，離散 protocol 序列除外。
+- 2026-11-23 [表單預設引用 library](2026-11-23-form-ref-not-copy.md)：表單預設。只在表單改了 Run 不會覆寫的欄位時複製，試調先 Convert to inline。
 
 ## 模組邊界
 
@@ -216,6 +221,7 @@
 - 2026-11-22 [Two-qubit 的身分、定位與中性位置名](2026-11-22-two-qubit-identity-and-neutral-positions.md)：職責歸屬。Adapter 解析身分並傳定位數值，分析 options 接收標籤，位置沿用 `qubit1/qubit2`。
 - 2026-11-22 [頻譜擬合模型的求值 owner](2026-11-22-spectrum-fit-evaluation-owner.md)：擬合邊界。Fitting 重用同次係數，實驗 caller 決定窗內網格與呈現。
 - 2026-11-23 [Program 的模擬邏輯只在 mixin 內](2026-11-23-program-simulation-mixin.md)：依賴邊界。單輪模擬估時移入模擬子包，lab 不再傳模擬專用線路要求。
+- 2026-11-23 [哪些取捨要寫進 ADR](2026-11-23-adr-inclusion-criteria.md)：文件組織。可能約束多個底層模組、決定子系統共同架構、難以撤回或需記錄否決理由，符合任一條就寫進 ADR。
 
 ## 測試與驗證
 
@@ -245,6 +251,7 @@
 - 2026-11-23 [Coherence 的 shot SEM 只隨當次 Run 交接](2026-11-23-coherence-run-only-shot-sem.md)：資料入庫（superseded）。只在記憶體交接矩的保存決策已由 [Native 保存六矩](2026-11-23-coherence-native-shot-moments.md) 取代。
 - 2026-11-23 [Coherence 的 shot 矩寫入 Native 檔](2026-11-23-coherence-native-shot-moments.md)：資料入庫。三個 leaf 可選保存同次六矩，重載後重算 SEM；Labber 匯出與三個歷史輸入契約不變。
 - 2026-11-23 [舊 MIST gain Labber 的同版轉換](2026-11-23-mist-legacy-labber-equivalence.md)：歷史格式。固定原單 log 宣告，兩種 profile 證明等價才保留版號。
+- 2026-11-24 [掃頻 drive cfg 的值域擴張升 minor](2026-11-24-swept-drive-cfg-minor.md)：資料格式。五個入口保留完整來源值，舊等頻 cfg 可由新版載入；舊版讀新異頻檔保留結果但不還原 cfg。
 
 ## 量測策略
 
@@ -260,6 +267,7 @@
 - 2026-11-15 [Two-qubit RB 的兩組都同時打單 qubit gates](2026-11-15-two-qubit-rb-simultaneous-gates.md)：並行排程。普通與heralded兩版的reference／interleaved都用每qubit時間線，在CZ共同同步，保留原frame與reset政策。
 - 2026-11-20 [Herald 改為 reset 模塊與逐 shot 遮罩](2026-11-20-herald-reset-shot-masks.md)：推翻放置選擇。Herald 改成既有 reset 欄位的模塊選項，取數層以逐 shot bool 遮罩篩選、所有下游統一收遮罩，tracker 改成顯式 reducer，FTF 沿用逐 shot 抽樣，決策見 [ADR-0074](../adr/0074-flat-readout-module.md#herald-reset-與逐-shot-遮罩)。
 - 2026-11-20 [只為共用參數保留獨立 heralded 實驗](2026-11-20-heralded-experiment-pruning.md)：刪除或收窄。只保留 RB 與 conditional phase 的獨立入口，其餘七個用 mux herald reset 篩選 gg。
+- 2026-11-23 [以準備後的 herald 分支量條件頻譜](2026-11-23-heralded-conditional-spectroscopy.md)：實驗入口新增。先做名目 I／Xπ 準備，再依實測 herald 類別畫四支條件頻譜。
 - 2026-11-19 [Integer fluxonium 的 MIST：與 half-flux 的差異及 erasure check 的注意事項](2026-11-19-integer-fluxonium-mist.md)：物理研究。Φ=0 的 e/f 是 parity 相反的計算態加 erasure 態，MIST 線成對、e/f 不經 k=0 交換但 10⁻³ Φ₀ 偏磁即破；check 宜讓 g、f 都暗，最糟後果是 e→g/f 或漏到不被標記的高態；重複 check 的 Stark 相位與磁通雜訊會相乘累積；An 的 check 期間 T1(e→g) 變短無法以閉系統 MIST 或平滑浴解釋。
 - 2026-11-20 [T1 二階矩實驗以 t1_cov 恢復](2026-11-20-t1-cov-restore.md)：恢復已刪除的概念。2026-11-09 誤刪的是二階矩方法，不是 post-selection；先恢復 T1，改稱 cov，讀出叫 pre_readout／post_readout，加可選脈衝 reset，舊資料不載入。
 - 2026-11-20 [Two-qubit RB 在 Clifford 邊界對齊兩條時間線](2026-11-20-rb-clifford-barrier.md)：排程修正。2026-11-15 的並行排程只在 CZ 同步，reference 組相鄰 Clifford 會重疊，interleaved 組不會；改為兩組都在 Clifford 邊界 join，interleaved 時序不變、reference 變長，新舊資料不混比。

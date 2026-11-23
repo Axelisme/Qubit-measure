@@ -7,7 +7,7 @@
 ## Run 前
 
 1. 核對[位置與完整 mux](../guide.md#綁定位置與讀出-tones)，為兩個位置選已校準的 Xπ/2、Xπ 和 circle classifier。各 X pulse 與同位置 CZ pulse 要用同一 generator。若用 mux herald，核對[讀出與保留條件](../guide.md#herald-reset-與獨立-heralded-入口)。
-2. 在 **Two-line CZ drive** 為兩線選相同形狀、時長的 `cosine`、`gauss`、`drag`、`const`、`arb` 或 `flat_top`。兩線可有不同的帶號 gain 和 phase。核對 **Local Z correction pair** 有序對應目前的 Qubit1、Qubit2，並使用 `$coupler.ext.cz_phase` 校準的角度。
+2. **Two-line CZ drive** 預填 coupler 的 `cz_qubit1`、`cz_qubit2` slot 引用。若要在表單暫換起點，先對兩支 pulse 按 **Convert to inline**，再選相同形狀、時長的 `cosine`、`gauss`、`drag`、`const`、`arb` 或 `flat_top`。兩線可有不同的帶號 gain 和 phase。核對 **Local Z correction pair** 有序對應目前的 Qubit1、Qubit2，並使用 `$coupler.ext.cz_phase` 校準的角度。
 3. **Interleaved Clifford depth** 選在已量的 IRB 衰減中段。**Clifford sequence seeds** 填 3–5 個不同整數。**Optimizer random seed** 控制候選，不改 Clifford 序列。
 4. **Avoid frequencies (MHz)** 可填絕對實驗室頻率，例如量到但不想驅動的躍遷。留空時頻譜不畫頻帶。這個欄位不加入最優化目標。
 

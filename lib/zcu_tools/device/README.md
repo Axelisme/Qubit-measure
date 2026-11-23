@@ -1,6 +1,6 @@
 # Device Note for `zcu_tools/device`
 
-**Last updated:** 2026-10-27
+**Last updated:** 2026-11-23，FakeDevice 的 address 身分
 
 **讀者：** framework-dev。儀器 driver、DeviceManager、並發與安全限制速查。
 
@@ -263,10 +263,7 @@ identity 被回收重複使用）；registry lock 只保護 lookup/claim/cleanup
 
 `FakeDevice` 用於本地流程測試，不需要真實儀器連線：
 
-- **`FakeDevice(*, address=None, fast_mode=False, value_unit="native")` 不接受 `rm` 參數**。顯式 address 從 process 共享的 class 容器取得同一實例。首次建立固定單位與 fast_mode，重取保留 value、output、ramp 與模擬綁定。
-- 省略 address 每次建立獨立 anonymous instance，不進容器。它的 Info address 是 `"none"`，與顯式 address `"none"` 的身分不同。
-- Class 容器最多保留 1024 個 addressed instances，僅防止無限增長。滿額拒絕新 address，不淘汰，既有 address 仍可取回。`close()` 不移除身分。真實 driver 不受影響，見 ADR-0076。
-- `isolated_instances()` 在無工作執行時建立空 scope，退出後還原原容器。測試使用它隔離 process 共享狀態。
+- **`FakeDevice(*, address=None, fast_mode=False, value_unit="native")` 不接受 `rm` 參數**。
 - Fake 不開 pyvisa session，但首次建立仍取得 base locks/logger/session invariant。`fast_mode=True` 跳過 ramp 的 `time.sleep`。`value_unit` 為 native、V 或 A，不做數值換算。
 - `FakeDeviceInfo` 欄位：`type: Literal["FakeDevice"] = "FakeDevice"`、`output: Literal["on","off"] = "off"`、`value: float = 0.0`、`rampstep: float = 0.01`、`value_unit: Literal["native", "V", "A"] = "native"`。Value 與 rampstep 使用相同固定單位。Setup 單位不同時在任何寫入前拒絕；換單位須重建裝置。Dump 與 GUI snapshot 保留實際單位。RF 裝置的 Hz／dBm 量各有固定單位，不新增 `value_unit`。
 - 提供 `get_output/set_output/output_on/output_off` 與 `get_value/set_value` 方法（記憶體狀態操作）。
@@ -275,6 +272,19 @@ identity 被回收重複使用）；registry lock 只保護 lookup/claim/cleanup
 - `get_info()` 回傳當前記憶體狀態。
 
 這個類別設計目標是「可被 `DeviceManager` 註冊」，模擬完整 ramp 行為（含 pbar + 協作取消）。
+
+#### FakeDevice 的 address 身分
+
+2026-10-19，使用者裁定：「FakeDevice採用以address為分辨的單例模式」，並指定「存在FakeDevice的類容器裡」。只有顯式 address 進入 process 共享的 class 容器。同 address 取回同一個 driver，保留模擬綁定、單位與設定。省略 address 的 anonymous instance 沒有可比較的身分，每次獨立建立，不進容器。真實 driver 不受影響。
+
+使用者說明上限「可以很大」，再修正「可能也不丟了，創建時報錯」。容器最多保留 1024 個 addressed instances，僅防止無限增長。滿額時拒絕新 address，既有 address 仍可取回，不淘汰。測試使用公開 isolation scope，結束時清空測試建立的容器並還原原 scope。原始討論未入庫，裁決見 Git `d94f2daa60`。
+
+使用者 2026-11-18 過目此條：「我大概看了一遍，基本上是没问题」，並說明這類規則「并不算是裁决，而算是建议」；它是 agent 的選擇，引用時視為僅供參考的先例。 原始討論未入庫，覆核見 Git `1f4b16aa0`。
+
+首次建立固定單位與 `fast_mode`；重取保留 value、output、ramp 與模擬綁定。
+Anonymous instance 的 Info address 是 `"none"`，與顯式 address `"none"` 的身分不同。
+`close()` 不移除身分。`isolated_instances()` 在無工作執行時建立空 scope，退出後還原原容器。
+[DeviceManager 的單名稱 registry](#devicemanager-單名稱登記) 不變，見 ADR-0076。
 
 ---
 

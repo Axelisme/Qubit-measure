@@ -141,6 +141,11 @@ class NotebookAdapter:
         )
 
 
+# Notebook interactive analysis uses Notebook widgets directly, without an
+# availability preflight or backend detection. Errors from creating or using
+# widgets propagate without falling back to inline or headless analysis or
+# automatically selecting Done. The synchronous adapter's non-plotting mode
+# is unchanged and is not a headless interactive workflow.
 class NotebookExperiment(Generic[CoreT]):
     """Retain successful records for one experiment in a bound environment.
 

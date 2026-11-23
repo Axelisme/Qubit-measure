@@ -1,7 +1,5 @@
 """Fixed-capture duration scan with explicit two-line drive and GE calibration inputs."""
 
-from dataclasses import replace
-
 from zcu_tools.cfg_model import Expr, Hidden, Range, Slot, Template
 from zcu_tools.gui.form_adapter import Form, FormContext
 
@@ -17,7 +15,7 @@ def make_form(ctx: FormContext) -> Form[ConstructivePhaseCfg]:
 
     Relative phase stays editable. The operator supplies both duration endpoints.
 
-    Existing CZ slots are editable source pairs, not certified gate settings.
+    Existing CZ slots supply library references, not certified gate settings.
     Missing slots offer explicit cosine templates on captured qubit wiring.
     Missing or linear qubit tone classifiers, or missing radii, stay Invalid. Run GE Post first. Open/Reset never performs acquisition.
     """
@@ -26,7 +24,7 @@ def make_form(ctx: FormContext) -> Form[ConstructivePhaseCfg]:
     for role in ("qubit1", "qubit2"):
         # CZ slots: $coupler.module.cz_qubit1 and $coupler.module.cz_qubit2.
         slot = f"$coupler.module.cz_{role}"
-        node = source(
+        drive[role] = source(
             ctx,
             slot,
             Template(
@@ -41,9 +39,6 @@ def make_form(ctx: FormContext) -> Form[ConstructivePhaseCfg]:
                 },
             ),
         )
-        if isinstance(node, Slot):
-            node = replace(node, copy=True)
-        drive[role] = node
     readout = source(
         ctx,
         "$mux.module.readout",
@@ -59,8 +54,8 @@ def make_form(ctx: FormContext) -> Form[ConstructivePhaseCfg]:
             "qubit1_tone": Hidden(qubits.qubit1_tone),
             "qubit2_tone": Hidden(qubits.qubit2_tone),
             "reset": None,
-            "x180_qubit1": Slot("$qubit1.module.x180", copy=True),
-            "x180_qubit2": Slot("$qubit2.module.x180", copy=True),
+            "x180_qubit1": Slot("$qubit1.module.x180"),
+            "x180_qubit2": Slot("$qubit2.module.x180"),
             "readout": readout,
             "drive": drive,
             "relative_phase": Range(-180.0, 180.0, expts=51),

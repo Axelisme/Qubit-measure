@@ -265,7 +265,7 @@ Notebook save 吸收 unique path 的便利層並回傳實際 path，再呼叫 ex
 
 **例子。** 傳統 Amp Rabi 保留原 `data` 的 Gain 軸和平均 complex IQ，有六矩才另存 `iq_moments`。Labber 明選原 `data`，普通 reader 仍讀單一 log。只有平均 IQ 的舊檔與校準產物用同一 spec 重開，不畫逐點誤差棒。
 
-**邊界。** `required=False` 只管 native 變數可否缺席，不決定哪些變數匯出。未明定 Labber 選集時匯出所有已存在的變數；不因選集自動切換 grid layout。不放寬既有 tag、cfg schema、軸或 dtype 驗證，也不新增歷史 reader。Datafile 與 Labber writer 不判讀實驗語意。
+**邊界。** `required=False` 只管 native 變數可否缺席，不決定哪些變數匯出。未明定 Labber 選集時匯出所有已存在的變數；不因選集自動切換 grid layout。不放寬既有 tag、cfg schema、軸或 dtype 驗證，也不新增歷史 reader。舊 Labber 的離線 reader 依[遷移規格〈Native 歷史證據〉](../../migrations/storage_migration/README.md#native-歷史證據)選用歷史輸入 schema，不依現行 Labber 輸出選集。Datafile 與 Labber writer 不判讀實驗語意。
 
 **依據。** 2026-11-22，designer 依「这个点的预期误差」所定的 shot SEM 方向代裁單一 spec 與獨立選集，使用者 2026-11-23 追認（「都採用建議」）。比較與驗證見 [Amp Rabi 的 shot moments](../discussions/2026-11-22-amp-rabi-shot-moments.md)。
 
@@ -350,9 +350,7 @@ Notebook 不新增 generation／request identity 的發布限制。較早啟動�
 
 ### G6：Notebook 互動前端
 
-Notebook 互動分析直接使用 Notebook widget，不增加前端可用性 preflight 或 backend 偵測。建立或使用 widget 的實際錯誤正常傳遞，不自動降級到 inline、無頭分析或自動 Done。
-
-同步分析的不呈現繪圖模式維持不變。它不是無頭互動工作流。
+Notebook 互動前端的局部規則見 [`notebook/adapter.py`](../../lib/zcu_tools/notebook/adapter.py) 的「Notebook interactive analysis」註解。
 
 ### G7：GUI adapters
 

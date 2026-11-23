@@ -78,3 +78,7 @@ Idle ZZ 的核對對每個實際 spectator 態用單一阻尼 cosine 擬合。�
 ## 依據
 
 九個實驗的分析盤點基於 `c333da7d8`。數值核對腳本未入庫，計算條件與結果寫在上文。實驗入口和操作見 [two-qubit guide](../../zcu_lab/v2/two_qubit/guide.md)。
+
+## 後記
+
+2026-11-23，[heralded conditional spectroscopy](2026-11-23-heralded-conditional-spectroscopy.md) 新增一個例外：分析需要依 probe 前的實測類別分開，不共用擬合參數。原共用參數原則與新例外均移到 [Two-qubit 實驗清單〈何時保留獨立 heralded 入口〉](../../zcu_lab/v2/README.md#何時保留獨立-heralded-入口)。先前的取數層遮罩決策仍在 [ADR-0074](../adr/0074-flat-readout-module.md#herald-reset-與逐-shot-遮罩)。

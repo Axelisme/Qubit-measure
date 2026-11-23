@@ -27,6 +27,7 @@ from zcu_tools.simulate.evolution import (
     EvolutionResult,
     ModelSource,
     PathDiagnostics,
+    SampledRWAProbeMemo,
     TimelineBatch,
 )
 from zcu_tools.simulators.ftf.config.schema import MuxReadoutSource
@@ -342,6 +343,7 @@ class FlipAtSecondRead(EngineDouble):
         telemetry: bool = False,
         reuse_key: bytes | None = None,
         capture: CaptureBuffer | None = None,
+        probe_memo: SampledRWAProbeMemo | None = None,
     ) -> EvolutionResult:
         result = super().evolve(
             source,
@@ -351,6 +353,7 @@ class FlipAtSecondRead(EngineDouble):
             telemetry=telemetry,
             reuse_key=reuse_key,
             capture=capture,
+            probe_memo=probe_memo,
         )
         ends = np.concatenate([batch.end_ns for batch in batches])
         flip = np.isin(ends, [8.0, 10.0])

@@ -1,6 +1,6 @@
 # `zcu_tools.experiment` — 實驗層
 
-**Last updated:** 2026-11-23，離線 probe 的圖形產物與 GE 模型診斷
+**Last updated:** 2026-11-23，離線 probe 保存比較與 lab 範例入口
 
 **讀者：** framework-dev。實驗介面、Run 資料、持久化映射與裝置操作邊界。
 
@@ -207,6 +207,11 @@ Slice 由 VariableZSpec 的 index 與 index_axis 選取。
 每個不符 slice 由 `zcu_tools.experiment.probe` logger 記 WARNING，其餘可比 slice 繼續比較，相符 slice 不記錄。
 Warning 指出欄位、index_axis、index 與 shape、dtype 或 value 差異。整欄 shape 不符時 index_axis 與 index 為 None。
 重疊區域須符合每個宣告的比較規則，未宣告區域維持 exact。
+逐欄比較涵蓋 run-only 欄位。原值在還原後變成 `None` 時仍記為差異，後續欄位照比。
+既有測試見 [`test_save_stage.py`](../../../tests/experiment/probe/test_save_stage.py) 的
+`test_scalar_field_restored_as_none_reports_dtype_and_keeps_comparing`。這個案例直接測 `compare_roundtrip`，不測 `save_stage`。
+
+原 record 的預期差異與副本驗收步驟見 [lab 的 T2Echo 保存範例](../../../zcu_lab/README.md#準備-python-檔)。
 
 ## 實驗介面與資料
 

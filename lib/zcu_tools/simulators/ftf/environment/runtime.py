@@ -7,7 +7,7 @@ import time
 import warnings
 from collections import OrderedDict
 from collections.abc import Collection, Generator
-from contextlib import contextmanager
+from contextlib import closing, contextmanager
 from dataclasses import dataclass, replace
 from hashlib import sha256
 from math import prod, sqrt
@@ -61,6 +61,7 @@ from zcu_tools.simulate.evolution import (
     ModelSource,
     PathDiagnostics,
     RoutingHistory,
+    SampledRWAProbeMemo,
     batch_populations,
 )
 from zcu_tools.simulators.capture import AcquireCaptureSettings
@@ -541,17 +542,19 @@ class FTFAcquire:
                 ):
                     self._remember_dimension(key, dimension)
                     return self._reuse(previous, index, len(model.initial_density))
-        options = CavityEvolutionOptions(
-            key,
-            owner.telemetry is not None,
-            cancel=cancel,
-            capture=owner.capture,
-            evolving=self._evolving,
-            reading=self._reading,
-            round_index=index,
-            projective_capture=self._projective_capture,
-        )
-        prepared = self._prepare(snapshot, index, facts, options, previous)
+        with closing(SampledRWAProbeMemo()) as probe_memo:
+            options = CavityEvolutionOptions(
+                key,
+                owner.telemetry is not None,
+                cancel=cancel,
+                capture=owner.capture,
+                evolving=self._evolving,
+                reading=self._reading,
+                round_index=index,
+                projective_capture=self._projective_capture,
+                probe_memo=probe_memo,
+            )
+            prepared = self._prepare(snapshot, index, facts, options, previous)
         # A changed live snapshot uses the session's N, but has not validated
         # that N for a future acquire starting at the changed snapshot.
         if self._pilot_facts is None or self._pilot_facts() is facts:

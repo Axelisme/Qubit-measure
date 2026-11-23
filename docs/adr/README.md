@@ -1,8 +1,8 @@
 # Architecture Decision Records
 
-**讀者：** framework-dev、agent。透過本索引與各篇 ADR 查找跨模組決策及其依據。
+**讀者：** framework-dev、agent。透過本索引與各篇 ADR 查找架構決策及其依據。
 
-每篇 ADR 以現在式描述目前生效的跨模組設計。索引只放定位用摘要；細節留在 ADR 本文。
+依 [CLAUDE.md〈使用者決策的引用〉](../../CLAUDE.md#使用者決策的引用)，取捨符合任一條就寫進 ADR：對多個底層模組已有或可能產生約束；定下整個子系統共用的架構；不易撤回，或得記下為何否決其他方案。像 Python 的 [PEP 659](https://peps.python.org/pep-0659/) 一樣，內部的重大架構改變也收錄，小改進不收。Evolution 的 kernel 共同規則留在 [ADR-0078](0078-evolution-module-boundary.md#每個-kernel-的量測場景只有一段)，個別 kernel 的閾值寫在 [Evolution README](../../lib/zcu_tools/simulate/evolution/README.md#kernel-summary)。只有單一實驗自己用、能在一個 task 內反悔的取捨，寫在該實驗的 README。獨立 heralded 入口的取捨則寫在管理這些實驗入口的 [zcu_lab/v2/README.md〈何時保留獨立 heralded 入口〉](../../zcu_lab/v2/README.md#何時保留獨立-heralded-入口)。索引只放 ADR 原則的摘要與指標。
 ADR 正文寫目前生效的規則與客觀事實。裁決日期、使用者原話與沿革的放置方式見下方[格式規定](#格式規定)。依據中的「使用者未覆核」只標尚未覆核的代裁；已覆核時記下覆核結果。
 
 程式碼註解與記憶檔以 `ADR-NNNN` 引用本目錄；ADR 之間以 `[[NNNN]]` 互鏈。
@@ -32,8 +32,8 @@ ADR 宣告 package 之間的依賴方向時，同時在 `.importlinter` 建立�
 
 ## Concurrency / Lifecycle
 
-- [0001 — Domain guard 與 Lease 分離](0001-permit-lease-typed-guard.md)：Domain guard 與 lease 的責任分界，typed Permit proof 由 [[0066]] 接替。
-- [0002 — Version table + off-main handler（handle 模型沿革）](0002-version-table-async-handle-off-main.md)：資源版本表與 RPC off-main handler，handle 模型由 [[0066]] 接替。
+- [0001 — Domain guard 與 Lease 分離](0001-permit-lease-typed-guard.md)：Domain guard 與 lease 的責任分界；typed Permit proof 已由 [ADR-0066](0066-operation-lifecycle.md#問題與決策) 取代。
+- [0002 — Version table + off-main handler](0002-version-table-async-handle-off-main.md)：資源版本表與 RPC off-main handler；handle 舊模型已由 [ADR-0066](0066-operation-lifecycle.md#問題與決策) 取代。
 - [0053 — Owner scheduler 與 gate presence](0053-owner-scheduler-and-gate-presence.md)：Owner scheduler、State guard、completion facts 與 gate presence。
 - [0066 — Operation 執行、取消與關閉](0066-operation-lifecycle.md)：Operation admission、lease、取消、完成、shutdown 與 disconnect 的責任分界。
 
@@ -41,10 +41,11 @@ ADR 宣告 package 之間的依賴方向時，同時在 `.importlinter` 建立�
 
 - [0064 — GUI process startup 與 app composition](0064-process-startup.md)：Launcher、runtime、composition 與 startup／on_close 的資源和 session 交接。
 - [0067 — GUI 應用核心與前端邊界](0067-gui-application.md)：Shared session、應用核心、前端反應與各 GUI pane 的 owner。
-- [0076 — Device 活動快照與 run 後讀回](0076-device-activity-and-readback.md)：Driver 活動狀態、DeviceManager 快照與 run 後 cache 讀回。
+- [0076 — Device 活動快照與 run 後讀回](0076-device-activity-and-readback.md)：Driver 活動狀態、DeviceManager 快照、單名稱 registry 與 run 後 cache 讀回。局部規則見 [FakeDevice 的 address 身分](../../lib/zcu_tools/device/README.md#fakedevice-的-address-身分)與[裝置活動標記](../../lib/zcu_tools/gui/session/ui/README.md#裝置活動標記)。
 
 ## Cfg / Value Model
 
+原則：表單預設引用 library，只在改了 Run 不會覆寫的欄位時複製，見 [ADR-0073](0073-measure-form-derivation.md#表單預設引用-library只在改了-run-不覆寫的欄位時複製)。
 原則：掃描初值每軸至少 31 點、以中心為準的用奇數；只管初值，不擋輸入，見 [ADR-0073〈Form 的形狀與初值〉](0073-measure-form-derivation.md#掃描初值的點數)。
 原則：表單初值用簡單固定的公式，不依板子調整；可填算好的數值或寫 expression，兩種寫法都遵守與板子無關的固定範圍，見 [ADR-0073](0073-measure-form-derivation.md#自動推導點到為止)。
 原則：初值在一般 point 上就違反實驗自己的規則時，修初值公式，不加檢查；依板子的限制不改初值，見 [ADR-0073](0073-measure-form-derivation.md#預設值的瑕疵就改預設值)。
@@ -53,8 +54,8 @@ ADR 宣告 package 之間的依賴方向時，同時在 `.importlinter` 建立�
 
 - [0008 — Headless Form 與 writeback draft](0008-cfg-editor-session.md)：Headless Form 與 writeback draft 的宿主所有權及 Apply 提交邊界。
 - [0037 — Session value lookup](0037-measure-gui-value-lookup-resolve-once.md)：唯讀 value lookup、resolve-once 與固定 capture。
-- [0065 — Cfg 編輯模型與使用邊界](0065-cfg-editing.md)：共用 Form、持久 Spec、固定來源與 Library／Inspect／writeback 提交邊界。
-- [0073 — Measure 表單從 core cfg 推導](0073-measure-form-derivation.md)：Measure Form 從 core cfg 推導、宣告初值 factory 與實驗 record 的邊界。
+- [0065 — Cfg 編輯模型與使用邊界](0065-cfg-editing.md)：共用 Form、持久 Spec、固定來源與 Library／Inspect／writeback 提交邊界；欄位轉換與草稿還原見 [ADR-0079](0079-form-field-transitions.md#決策狀態與問題)。
+- [0073 — Measure 表單從 core cfg 推導](0073-measure-form-derivation.md)：Measure Form 從 core cfg 推導、宣告初值 factory 與實驗 record 的邊界；欄位轉換與草稿還原見 [ADR-0079](0079-form-field-transitions.md#決策狀態與問題)。
 - [0079 — Form 欄位轉換、固定元素與逐元素操作](0079-form-field-transitions.md)：已採用但尚未完成實作的 Form converter、scoped command 與固定元素設計。
 
 ## Remote / Transport
@@ -65,9 +66,9 @@ ADR 宣告 package 之間的依賴方向時，同時在 `.importlinter` 建立�
 
 原則：guide 寫給懂物理、沒看過實作的讀者，只介紹實驗與它的行為；板子限制與底層報錯的判讀放知識庫的 judge 條目，見 [ADR-0075](0075-agent-interface-layers.md#判讀依據放知識庫)。
 
-- [0068 — 遠端前端、傳輸與 agent 介面](0068-remote-transport.md)：共用傳輸、holder dispatch、RPC／MCP 與事件錯誤投影。
-- [0070 — GUI 與 agent 的控制身份](0070-control-identity.md)：Measure／fluxdep 單一 holder、固定連線身份、控制權交接與 Measure 診斷呈現。
-- [0075 — Agent 介面分層](0075-agent-interface-layers.md)：Agent 介面分層、共用 async host、顯式 Scope 與跨層 writeback。
+- [0068 — 遠端前端、傳輸與 agent 介面](0068-remote-transport.md)：共用傳輸、holder dispatch、RPC／MCP 與事件錯誤投影。局部等待策略見 [Fluxdep Auto Align／search](../../lib/zcu_tools/gui/app/fluxdep/README.md#auto-align-與-search-的等待)與 [Measure MCP `device_setup`](../../lib/zcu_tools/mcp/measure/README.md#device-setup-的等待)。
+- [0070 — GUI 與 agent 的控制身份](0070-control-identity.md)：Measure／fluxdep 單一 holder、固定連線身份、控制權交接與 GUI 寫入保護。Measure 的局部呈現見[錯誤通知](../../lib/zcu_tools/gui/app/measure/ui/README.md#錯誤通知)。
+- [0075 — Agent 介面分層](0075-agent-interface-layers.md)：Agent 介面分層、共用 async host、顯式 Scope 與跨層 writeback。局部規則見 [Fluxdep 的流程依賴](../../lib/zcu_tools/gui/app/fluxdep/README.md#fluxdep-的依賴模型不是跨-app-原則)。
 
 ## Persistence
 
@@ -93,15 +94,13 @@ ADR 宣告 package 之間的依賴方向時，同時在 `.importlinter` 建立�
 原則：Measure 圖磚以 12×9 in 排版，只等比縮放整張圖；R7 在存檔 PNG 檢查版面，見 [ADR-0069](0069-experiment-core-and-frontends.md#圖以固定存檔幾何排版)。
 原則：平均 IQ 的一維圖預設用主軸投影，二維 flux／頻率圖用逐 bias 扣背景後的幅值，改用其他量須寫明理由，見 [ADR-0069](0069-experiment-core-and-frontends.md#平均-iq-的投影慣例)。
 
-原則：只有準備誤差不移動 gg、ee 兩組共用的參數時，才保留獨立 heralded 實驗，見 [ADR-0074](0074-flat-readout-module.md#保留獨立-heralded-實驗的條件)。
-
 原則：Timeline 編譯器推算每發 ADC 讀取數，每個 Branch 出口與作者 label 都逐 ADC 對齊，見 [ADR-0083](0083-program-macros-and-timelines.md#每發-adc-讀取數)。
 原則：Timeline program 提供通用跳轉，builder 只轉交同名動作。只往後跳，迭代用 Repeat 或 sweep。見 [ADR-0083](0083-program-macros-and-timelines.md#往後跳轉與-label-合併)。
 原則：增加的量測能力不抵第二條路徑的可讀性成本時，保留一條路徑，超限就報錯。見 [ADR-0083](0083-program-macros-and-timelines.md#量測能力不抵可讀性成本時不加分支)。
 原則：模擬的零輪中斷由 Program 的 `EarlyStopMixin` 統一判定；simulation mixin 只回報中斷，見 [ADR-0083](0083-program-macros-and-timelines.md#compiled-snapshot-與-simulation-入口)。
 
 - [0062 — 實驗執行與 workflow 編排](0062-experiment-workflow.md)：Async workflow、operation、Ask、停止、live tunables 與作者保存責任。
-- [0069 — 實驗核心、前端包裝與具名圖形產物](0069-experiment-core-and-frontends.md)：實驗 core 黑箱、前端包裝、Run／AnalysisRecord 與具名圖形產物。
+- [0069 — 實驗核心、前端包裝與具名圖形產物](0069-experiment-core-and-frontends.md)：實驗 core 黑箱、前端包裝、Run／AnalysisRecord 與具名圖形產物。局部規則見 [`notebook/adapter.py`](../../lib/zcu_tools/notebook/adapter.py) 的「Notebook interactive analysis」註解。
 - [0074 — 獨立的平鋪 Readout module](0074-flat-readout-module.md)：Readout 配置、classifier、逐 shot sums、選用校正 IQ 矩、herald reset 與逐 shot 遮罩、雙 qubit heralded 分類、單 qubit cov 自校準與 QICK projection。
 - [0083 — Program macro 與具名 timeline](0083-program-macros-and-timelines.md)：Program macro、具名 timeline、往後跳轉與 label 合併、查表掃描、compiled snapshot 與全面 Timeline 遷移。
 
@@ -133,8 +132,8 @@ ADR 宣告 package 之間的依賴方向時，同時在 `.importlinter` 建立�
 - [0085 — 實驗數值工具的 fitting owner](0085-numerical-fitting-owners.md)：六組純數值工具由 fitting 持有，lab 保留選資料、herald、維度換算、live 與畫圖。
 
 - [0071 — Coherence 頻率與時間單位](0071-coherence-units.md)：頻率、時間、loss parameters 與 lifetime 的單位和換算契約。
-- [0078 — Evolution 黑盒邊界與算法內聚](0078-evolution-module-boundary.md)：Evolution 的 dispatch／kernel 分工、公開黑箱、數值 preparation 壽命與 t6 只保留 direct 的決定。
-- [0084 — 模擬 request 的公共整數時基](0084-simulation-integer-time-base.md)：公共有理數時基、整數 request 與 compiled frontend。
+- [0078 — Evolution 黑盒邊界與算法內聚](0078-evolution-module-boundary.md)：Evolution 的 dispatch／kernel 分工、公開黑箱、[數值 preparation 壽命與 FTF 探針例外](0078-evolution-module-boundary.md#損耗漂移下的結構與-preparation-lifetime)。局部選路見 [t6 只保留 direct](../../lib/zcu_tools/simulate/evolution/README.md#t6-只保留-direct)。
+- [0084 — 模擬 request 的公共整數時基](0084-simulation-integer-time-base.md)：公共有理數時基、整數 request 與 compiled frontend。固定測試數值見 [Mock clock example](../../lib/zcu_tools/program/v2/simulation/README.md#mock-clock-example)。
 
 改模擬器時的流程與自查見 [模擬器維護規則](../../lib/zcu_tools/simulate/maintenance.md)。
 
@@ -218,6 +217,10 @@ ADR 宣告 package 之間的依賴方向時，同時在 `.importlinter` 建立�
 - [0060 — Measure agent interface](retired/0060-measure-agent-interface-shared-gui-view.md)：跨模組邊界由 [[0068]] 接替。
 - [0061 — Measure interactive plugin session](retired/0061-measure-interactive-plugin-session.md)：session ownership 由 0067 接替，互動細節見 measure README。
 - [0077 — Numerical candidates、plan ownership 與 checked replay](retired/0077-numerical-plans-and-replay.md)：Numerical planner 與 checked replay 已移除，現行分工見 [[0078]]。
+- [Domain guard 的 typed Permit proof](retired/typed-permit-proof.md#現況)：摘自 ADR-0001，領域檢查與 RunInputs 見 [ADR-0066](0066-operation-lifecycle.md#問題與決策)。
+- [Operation handle 舊模型](retired/operation-handle.md#2-operation-handle歷史設計)：摘自 ADR-0002，現行 runner 與 lease 分工見 [ADR-0066](0066-operation-lifecycle.md#問題與決策)。
+- [Cfg 編輯模型的局部取代範圍](retired/cfg-editing-replacement-scope.md#局部取代範圍)：摘自 ADR-0065，欄位轉換與草稿還原見 [ADR-0079](0079-form-field-transitions.md#決策狀態與問題)。
+- [Measure 表單推導的局部取代範圍](retired/measure-form-derivation-replacement-scope.md#局部取代範圍)：摘自 ADR-0073，欄位轉換與草稿還原見 [ADR-0079](0079-form-field-transitions.md#決策狀態與問題)。
 - [Pydantic 表單、輸入與宿主提交](retired/pydantic-form-tool.md)：superseded，穩定邊界併入 0065／0062，持久 Spec 與推導由 0008／0073 承接；原稿留存歷史。
 - [量測成果 Artifact、設定快照與讀回](retired/artifact-persistence.md)：superseded，由 0063、0069、0067 接替；保留原提案與討論連結供追溯。
 - [Cfg 編輯接縫與使用邊界](retired/cfg-editing-boundaries.md)：superseded，由 0065、0008、0073 接替，正文只供歷史追溯。

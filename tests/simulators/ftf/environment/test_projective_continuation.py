@@ -25,6 +25,7 @@ from zcu_tools.simulate.evolution import (
     NoValidKernel,
     PathDiagnostics,
     RoutingHistory,
+    SampledRWAProbeMemo,
     StarkOrderInversion,
     TimelineBatch,
     capture_directory,
@@ -60,6 +61,7 @@ class HistoryEngine(EngineDouble):
         self.attempted: list[bytes] = []
         self.completed: set[bytes] = set()
         self.reuse_checks: list[bytes] = []
+        self.probe_memos: list[SampledRWAProbeMemo | None] = []
 
     @override
     def evolve(
@@ -72,6 +74,7 @@ class HistoryEngine(EngineDouble):
         telemetry: bool = False,
         reuse_key: bytes | None = None,
         capture: CaptureBuffer | None = None,
+        probe_memo: SampledRWAProbeMemo | None = None,
     ) -> EvolutionResult:
         result = super().evolve(
             source,
@@ -81,9 +84,11 @@ class HistoryEngine(EngineDouble):
             telemetry=telemetry,
             reuse_key=reuse_key,
             capture=capture,
+            probe_memo=probe_memo,
         )
         assert reuse_key is not None
         self.attempted.append(reuse_key)
+        self.probe_memos.append(probe_memo)
         densities = []
         inversions = []
         for batch in batches:
@@ -421,6 +426,11 @@ def test_interrupted_batch_has_no_reusable_preparation(projective_source, error)
     assert set(earlier) == engine.completed
     assert incomplete not in engine.completed
     interrupted_calls = len(engine.calls)
+    memo = engine.probe_memos[0]
+    assert memo is not None
+    assert all(used is memo for used in engine.probe_memos)
+    with pytest.raises(RuntimeError, match="probe memo is closed"):
+        memo.get(b"probe")
 
     engine.interrupt = None
     later = replace(acquire, sequence=old_seq + 1)
@@ -428,6 +438,11 @@ def test_interrupted_batch_has_no_reusable_preparation(projective_source, error)
     assert {*earlier, incomplete} <= set(engine.attempted[interrupted_calls:])
     assert engine.reuse_checks == []
     assert source.evaluations[0].projection_continued_states == ((2,), (2,))
+    retry_memo = engine.probe_memos[interrupted_calls]
+    assert retry_memo is not None and retry_memo is not memo
+    assert all(used is retry_memo for used in engine.probe_memos[interrupted_calls:])
+    with pytest.raises(RuntimeError, match="probe memo is closed"):
+        retry_memo.get(b"probe")
 
     # A fully retried preparation can be reused across acquires.
     calls = len(engine.calls)
@@ -550,6 +565,7 @@ class CaptureFailureEngine(EngineDouble):
         telemetry: bool = False,
         reuse_key: bytes | None = None,
         capture: CaptureBuffer | None = None,
+        probe_memo: SampledRWAProbeMemo | None = None,
     ) -> EvolutionResult:
         for batch in batches:
             if not self.fail:
@@ -576,6 +592,7 @@ class CaptureFailureEngine(EngineDouble):
             telemetry=telemetry,
             reuse_key=reuse_key,
             capture=capture,
+            probe_memo=probe_memo,
         )
 
 

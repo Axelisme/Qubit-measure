@@ -1,6 +1,6 @@
 # Segment evolution
 
-**Last updated:** 2026-11-23, fixed-H collapse operators and frozen physical v2
+**Last updated:** 2026-11-24, sampled RWA probe lifetime, t6 direct routing, and simulator optimization index
 
 **讀者：** framework-dev、agent。Segment evolution 的公開輸入、路由與數值邊界。
 
@@ -43,6 +43,7 @@ The exports in [__init__.py](__init__.py) fall into these groups:
 | Execution capture | `CaptureBuffer`, `CaptureMetadata`, `CaptureRoute`, `CaptureCandidate`, `CapturePrefixRun`, `CapturePosition`, `CaptureAdopter`, `CaptureSampledAdmission`, `CaptureSampledSpot`, `CaptureRowKey` |
 | Dispatch inspection | `DispatchInspection`, `DispatchRow`, `DispatchCandidate`, `RowKey` |
 | Engine model source and routing history | `ModelSource`, `SecularModel`, `SecularDrive`, `RoutingHistory` |
+| Sampled guard reuse within one preparation | `SampledRWAProbeMemo` |
 | Flux description | `FluxExpansion`, `FluxTerm`, `FluxLevel`, `FluxSchedule`, `FluxWaveform` |
 | Batched timelines | `TimelineBatch`, `DriveTrack`, `EnvelopeSpec`, `SegmentShift`, `segment_spans` |
 | Control description | `ControlPulse`, `ControlSequence`, `Envelope`, `PhaseEvent`, `quantize_ns` |
@@ -59,7 +60,7 @@ The exports in [__init__.py](__init__.py) fall into these groups:
 
 `Engine(workers, *, families=None, kernels=None, chunks_per_worker=None,
 routing_cache_bytes=4*1024**2, backend="auto")` owns immutable routing facts.
-Numerical preparations live only within one evolve. `evolve(source, batches, *, budget=1e-3, cancel=event)` consumes a
+Numerical payloads live only within one evolve. `evolve(source, batches, *, budget=1e-3, cancel=event)` consumes a
 `ModelSource` and all `TimelineBatch` inputs for one acquire. `NumericModel` is a
 separate fixed-coordinate record, not an Engine input. Constructor and field
 contracts live with their types in [engine.py](engine.py), [secular.py](secular.py),
@@ -794,7 +795,13 @@ Rejections count actual numerical guard refusals, not cost-based skips or planne
 feasibility probes. A shared prefix executes once although logical rows include
 all adopting timelines. Caller-retained complete preparation hits report logical
 rows as `cache_hits`, with zero CPU, rejected rows and estimated work.
-Engine evolves always execute numerical work. For `dop853`, `opencl_rows`
+Engine evolves always execute numerical work. For `multitone_rwa`,
+`admission_rows` counts sampled probes actually integrated. `probe_memo_hits`
+counts sampled probes supplied by the preparation memo. `probe_integration_cpu_s`
+measures both probe integrators and is part of `prepare_cpu_s`, not additional
+CPU. These values add across Engine reports and are zero on complete-preparation
+reuse. The acquire JSONL keeps its explicit fields and does not store the new
+probe counters or timing. For `dop853`, `opencl_rows`
 counts endpoints computed on GPU and `opencl_detection_error` reports why
 automatic detection or compilation for the active dimension and tableau failed.
 It is `None` when neither failed. `dp54_rows` counts physical DP5(4) endpoints;
@@ -1191,8 +1198,7 @@ inventory. Prepare keys still contain flux level, shift content, port, signed
 carrier, signed gain and duration; phase and start time are apply-only.
 `cost(table, rows)` supplies table-only chunk-interleaving weights.
 It does not determine candidate order.
-[ADR-0078](../../../../docs/adr/0078-evolution-module-boundary.md#t6-只保留-direct)
-records why the reusable-channel strategy was removed.
+See [t6 只保留 direct](#t6-只保留-direct) for the decision and its evidence.
 
 The matrix measures the maximum absolute difference over every complex density
 entry at readout, against an independent full-Hamiltonian Lindblad DOP853
@@ -1238,6 +1244,16 @@ controls do not establish a whole-sequence full-density bound. In particular,
 the slow-envelope population tolerance of `1e-2` above is not the matrix's
 `2e-3` full-density acceptance threshold. The matrix does not measure environment
 I/Q accuracy or model/basis convergence.
+
+### t6 只保留 direct
+
+**規則。** `t6` 在 constant 單 tone 域只走 direct，保留原 guard、prepare-key 身份和失敗就 raise 的語意。不建 reusable channel，不做 Fourier playback，也不為 channel 收完整 acquire key inventory 或比價。
+
+**例子。** 每列 density 經共用的 endpoint solver 在 H0 旋轉座標積分，用完整 secular bath 與原 budget-scaled 局部容差。實作入口見 [Kernel summary](#kernel-summary)與[共用數值 owner](#algorithm-ownership-and-reuse)。
+
+**邊界。** 其他 family 的 period channel 不變。未來若出現高重用工作負載，再依新證據評估，不保留相容性分支。
+
+**依據。** 2026-11-15，使用者裁定 `t6` 只保留 direct，答「2B」。量測與方案比較見[移除 t6 channel 的討論](../../../../docs/discussions/2026-11-15-t6-channel-removal.md)。
 
 ## Adding a family
 
@@ -1463,8 +1479,16 @@ sources. Oversized facts compute without evicting existing entries.
 active payloads, ADC preparation and Numba's compilation cache are separate.
 The byte cap is not a process RAM limit.
 
-Engine prepare residency, exact-result memoization and source ADC solver
-residency are removed. Representative single CPMG, six-cavity and FTF
+FTF can lend `SampledRWAProbeMemo` to `Engine.evolve(probe_memo=...)` for
+one [complete preparation](../../simulators/ftf/environment/README.md#preparation-reuse).
+The bounded memo retains only per-probe differences and decisions for exact
+sampled multitone RWA inputs. Each evolve still chooses the probe rows, applies
+the group threshold, records its own routing and capture, and evolves its own
+densities. Dispatch inspection does not borrow the memo. FTF closes it on
+completion, cancellation or failure. See [ADR-0078](../../../../docs/adr/0078-evolution-module-boundary.md#損耗漂移下的結構與-preparation-lifetime).
+
+Engine prepare residency, production exact-result memoization and source ADC
+solver residency are removed. Representative single CPMG, six-cavity and FTF
 acquisitions had zero hits in those layers within an acquisition.
 Recomputing across acquisitions avoids retaining loss-dependent products as
 losses drift. Single-source complete preparation and model reuse, and FTF's
@@ -1624,16 +1648,10 @@ densities or offline tables across processes or Engine lifetimes.
 
 ## Research records
 
-Experiments, rejected alternatives and historical measurements live in the
-tracked discussion snapshots, not in the runtime contract above:
-
-- [Constant-pair guard and diagnostic](../../../../docs/discussions/2026-11-16-constant-multitone-guard-diagnostic.md).
-- [Dyson input reuse](../../../../docs/discussions/2026-10-18-dyson-input-reuse.md).
-- [Constant-period builders](../../../../docs/discussions/2026-10-18-constant-period-builders.md).
-- [Shaped periods and gates](../../../../docs/discussions/2026-10-18-shaped-period-and-gates.md).
-- [Two-tone Floquet](../../../../docs/discussions/2026-10-18-two-tone-floquet.md).
-- [Direct integration](../../../../docs/discussions/2026-10-18-direct-integration.md).
-- [Planner evidence and overhead](../../../../docs/discussions/2026-10-18-planner-evidence-and-overhead.md).
+See the [simulator optimization index](../../../../docs/simulator-attempts/INDEX.md) for attempts, rejected alternatives and historical measurements.
+Start with [families and guards](../../../../docs/simulator-attempts/INDEX.md#family-與-guard) for admission and pricing,
+[reference integration](../../../../docs/simulator-attempts/INDEX.md#參考積分) for solver comparisons,
+or [reuse and caching](../../../../docs/simulator-attempts/INDEX.md#跨點重用與快取) for sharing across rows and points.
 
 The shared numerical contract suite is
 [tests/simulate/evolution/contract/kernel_suite.py](../../../../tests/simulate/evolution/contract/kernel_suite.py).

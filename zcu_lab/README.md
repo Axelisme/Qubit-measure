@@ -1,6 +1,6 @@
 # zcu_lab
 
-**Last updated:** 2026-11-21，讀出範本的 ADC window 餘量
+**Last updated:** 2026-11-23，離線 probe 的 fit 失敗判讀
 
 **讀者：** lab-author、agent。查找實驗室定義的套件邊界、註冊入口與操作文件。
 
@@ -48,6 +48,7 @@ Templates 發布後不修改其內容；frozen dataclass 不會遞迴凍結範�
 各入口的最小 Protocol 與依賴理由見 [ADR-0072](../docs/adr/0072-module-boundaries.md#lab-定義與組合根)。
 
 Measure behavior 先註冊 components，再以 `lab.templates` 建 Registry，呼叫 `lab.register_experiments` 填入 adapters。
+兩種 conditional spectroscopy 入口在[實驗清單](v2/README.md#two-qubit-實驗清單)各有獨立 registry key 與 guide。
 [definitions.py](definitions.py) 註冊 AC Stark spectroscopy 的 `twotone/ac_stark` 與 Ramsey 的 `twotone/ac_stark_ramsey`。Ramsey 操作見 [AC Stark Ramsey guide](v2/twotone/ac_stark/guide.ramsey.md#序列與設定)。
 Library 新建直接讀 `registry.templates`。`definitions.register_all` 綁同一份 catalog 給 chain_length 與 rpi_length，供兩張表在沒有擷取模組時取得長度差。
 Reload 保留既有範本與元件註冊，不重新 bootstrap components。兩張表的 factory 重新綁到該次註冊收到的 Registry 範本。
@@ -129,6 +130,13 @@ saved = save_stage(record, experiment.AXES_SPEC, output_dir)
 analyzed = analysis_stage(experiment, record, options)
 ```
 
+T2Echo 保存範例：[`T2EchoResult.true_activate_detune`](v2/twotone/time_domain/t2echo/core.py) 是 run-only 欄位，Native 還原後是 `None`。
+若原 record 的該欄有值，分兩次驗收：
+
+1. 用原 record 呼叫 `save_stage`，在 scratch 記錄 `roundtrip_equal=False`，從 WARNING 確認唯一差異是 `true_activate_detune`。
+2. 用 `dataclasses.replace` 複製 record 與 Result，只把副本的 `true_activate_detune` 設為 `None`，不改原 record。`iq_moments` 是 Native 持久欄位，有值就保留在副本中一起比較。
+3. 用副本和另一個輸出目錄重跑 `save_stage`，確認 `roundtrip_equal is True`。在 scratch 記錄並判讀 `cfg_issue`。
+
 Run／analysis 的圖片由腳本保存，例如：
 
 ```python
@@ -141,6 +149,11 @@ for name, png in analyzed.pngs.items():
 若要核對 PNG 看不出的 artist 屬性，在 scratch 用 caller 建立的 `Plots(NonPresentingHost())` 呼叫公開入口：
 run 使用 `RunContext.plots`，analyze 直接收 `plots=`。從同一個 `Plots` 讀取具名圖的原生 artist。
 Caller 負責[結束繪圖與釋放呈現](../lib/zcu_tools/plotting/README.md#完成與保留)。不為個別實驗新增 durable test。
+
+例如，將新建的 `Plots(NonPresentingHost())` 傳給 [`T2EchoExp.analyze`](v2/twotone/time_domain/t2echo/core.py) 的 `plots=`。
+在 core 搜尋 `_iq_direction` 與 `Build the measured trace before fitting`。
+若量測 trace 已畫出，fit 才拋錯，捕捉原例外後從同一個 `plots["fit"]` 檢查量測點與可估的 shot SEM 棒，並確認沒有模型線。
+記錄原例外及 traceback。這是 core 的殘圖診斷；`analysis_stage` 拋錯時不回傳 PNG，也不代表 GUI 成功發布圖或摘要。
 
 ### 檢查與執行
 

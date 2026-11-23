@@ -42,19 +42,15 @@ def phase_form(ctx: FormContext, cfg_type: type[CfgT]) -> Form[CfgT]:
             "qubit1_tone": Hidden(qubits.qubit1_tone),
             "qubit2_tone": Hidden(qubits.qubit2_tone),
             "reset": None,
-            "x180_qubit1": Slot("$qubit1.module.x180", copy=True),
-            "x180_qubit2": Slot("$qubit2.module.x180", copy=True),
-            "x90_qubit1": Slot("$qubit1.module.x90", copy=True),
-            "x90_qubit2": Slot("$qubit2.module.x90", copy=True),
+            "x180_qubit1": Slot("$qubit1.module.x180"),
+            "x180_qubit2": Slot("$qubit2.module.x180"),
+            "x90_qubit1": Slot("$qubit1.module.x90"),
+            "x90_qubit2": Slot("$qubit2.module.x90"),
             "readout": readout,
             "drive": {
-                # Run overrides both CZ frequencies with the common hardware sweep.
-                "qubit1": Slot(
-                    "$coupler.module.cz_qubit1", copy=True, set={"freq": Hidden(0.0)}
-                ),
-                "qubit2": Slot(
-                    "$coupler.module.cz_qubit2", copy=True, set={"freq": Hidden(0.0)}
-                ),
+                # Keep the refs; hide the frequency Run overrides in inline.
+                "qubit1": Slot("$coupler.module.cz_qubit1", set={"freq": Hidden(0.0)}),
+                "qubit2": Slot("$coupler.module.cz_qubit2", set={"freq": Hidden(0.0)}),
             },
             "frequency": Range(None, None, expts=101),
         },

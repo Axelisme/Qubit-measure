@@ -4,11 +4,11 @@ status: accepted
 
 # 0073 — Measure 表單從 core cfg 推導
 
+本篇接替 [[0012]] 的 measure definition／seed 契約與 [[0009]] 的角色 default 表。Library、writeback 與 Inspect 也使用共用 Form，持久 Spec 與提交邊界見 [[0065]]、[[0008]]。實驗核心與前端分工見 [[0069]]。
+
 ## 局部取代範圍
 
-[ADR-0079](0079-form-field-transitions.md#決策狀態與問題) 局部取代本篇關於普通切換補 fresh defaults、數值葉 command 改 parent，以及僅保存 input 並丟棄不相容葉的規則。欄位轉換與保存還原以該篇為準。[Form core](../../lib/zcu_tools/gui/form/README.md) 提供 `select` 與 `restore_input`，Measure 的 tab 由 Form owner 還原已保存的原始輸入，見 [Measure owner](../../lib/zcu_tools/gui/app/measure/README.md#sources-and-workflow)。其餘 owner 邊界不變。
-
-本篇接替 [[0012]] 的 measure definition／seed 契約與 [[0009]] 的角色 default 表。Library、writeback 與 Inspect 也使用共用 Form，持久 Spec 與提交邊界見 [[0065]]、[[0008]]。實驗核心與前端分工見 [[0069]]。
+已由 [[0079]] 取代，見[〈決策狀態與問題〉](0079-form-field-transitions.md#決策狀態與問題)；[原文](retired/measure-form-derivation-replacement-scope.md#局部取代範圍)僅供追溯。
 
 ## 問題
 
@@ -65,6 +65,16 @@ status: accepted
 - 2026-10-30，使用者答「9A」；其中 Template 自有 metadata 的部分仍適用。2026-11-01，使用者以「B，如果要省下重複名字，那就一個factory helper就好」決定由 lab helper 選來源。舊 Slot fallback 的原話與規則未有入庫討論，見 Git `304ba12ef`、`a967ae052`。
 - 2026-11-02，使用者：「我以為生成Form預設值的form_adapter就能處理這種if/else的複雜邏輯，這樣Form就只要呈現就好，或是搭配command或convert或即時計算」，並對 factory 接收宣告初值答「A」。同日問「Factory不能回傳新的樹嗎？他可以原地修改default並回傳吧？」，再以「採用建議」確認由 Form 整份採用回傳樹。原始討論未入庫，見 Git `a8c7eb66a`。
 - 2026-11-18，使用者過目輸入型別的推導、Hidden 與切換及描述規則：「我大概看了一遍，基本上是没问题」，並說明這類規則「并不算是裁决，而算是建议」。這些是 agent 的選擇，僅供參考。原始討論未入庫，見 Git `1f4b16aa0`。
+
+#### 表單預設引用 library，只在改了 Run 不覆寫的欄位時複製
+
+**規則。** 表單的 `Slot` 預設保留 library 引用。只有表單改了 Run 不會覆寫的欄位，才設定 `copy=True`，並在程式旁寫下複製的理由。為了隱藏 Run 會覆寫的欄位，不複製 library 模組；可在 ref 的欄位宣告使用 `Hidden`，只影響 inline 欄位，不改引用值。需要試調時，操作員先按 **Convert to inline** 再編輯；可能要試調不是預設複製的理由。
+
+**例子。** Chevron、Conditional phase 和 Conditional spectroscopy 引用兩條 CZ drive，Run 用掃頻座標覆寫 `freq`。CZ amplitude 和 Constructive phase 也預設引用兩條 drive。Bath reset 的 Xπ/2 初值設定 `phase=90`，Amplitude Rabi 設定 `waveform.length`，部分 mux readout 填入 tone 初值。這些值會進入 Run，所以有來源時保留副本。
+
+**邊界。** [掃頻 drive cfg](../../zcu_lab/v2/two_qubit/_drive.py) 不要求兩條 library carrier 相等；固定頻率入口保留等頻檢查。既有合法的 inline cfg 仍可載入。
+
+**依據。** 2026-11-23，使用者說：「CZ drive 必須複製，因為表單要把 freq 蓋成隱藏的 0，再由 Run 掃頻這是沒什麼意義的流程，因為不管頻率填什麼都會被覆寫，這是在這個實驗語義下非常合理的行為，類似的問題都要修正。」「連無理由的複製一起查」。2026-11-24 裁定：「form-ref-not-copy 票 02選全部ref」。見[表單預設引用 library 的討論](../discussions/2026-11-23-form-ref-not-copy.md)。
 
 #### 掃描初值的點數
 

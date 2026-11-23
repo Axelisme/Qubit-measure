@@ -2,13 +2,13 @@
 
 # Conditional spectroscopy
 
-每發做 **可選 Reset → 名目 g,g／g,e／e,g／e,e 準備 → 同頻雙線弱 probe → 可選雙 Xπ 對比 → mux 終端讀出**。標籤按 Qubit1、Qubit2；g 用 I、e 用 Xπ，雙翻轉準備同時開始。沒有 reset 時仍有熱布居。
+每發做 **可選 Reset → 名目 g,g／g,e／e,g／e,e 準備 → 同頻雙線弱 probe → 可選雙 Xπ 對比 → mux 終端讀出**。標籤按 Qubit1、Qubit2；g 用 I、e 用 Xπ，雙翻轉準備同時開始。沒有 reset 時仍有熱布居。若要按準備後的實測分類分支，使用 [Heralded conditional spectroscopy](guide_heralded.md)。
 
 ## 設定表單
 
-- 核對 [qubit 位置與 mux tone 次序](../guide.md#綁定位置與讀出-tones)；不需綁 coupler。兩顆 **Xπ** 從各自 `x180` slot 複製，缺 slot 留空。用同讀出條件下的 GE circles 與 GE Post 半徑，保留完整 **Mux readout**。
-- **Two-qubit spectroscopy probe** 不等於準備用 Xπ。若有 coupler 的 `cz_qubit1`、`cz_qubit2` slots，表單以它們為起點；否則給 cosine 封包與各 qubit 的 channel，另填 gain、長度及 NQZ。兩線與各自的 Xπ 同 channel，包絡長度和 pre-delay 相同，帶號 gain 與 phase 可不同。調為弱 probe，不照搬 CZ 功率。
-- 填 **Common probe RF frequency** 起訖 (MHz)；每個頻點同時覆蓋兩路 RF，其他 pulse 設定不變。圖的頻率是掃描要求值，不是另量的 RF。**Double Xπ contrast** 預設開，probe 後依序打 Qubit1、Qubit2 Xπ；關閉則直接讀出。
+- 核對 [qubit 位置與 mux tone 次序](../guide.md#綁定位置與讀出-tones)；不需綁 coupler。兩顆 **Xπ** 引用各自的 `x180` slot，缺 slot 留空。用同讀出條件下的 GE circles 與 GE Post 半徑，保留完整 **Mux readout**。
+- **Two-qubit spectroscopy probe** 不等於準備用 Xπ。若有 coupler 的 `cz_qubit1`、`cz_qubit2` slots，表單會引用它們；否則給 cosine 封包與各 qubit 的 channel，另填 gain、長度及 NQZ。兩線與各自的 Xπ 同 channel，包絡長度和 pre-delay 相同，帶號 gain 與 phase 可不同。要降低 CZ gain 做弱 probe 時，先用 **Convert to inline**。
+- 填 **Common probe RF frequency** 起訖 (MHz)；每個頻點同時設定兩路 RF，不使用 Library 裡保存的頻率，其他 pulse 設定不變。圖的頻率是掃描要求值，不是另量的 RF。**Double Xπ contrast** 預設開，probe 後依序打 Qubit1、Qubit2 Xπ；關閉則直接讀出。
 - **Coupler DC source** 留空不動 DC。若掃 bias，用 **DC source unit** 選 A、V 或 native，並以該單位填 **Coupler DC bias sweep**。不補償其他 loop，結束或 Stop 不復原。Reset 留空不發射；若選 mux herald，見[讀出與等待](../guide.md#herald-reset-與獨立-heralded-入口)。
 
 ## 讀 Run 與 Analyze 圖

@@ -7,7 +7,7 @@ Each shot runs **optional Reset → I or Xπ on each qubit → terminal mux read
 ## Set up the form
 
 - Bind distinct `qubit1` and `qubit2` and their `mux`; no coupler is needed. Check [tone order](../guide.md#綁定位置與讀出-tones). Plots put Qubit1 first regardless of ADC or tone order.
-- **Qubit1 Xπ** and **Qubit2 Xπ** start as editable Inline copies from the respective `x180` slots, or blank for a missing slot. Use the Rabi-calibrated pulse on each qubit's own generator. Editing an Inline copy does not change the library. A named pulse in the menu is not necessarily calibrated for that qubit.
+- **Qubit1 Xπ** and **Qubit2 Xπ** reference the respective `x180` slots, or start blank if the slot is missing. Use the Rabi-calibrated pulse on each qubit's own generator. To edit the pulse for this run, choose **Convert to inline**; edits do not change the library. A named pulse in the menu is not necessarily calibrated for that qubit.
 - When filling an Inline pulse, keep its calibrated **Gen ch**, **NQZ**, RF **Frequency**, signed **Gain**, **Phase** and **Waveform → Length** together. **Pre-delay** and **Post-delay** are outside the envelope. **Mixer freq** can stay blank for an unmixed drive.
 - Use the complete **Mux readout** from its slot (or fill the blank template). Match the readout frequency, gain and integration window used for the two tones' GE circles and GE Post radii. Blank **Reset** means no reset. For mux herald, use the [same readout and keep keys](../guide.md#herald-reset-與獨立-heralded-入口).
 - Set **Relaxation wait** from qubit relaxation and cavity-emptying measurements, not from the 1 µs form initial. **Reps × Rounds** gives attempted shots per preparation; multiply by four for the run.
