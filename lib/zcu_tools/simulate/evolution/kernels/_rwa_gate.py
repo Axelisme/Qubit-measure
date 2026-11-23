@@ -16,6 +16,7 @@ from ._multitone_gate_phase import FULL_DRIVE_GATE_POLICY
 from ._rwa_fourier import RWACoefficients, interaction_hamiltonian
 from ._rwa_graph import RWA_GRAPH_POLICY, PhaseGraph, phase_graph, pruning_admitted
 from ._rwa_numeric import (
+    COMPLEX_ENVELOPE_RWA_POLICY,
     MULTITONE_RETENTION_POLICY,
     RWA_POLICY,
     RWARetention,
@@ -49,6 +50,7 @@ SINGLE_GATE_POLICY = (
     GATE_POLICY,
     MULTITONE_RETENTION_POLICY,
 )
+COMPLEX_SINGLE_GATE_POLICY = (SINGLE_GATE_POLICY, COMPLEX_ENVELOPE_RWA_POLICY)
 
 
 @dataclass(frozen=True)
@@ -92,9 +94,15 @@ def canonical_key(table: SegmentTable, row: int, context: KernelContext) -> byte
     count = table.tones[row]
     model = table.model(context.source, row)
     retention = _row_retention(table, row, context)
-    policy = SINGLE_GATE_POLICY if retention is not None else GATE_POLICY
+    policy = GATE_POLICY
     if count == 2:
         policy = FULL_DRIVE_GATE_POLICY
+    elif retention is not None:
+        envelope = table.tone_envelope[row, 0]
+        bounds = envelope_bounds(table, context.work_plan)
+        policy = (
+            SINGLE_GATE_POLICY if bounds.real[envelope] else COMPLEX_SINGLE_GATE_POLICY
+        )
     digest = sha256(repr((policy, model.identity, model.level)).encode())
     if count == 2:
         digest.update(table.shift(row))
