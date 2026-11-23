@@ -550,6 +550,8 @@ class CZOptimizeExp(Experiment[CZOptimizeResult, CZOptimizeCfg]):
             cfg_schema_version="3.0",
             tag="two_qubit/cz_optimize",
             result_builder=_restore_result,
+            labber_layout="independent",
+            labber_variables=("params", "peak"),
         )
     )
 

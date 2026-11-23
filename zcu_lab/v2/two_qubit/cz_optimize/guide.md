@@ -18,6 +18,10 @@
 - **Analyze fit** 比較各已量目標、最大值與起點，沒有 survival 曲線擬合。兩圖的實測點棒是由各 seed 的 retained-shot 二項 variance 傳播到等權平均所得的 shot SEM，不是 seed SD、輪間散布或 fit error。
 - **Envelopes** 比較最佳與起點的 normalized I/Q 對包絡時間。摘要依序列 I1… I6、Q1… Q6、Qubit1／Qubit2 local Z。Load 後由保存的時長重建波形，不需原資產；原 cfg 重跑仍需它。缺 cfg 或有效評估就不選最佳。
 
+## 儲存與重載
+
+**Save All** 把候選參數 `params`、波形峰值 `peak`、分類計數 `sums` 和起點時長 `duration` 都寫入 Native `data.h5`。Labber 只匯出 `params` 和 `peak`，兩個 log 各保留自己的軸。要重載完整結果，請開啟 Native 檔。
+
 ## 每輪優化與驗收
 
 寫回提案包含一筆新 arb 資產、兩筆改用該資產的 CZ pulse、兩筆 slot 和一筆 `$coupler.ext.cz_phase`。其他 pulse 欄位不變。僅最佳分數高於評估 0 才預選六筆；持平或無法比較不預選。接受時一起採用，讓波形、slots 與 local Z 一致；套用只完成一部分時先核對收據，不用混合設定做 IRB。

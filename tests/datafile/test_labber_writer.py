@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import logging
 from pathlib import Path
 from typing import Literal
 
@@ -235,53 +234,19 @@ def test_export_refuses_existing_path(tmp_path: Path) -> None:
     assert path.read_bytes() == b"original"
 
 
-@pytest.mark.parametrize(
-    ("grouped_layout", "extra_channel", "index_name"),
-    [
-        ("common", None, "point"),
-        ("common", "point", "point_"),
-        ("independent", "offset", "point"),
-    ],
-    ids=["single", "common", "independent"],
-)
-def test_export_scalar_round_trips_on_index_axis(
-    tmp_path: Path,
-    caplog: pytest.LogCaptureFixture,
-    grouped_layout: Literal["common", "independent"],
-    extra_channel: str | None,
-    index_name: str,
+@pytest.mark.parametrize("grouped_layout", ["common", "independent"])
+def test_export_refuses_axisless_variable_before_creation(
+    tmp_path: Path, grouped_layout: Literal["common", "independent"]
 ) -> None:
-    values = {"duration": 0.25}
-    if extra_channel is not None:
-        values[extra_channel] = 1.5
     container = datafile.Container(
-        {
-            name: datafile.Variable(np.array(value), (), "s")
-            for name, value in values.items()
-        },
+        {"scalar": datafile.Variable(np.array(0.25), (), "s")},
         {},
         {},
         _container().attrs,
     )
     path = tmp_path / "scalar.hdf5"
-    with caplog.at_level(logging.WARNING):
+    with pytest.raises(
+        ValueError, match="scalar: Labber requires at least one step axis"
+    ):
         datafile.write_labber(path, container, grouped_layout=grouped_layout)
-
-    loaded, _ = datafile.read_labber(path)
-    assert set(loaded.vars) == values.keys()
-    warnings = [
-        record.getMessage()
-        for record in caplog.records
-        if record.levelno == logging.WARNING
-    ]
-    assert len(warnings) == len(values)
-    for (name, value), warning in zip(values.items(), warnings, strict=True):
-        assert warning.startswith(f"{name}:")
-        assert "added length-1 index axis" in warning
-        variable = loaded.vars[name]
-        assert variable.values.shape == (1,)
-        np.testing.assert_array_equal(variable.values, [value])
-        assert variable.unit == "s"
-        (axis,) = variable.axes
-        assert (axis.name, axis.unit) == (index_name, "")
-        np.testing.assert_array_equal(axis.values, [0])
+    assert not path.exists()
