@@ -218,6 +218,7 @@
 - 2026-11-22 [Two-qubit 的身分、定位與中性位置名](2026-11-22-two-qubit-identity-and-neutral-positions.md)：職責歸屬。Adapter 解析身分並傳定位數值，分析 options 接收標籤，位置沿用 `qubit1/qubit2`。
 - 2026-11-22 [頻譜擬合模型的求值 owner](2026-11-22-spectrum-fit-evaluation-owner.md)：擬合邊界。Fitting 重用同次係數，實驗 caller 決定窗內網格與呈現。
 - 2026-11-23 [Program 的模擬邏輯只在 mixin 內](2026-11-23-program-simulation-mixin.md)：依賴邊界。單輪模擬估時移入模擬子包，lab 不再傳模擬專用線路要求。
+- 2026-11-23 [哪些取捨要寫進 ADR](2026-11-23-adr-inclusion-criteria.md)：文件組織。可能約束多個底層模組、決定子系統共同架構、難以撤回或需記錄否決理由，符合任一條就寫進 ADR。
 
 ## 測試與驗證
 
