@@ -1,6 +1,6 @@
 # `zcu_tools.analysis` 模塊重點文檔
 
-**Last updated:** 2026-11-23，K-cycle 數值入口與讀出校正後的 shot SEM
+**Last updated:** 2026-11-23，平均 IQ 共變異與 shot SEM
 
 **讀者：** framework-dev。分析核心、純數值工具與前端 adapter 的分工速查。
 
@@ -36,7 +36,8 @@ Experiment 公開同一型別，GUI analyze work 經分類後才讓 recipe 交�
 
 [`shot_uncertainty`](shot_uncertainty.py) 從保留 shots 的 IQ 總和或分類計數估計抽樣誤差。`iq_shot_sem` 接收
 ADR-0074 的單次讀出 IQ 總和 `[N, ΣI, ΣQ, ΣI², ΣIQ, ΣQ²]`。它取指定 IQ 投影的樣本標準差，再除以 √N。
-只存平均 IQ 時，缺少逐發的散布資訊，無法估計投影的 shot SEM。
+`iq_mean_covariance` 用同一組總和算 I、Q 的 2×2 樣本共變異矩陣，再除以 N，供非線性觀測量做誤差傳遞。
+只存平均 IQ 時，缺少逐發的散布資訊，無法估計 shot SEM。
 `class_probability_covariance` 用保留 shots 的 one-hot 樣本共變異除以 N 估計平均機率的共變異。
 對角元素開根號就是各類的二項 SEM。比例為 0 或 1 時樣本變異數為 0，不代表信賴區間。
 `corrected_population_sem` 視讀出校正矩陣為已知，用其轉置的逆傳遞 shot 共變異，取對角元素開根號。

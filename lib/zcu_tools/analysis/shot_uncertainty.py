@@ -20,15 +20,15 @@ def _validate_counts(counts: NDArray[np.float64] | NDArray[np.int64]) -> None:
         raise ValueError("shot counts must be finite nonnegative integers or NaN")
 
 
-def _validate_centered_iq(
+def _centered_iq(
     n: NDArray[np.float64],
     i: NDArray[np.float64],
     q: NDArray[np.float64],
     ii: NDArray[np.float64],
     iq: NDArray[np.float64],
     qq: NDArray[np.float64],
-) -> None:
-    """Check both variances and the covariance before choosing a projection."""
+) -> tuple[NDArray[np.float64], NDArray[np.float64], NDArray[np.float64]]:
+    """Return centered sums after checking both variances and the cross term."""
     with np.errstate(over="ignore", invalid="ignore"):
         i_mean_term = i * (i / n)
         q_mean_term = q * (q / n)
@@ -54,6 +54,41 @@ def _validate_centered_iq(
         cross_bound = i_bound * q_bound
     if np.any(np.abs(centered_cross) - cross_bound > cross_tol):
         raise ValueError("centered IQ cross sum exceeds the covariance bound")
+    return centered_i, centered_cross, centered_q
+
+
+def _iq_moments_and_counts(moments: NDArray[np.float64]) -> NDArray[np.float64]:
+    """Validate six-column moments and return counts masked at undefined points."""
+    if moments.shape[-1:] != (6,):
+        raise ValueError("IQ moments must have shape (..., 6)")
+    n = moments[..., 0]
+    _validate_counts(n)
+    if np.isinf(moments).any():
+        raise ValueError("IQ moments must not be infinite")
+    defined = (n >= 2) & ~np.isnan(moments).any(axis=-1)
+    return np.where(defined, n, np.nan)
+
+
+def iq_mean_covariance(moments: NDArray[np.float64]) -> NDArray[np.float64]:
+    """Estimate the covariance of mean I and Q from retained shot sums.
+
+    ``moments`` has shape ``(..., 6)`` in shot-sums order (ADR-0074):
+    ``[N, ΣI, ΣQ, ΣI², ΣIQ, ΣQ²]``. Return ``(..., 2, 2)`` matrices in
+    I/Q order and squared IQ units, using sample covariance (ddof=1) divided
+    by N. Fewer than two shots or any NaN sum gives a NaN matrix. Rounding-scale
+    excesses are clipped to keep the matrix positive semidefinite. Invalid
+    shape, counts, covariance, infinite moments or overflow raise ValueError.
+    """
+    n = _iq_moments_and_counts(moments)
+    _, i, q, ii, iq, qq = np.moveaxis(moments, -1, 0)
+    i_sq, cross, q_sq = _centered_iq(n, i, q, ii, iq, qq)
+    i_var = np.maximum(i_sq, 0) / n / (n - 1)
+    q_var = np.maximum(q_sq, 0) / n / (n - 1)
+    bound = np.sqrt(i_var) * np.sqrt(q_var)
+    cov = np.clip(cross / n / (n - 1), -bound, bound)
+    return np.stack((i_var, cov, cov, q_var), axis=-1).reshape(
+        (*moments.shape[:-1], 2, 2)
+    )
 
 
 def iq_shot_sem(
@@ -75,19 +110,13 @@ def iq_shot_sem(
     outside the projection direction. Invalid covariance or overflow raises
     ValueError.
     """
-    if moments.shape[-1:] != (6,):
-        raise ValueError("IQ moments must have shape (..., 6)")
+    n = _iq_moments_and_counts(moments)
     a, b = np.asarray(direction, dtype=np.float64)
     if not np.isfinite(direction).all():
         raise ValueError("IQ projection weights must be finite")
 
-    n, i, q, ii, iq, qq = np.moveaxis(moments, -1, 0)
-    _validate_counts(n)
-    if np.isinf(moments).any():
-        raise ValueError("IQ moments must not be infinite")
-    defined = (n >= 2) & ~np.isnan(moments).any(axis=-1)
-    n = np.where(defined, n, np.nan)
-    _validate_centered_iq(n, i, q, ii, iq, qq)
+    _, i, q, ii, iq, qq = np.moveaxis(moments, -1, 0)
+    _centered_iq(n, i, q, ii, iq, qq)
     with np.errstate(over="ignore", invalid="ignore"):
         total = a * i + b * q
         i_term = a * (a * ii)
@@ -95,7 +124,7 @@ def iq_shot_sem(
         q_term = b * (b * qq)
         mean_term = total * (total / n)
         centered = i_term + iq_term + q_term - mean_term
-    if np.any(defined & ~np.isfinite(centered)):
+    if np.any((n >= 2) & ~np.isfinite(centered)):
         raise ValueError("IQ projection overflows finite moments")
     # Cancellation can expose rounding of any of the four subtracted terms.
     scale = np.maximum.reduce(

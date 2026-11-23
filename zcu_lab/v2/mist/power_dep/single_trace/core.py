@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 from collections.abc import Iterable
 from dataclasses import dataclass
 from typing import Annotated, ClassVar
@@ -9,29 +10,58 @@ from matplotlib.artist import Artist
 from matplotlib.ticker import MaxNLocator
 from numpy.typing import NDArray
 from pydantic.dataclasses import dataclass as pydantic_dataclass
+from zcu_tools.analysis.shot_uncertainty import iq_mean_covariance
 from zcu_tools.cfg_model import ConfigBase, FieldMeta
-from zcu_tools.experiment import AxesSpec, Experiment, config
+from zcu_tools.datafile import DataVariable
+from zcu_tools.experiment import (
+    Experiment,
+    GroupedAxesSpec,
+    GroupedLoadData,
+    VariableAxisSpec,
+    VariableSpec,
+    VariableZSpec,
+    config,
+)
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.experiment.v2.runtime.run_acquire import RunOptions
 from zcu_tools.experiment.v2.runtime.schedule import Schedule, SignalBuffer
 from zcu_tools.experiment.v2.utils.round_zcu import sweep2array
 from zcu_tools.plotting.plots import Plots
-from zcu_tools.program.v2 import Pulse, Readout, Reset, SweepCfg, TimelineBuilder
+from zcu_tools.program.v2 import (
+    IQ,
+    Pulse,
+    Readout,
+    Reset,
+    SweepCfg,
+    TimelineBuilder,
+    shot_sums,
+    split_sums,
+)
 
-from zcu_lab.v2.support import live_line
+from zcu_lab.v2.support import live_errorbar
+
+logger = logging.getLogger(__name__)
 
 _TITLE = "MIST · Resonator probe · IQ displacement"
 _GAIN_LABEL = "Probe gain (a.u.)"
 _IQ_LABEL = "Mean IQ displacement (a.u.)"
+_GAIN_AXIS = VariableAxisSpec(field_name="gains", label="Drive Power", unit="a.u.")
+_MOMENT_COLUMNS = np.arange(6, dtype=np.float64)
 
 
 @dataclass(frozen=True)
 class PowerDepResult:
-    """Hardware probe gains and mean complex readout IQ at each gain."""
+    """Hardware probe gains and their mean complex readout IQ, both in a.u.
+
+    ``iq_moments`` is a float64 array with one row per gain, in order
+    [N, ΣI, ΣQ, ΣI², ΣIQ, ΣQ²]. The sums use the same offset-corrected
+    shots as the mean IQ. None denotes a mean-only result.
+    """
 
     gains: NDArray[np.float64]
     signals: NDArray[np.complex128]
+    iq_moments: NDArray[np.float64] | None = None
 
 
 @pydantic_dataclass(frozen=True)
@@ -41,15 +71,52 @@ class PowerDepAnalyzeOptions:
     ac_coeff: float | None = None
 
 
+def _reference_size(signals: NDArray[np.complex128]) -> int:
+    return max(len(signals) // 20, 1)
+
+
 def _reference_iq(signals: NDArray[np.complex128]) -> complex:
-    points = max(len(signals) // 20, 1)
-    return complex(signals[:points].mean())
+    return complex(signals[: _reference_size(signals)].mean())
 
 
 def mist_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
     """Return mean IQ distances from the complex mean of the first 5% of scan points (at least one)."""
     # ADR-0069: distance preserves probe-induced shifts orthogonal to a fixed IQ axis.
     return np.abs(signals - _reference_iq(signals))
+
+
+def _distance_sem(
+    delta: NDArray[np.complex128],
+    distance: NDArray[np.float64],
+    moments: NDArray[np.float64],
+    *,
+    reference_size: int,
+) -> NDArray[np.float64]:
+    """Propagate shot covariance to each distance; zero reference_size fixes g0."""
+    covariance = iq_mean_covariance(moments)
+    if reference_size:
+        # For the scan-start mean, Cov(z_i, r) = Σ_i/m for its own points.
+        reference_cov = (covariance[:reference_size] / reference_size**2).sum(axis=0)
+        covariance[:reference_size] *= 1 - 2 / reference_size
+        covariance += reference_cov
+
+    defined = np.isfinite(distance) & np.isfinite(covariance).all(axis=(1, 2))
+    nonzero = defined & (distance > 0)
+    direction = np.column_stack((delta.real[nonzero], delta.imag[nonzero]))
+    direction /= distance[nonzero, None]
+    variance = np.full(distance.shape, np.nan)
+    variance[nonzero] = np.einsum(
+        "ni,nij,nj->n", direction, covariance[nonzero], direction
+    )
+    zero = defined & (distance == 0)
+    if zero.any():
+        # The radial direction is undefined at zero displacement.
+        logger.info(
+            "Using maximum directional shot variance at %d zero IQ distances",
+            np.count_nonzero(zero),
+        )
+        variance[zero] = np.linalg.eigvalsh(covariance[zero])[:, -1]
+    return np.sqrt(np.maximum(variance, 0))
 
 
 class PowerDepCfg(ConfigBase):
@@ -116,16 +183,54 @@ class PowerDepCfg(ConfigBase):
     ]
 
 
+def _build_result(data: GroupedLoadData[PowerDepCfg]) -> PowerDepResult:
+    """Restore mean IQ and check that any retained moments share its gain axis."""
+    signal = data.variable("data")
+    (gains,) = signal.axes
+    moments = data.variables.get(DataVariable("iq_moments"))
+    if moments is None:
+        return PowerDepResult(gains, signal.z)
+    columns, moment_gains = moments.axes
+    if not np.array_equal(gains, moment_gains):
+        raise ValueError(
+            "/vars/iq_moments: Drive Power axis must equal /vars/data axis"
+        )
+    if not np.array_equal(columns, _MOMENT_COLUMNS):
+        raise ValueError(
+            "/vars/iq_moments: Moment axis must contain columns 0 through 5"
+        )
+    return PowerDepResult(gains, signal.z, moments.z)
+
+
 class PowerDepExp(Experiment[PowerDepResult, PowerDepCfg]):
     Options: ClassVar[type[PowerDepAnalyzeOptions]] = PowerDepAnalyzeOptions
 
-    AXES_SPEC: ClassVar[AxesSpec[PowerDepResult, PowerDepCfg]] = AxesSpec(
-        axes=(AxesSpec.Axis("gains", label="Drive Power", unit="a.u."),),
-        z=AxesSpec.Z("signals", label="Signal", unit="a.u."),
+    # ADR-0069: save optional shot moments in Native; Labber keeps the mean IQ only.
+    AXES_SPEC: ClassVar[GroupedAxesSpec[PowerDepResult, PowerDepCfg]] = GroupedAxesSpec(
+        variables=(
+            VariableSpec(
+                "data",
+                (_GAIN_AXIS,),
+                VariableZSpec(
+                    "signals", label="Signal", unit="a.u.", dtype=np.complex128
+                ),
+            ),
+            VariableSpec(
+                "iq_moments",
+                (
+                    VariableAxisSpec(label="Moment", unit="", values=_MOMENT_COLUMNS),
+                    _GAIN_AXIS,
+                ),
+                VariableZSpec("iq_moments", label="IQ moments", unit=""),
+                required=False,
+            ),
+        ),
         result_type=PowerDepResult,
         cfg_type=PowerDepCfg,
         cfg_schema_version="3.0",
         tag="mist/gain",
+        result_builder=_build_result,
+        labber_variables=("data",),
     )
 
     def run(
@@ -138,10 +243,10 @@ class PowerDepExp(Experiment[PowerDepResult, PowerDepCfg]):
 
         Reset, apply the optional init pulse, apply the gain-swept probe,
         then read out. The board sweeps gain while the other pulse settings
-        stay fixed. Return hardware gain coordinates and mean complex IQ
-        per gain. IQ displacement reveals the probe-induced response; it
-        is not a calibrated state population. ``config`` supplies the
-        probe/readout modules and gain range.
+        stay fixed. Return hardware gain coordinates, mean complex IQ and
+        six shot sums per gain. Live shows IQ displacement and propagated
+        shot SEM. The readout must supply one integrated ADC read per shot
+        without masking. ``config`` supplies the modules and gain range.
         """
         # 1. Prepare gain coordinates for the probe's generator channel.
         cfg = config
@@ -158,19 +263,28 @@ class PowerDepExp(Experiment[PowerDepResult, PowerDepCfg]):
         ax.set(xlabel=_GAIN_LABEL, ylabel=_IQ_LABEL)
         ax.xaxis.set_major_locator(MaxNLocator(nbins=4))
         progress = ax.set_title(f"Averaging round 0 / {cfg.rounds}")
-        viewer = live_line(ax)
-        signals_buffer = SignalBuffer((len(gains),))
+        viewer = live_errorbar(ax)
+        moments_buffer = SignalBuffer(
+            (len(gains), len(_MOMENT_COLUMNS)), dtype=np.float64
+        )
         rounds_done = 0
 
         @context.plots.on_plot_thread
         def update(completed: int) -> Iterable[Artist]:
-            """Draw the cumulative mean IQ displacement and completed-round progress."""
+            """Draw cumulative IQ displacement, its shot SEM and round progress."""
+            moments = moments_buffer.array
+            _, signals = split_sums(moments)
+            delta = signals - _reference_iq(signals)
+            distance = np.abs(delta)
+            sem = _distance_sem(
+                delta, distance, moments, reference_size=_reference_size(signals)
+            )
             progress.set_text(
                 f"Averaging round {completed} / {cfg.rounds} · "
                 f"{completed * cfg.reps:,} nominal shots/point"
             )
             return (
-                *viewer.set(gains, mist_signal2real(signals_buffer.array)),
+                *viewer.set(gains, distance, sem),
                 progress,
             )
 
@@ -184,7 +298,7 @@ class PowerDepExp(Experiment[PowerDepResult, PowerDepCfg]):
         fig.show()
 
         # 2. Bind the board gain sweep without changing the other probe settings.
-        with Schedule(signals_buffer, scope=context.scope) as sched:
+        with Schedule(moments_buffer, scope=context.scope) as sched:
             # 3. Reset and initialize before each gain-swept probe and readout.
             builder = TimelineBuilder(
                 soccfg, reps=cfg.reps, relax_delay=cfg.relax_delay
@@ -196,15 +310,19 @@ class PowerDepExp(Experiment[PowerDepResult, PowerDepCfg]):
             builder.emit(Pulse("probe_pulse", cfg.probe_pulse, gain=gain))
             builder.emit(Readout("readout", cfg.readout))
             prog = builder.build()
-            sched.run_acquire(
+            reducer = shot_sums(prog, (IQ("readout", offset_corrected=True),))
+            sched.run_acquire_summed(
                 prog,
                 soc,
+                reducer=reducer,
                 rounds=cfg.rounds,
                 options=RunOptions(stop_condition=show_round),
             )
 
-        # 4. Preserve complex IQ so analysis can choose its own reference.
-        return PowerDepResult(gains=gains, signals=signals_buffer.array)
+        # 4. Preserve complex IQ and same-shot moments for reanalysis.
+        moments = moments_buffer.array
+        _, signals = split_sums(moments)
+        return PowerDepResult(gains=gains, signals=signals, iq_moments=moments)
 
     def analyze(
         self,
@@ -218,6 +336,7 @@ class PowerDepExp(Experiment[PowerDepResult, PowerDepCfg]):
         If g0 is None, use the complex mean of the first 5% of scan points
         (at least one), just as Live does. ``ac_coeff`` maps gain squared to
         photon number when supplied; ``e0`` only sets the vertical display range.
+        Show propagated shot SEM wherever the retained moments define one.
         Return no fit or calibrated population estimate.
         """
         # 1. Measure IQ displacement from the explicit or default scan reference.
@@ -225,7 +344,8 @@ class PowerDepExp(Experiment[PowerDepResult, PowerDepCfg]):
         g0, e0, ac_coeff = options.g0, options.e0, options.ac_coeff
         gains, signals = result.gains, result.signals
         reference = _reference_iq(signals) if g0 is None else g0
-        displacement = np.abs(signals - reference)
+        delta = signals - reference
+        displacement = np.abs(delta)
 
         # 2. Use photon number only when a gain-squared calibration is supplied.
         if ac_coeff is None:
@@ -235,12 +355,28 @@ class PowerDepExp(Experiment[PowerDepResult, PowerDepCfg]):
             xs = ac_coeff * gains**2
             xlabel = "Mean photon number"
 
-        # 3. Connect the measured points; the norm of a mean difference is
-        # not a shot average, so do not put shot-SEM bars on this observable.
+        # 3. Connect the measured points and show uncertainty when moments are available.
         fig, ax = plots.subplots(num="fit", figsize=config.figsize)
         fig.suptitle(_TITLE)
         ax.set(xlabel=xlabel, ylabel=_IQ_LABEL)
         ax.xaxis.set_major_locator(MaxNLocator(nbins=4))
         ax.plot(xs, displacement, ".-")
+        if result.iq_moments is not None:
+            sem = _distance_sem(
+                delta,
+                displacement,
+                result.iq_moments,
+                reference_size=_reference_size(signals) if g0 is None else 0,
+            )
+            if np.isfinite(sem).any():
+                ax.errorbar(
+                    xs,
+                    displacement,
+                    yerr=sem,
+                    fmt="none",
+                    ecolor="C0",
+                    label="Propagated shot SEM",
+                )
+                ax.legend()
         if e0 is not None:
             ax.set_ylim(0, 1.1 * np.abs(reference - e0))

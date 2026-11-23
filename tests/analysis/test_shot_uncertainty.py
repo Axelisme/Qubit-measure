@@ -3,6 +3,25 @@ import pytest
 from zcu_tools.analysis import shot_uncertainty
 
 
+def test_iq_mean_covariance_keeps_cross_term_and_uses_retained_counts() -> None:
+    # Paired shots (0, 0) and (3, 4), then the same two shots retained twice.
+    moments = np.array(
+        [
+            [2, 3, 4, 9, 12, 16],
+            [4, 6, 8, 18, 24, 32],
+            [1, 3, 4, 9, 12, 16],
+            [2, 3, 4, 9, np.nan, 16],
+        ],
+        dtype=np.float64,
+    )
+
+    covariance = shot_uncertainty.iq_mean_covariance(moments)
+
+    np.testing.assert_allclose(covariance[0], [[2.25, 3], [3, 4]])
+    np.testing.assert_allclose(covariance[1], [[0.75, 1], [1, 4 / 3]])
+    assert np.isnan(covariance[2:]).all()
+
+
 def test_iq_sem_projects_cross_moment_and_uses_retained_count() -> None:
     # IQ shots (0, 0) and (3, 4) project to 0 and 5. The second point
     # retains the same two shots twice, even if both points started with 4 shots.
