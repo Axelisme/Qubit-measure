@@ -243,8 +243,7 @@ class RamanGFExp(Experiment[RamanGFResult, RamanGFCfg]):
         shape = (len(detunings), len(gains))
         if grid:
             maps = [
-                live_heatmap(ax, uniform=False, clim=(0, 1), cmap="viridis")
-                for ax in figure.axes
+                live_heatmap(ax, uniform=False, cmap="viridis") for ax in figure.axes
             ]
             for ax, heatmap, state in zip(figure.axes, maps, STATE_LABELS, strict=True):
                 ax.set(
@@ -254,9 +253,7 @@ class RamanGFExp(Experiment[RamanGFResult, RamanGFCfg]):
                 )
                 ax.grid(False)
                 (image,) = heatmap.set(gains, detunings, np.full(shape[::-1], np.nan))
-                figure.colorbar(
-                    image, ax=ax, label="Measured label fraction", ticks=(0, 0.5, 1)
-                )
+                figure.colorbar(image, ax=ax, label="Measured label fraction")
 
             @plots.on_plot_thread
             def update_grid(data: NDArray[np.float64]) -> tuple[Artist, ...]:
@@ -376,18 +373,10 @@ class RamanGFExp(Experiment[RamanGFResult, RamanGFCfg]):
         shape = (cfg.detuning.expts, cfg.gain.expts)
         detunings = data.detunings.reshape(shape)[:, 0]
         gains = data.gains.reshape(shape)[0, :]
-        corrected = result.corrected_populations
-        for row, (values, title, limits) in enumerate(
+        for row, (values, title) in enumerate(
             (
-                (result.raw_populations, "Measured", (0.0, 1.0)),
-                (
-                    corrected,
-                    "Corrected",
-                    (
-                        min(0.0, float(corrected.min())),
-                        max(1.0, float(corrected.max())),
-                    ),
-                ),
+                (result.raw_populations, "Measured"),
+                (result.corrected_populations, "Corrected"),
             )
         ):
             for label, state in enumerate(STATE_LABELS):
@@ -399,8 +388,6 @@ class RamanGFExp(Experiment[RamanGFResult, RamanGFCfg]):
                     values[:, label].reshape(shape),
                     shading="nearest",
                     cmap="viridis",
-                    vmin=limits[0],
-                    vmax=limits[1],
                 )
                 ax.set(
                     xlabel="Drive gain (a.u.)",

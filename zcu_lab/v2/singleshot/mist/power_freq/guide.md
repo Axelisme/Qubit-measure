@@ -14,7 +14,7 @@ Optional **Reset** → optional **Initial preparation pulse** → **MIST tone** 
 
 ## How to read the results
 
-Compare g/e/Other map panels at the same gain and RF frequency on their common 0–1 scale. Live shows classified fractions. Analyze corrects them only with the confusion matrix saved with this result; without it, expect classified fractions, not corrected populations. An elevated Other region is a loss-of-classification signal, not a level assignment. The maps carry no per-point shot SEM bars.
+Compare g/e/Other at the same gain and RF frequency by reading each panel’s colorbar. Each scale spans its own panel’s values. Gray cells have no data. Live shows classified fractions. Analyze corrects them only with the confusion matrix saved with this result; without it, expect classified fractions, not corrected populations. An elevated Other region is a loss-of-classification signal, not a level assignment. The maps carry no per-point shot SEM bars.
 
 ## Next step
 
