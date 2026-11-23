@@ -11,13 +11,8 @@ from zcu_tools.program.v2 import PulseCfg
 from zcu_tools.program.v2.modules import ArbWaveformCfg
 
 
-class QubitDriveCfg(ConfigBase):
-    """Aligned scalar charge-line pulses on the two named qubit positions.
-
-    qubit1/qubit2 carry independent signed gain and phase in degrees. The
-    pulses must have equal MHz frequency, envelope duration and pre-delay in
-    µs; their post-delays may differ. The run validates referenced waveform assets.
-    """
+class _DrivePairCfg(ConfigBase):
+    """Scalar charge-line pulses for the two named qubit positions."""
 
     qubit1: Annotated[
         PulseCfg,
@@ -28,14 +23,41 @@ class QubitDriveCfg(ConfigBase):
         FieldMeta(label="Qubit2 drive", description="Qubit2 charge-line pulse."),
     ]
 
+
+class QubitDriveCfg(_DrivePairCfg):
+    """Aligned fixed-carrier pulses on the two named qubit positions.
+
+    qubit1/qubit2 carry independent signed gain and phase in degrees. The
+    pulses must have equal MHz frequency, envelope duration and pre-delay in
+    µs; their post-delays may differ. The run validates referenced waveform assets.
+    """
+
     @model_validator(mode="after")
     def validate_lines(self) -> Self:
-        """Reject non-scalar/mismatched timing or frequency."""
-        _validate_pulse_pair(self.qubit1, self.qubit2)
+        """Reject non-scalar controls and mismatched timing or frequency."""
+        _validate_pulse_pair(self.qubit1, self.qubit2, match_frequency=True)
         return self
 
 
-def _validate_pulse_pair(first: PulseCfg, second: PulseCfg) -> None:
+class SweptQubitDriveCfg(_DrivePairCfg):
+    """Aligned pulses played at a common swept carrier.
+
+    qubit1/qubit2 carry independent signed gain and phase in degrees. The
+    sweep replaces both pulse freq values; their stored carriers are not used
+    and may differ. The envelope durations and pre-delays must match in µs;
+    post-delays may differ. The run validates referenced waveform assets.
+    """
+
+    @model_validator(mode="after")
+    def validate_lines(self) -> Self:
+        """Reject non-scalar controls and mismatched timing, not distinct carriers."""
+        _validate_pulse_pair(self.qubit1, self.qubit2, match_frequency=False)
+        return self
+
+
+def _validate_pulse_pair(
+    first: PulseCfg, second: PulseCfg, *, match_frequency: bool
+) -> None:
     for pulse in (first, second):
         for name, value in (
             ("freq", pulse.freq),
@@ -48,7 +70,7 @@ def _validate_pulse_pair(first: PulseCfg, second: PulseCfg) -> None:
                 raise ValueError(f"Dual-line {name} must be a finite scalar")
         if pulse.pre_delay < 0 or pulse.post_delay < 0:
             raise ValueError("Dual-line delays must be nonnegative")
-    if first.freq != second.freq:
+    if match_frequency and first.freq != second.freq:
         raise ValueError("Dual-line frequencies must match")
     if first.pre_delay != second.pre_delay:
         raise ValueError("Dual-line pulses must share the same time origin")

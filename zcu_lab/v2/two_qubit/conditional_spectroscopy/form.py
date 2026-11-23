@@ -1,7 +1,5 @@
 """Fixed-capture thermal spectroscopy Form with explicit two-line probe inputs."""
 
-from dataclasses import replace
-
 from zcu_tools.cfg_model import Expr, Hidden, Range, Slot, Template
 from zcu_tools.gui.form_adapter import Form, FormContext
 
@@ -27,8 +25,8 @@ def spectroscopy_form[Cfg: SpectroscopyCfg | HeraldedSpectroscopyCfg](
 
     The fixed capture seeds hidden tone indices; no $coupler binding is needed.
     Notebook bindings of the same names are separate. Missing or inconsistent
-    qubit/mux bindings raise ValueError. Available coupler CZ slots are editable
-    starting points, not assumed weak probes. Without a slot, offer a cosine
+    qubit/mux bindings raise ValueError. Available coupler CZ slots start as
+    references, not assumed weak probes. Without a slot, offer a cosine
     on the qubit's captured channel; gain, duration and Nyquist zone remain
     required. Run supplies both drive frequencies from the common scan.
     No model truth or safe-drive defaults are supplied. The frequency scan must
@@ -40,7 +38,7 @@ def spectroscopy_form[Cfg: SpectroscopyCfg | HeraldedSpectroscopyCfg](
         # CZ slots: $coupler.module.cz_qubit1 and $coupler.module.cz_qubit2.
         slot = f"$coupler.module.cz_{position}"
         # The run overrides both pulse frequencies with the common sweep.
-        node = source(
+        drive[position] = source(
             ctx,
             slot,
             Template(
@@ -55,9 +53,6 @@ def spectroscopy_form[Cfg: SpectroscopyCfg | HeraldedSpectroscopyCfg](
                 },
             ),
         )
-        if isinstance(node, Slot):
-            node = replace(node, copy=True, set={"freq": Hidden(0.0)})
-        drive[position] = node
     readout = mux_readout_initial(ctx)
     return TwoQubitForm(
         cfg_type,

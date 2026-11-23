@@ -1,7 +1,5 @@
 """Fixed-capture duration scan with explicit two-line drive and GE calibration inputs."""
 
-from dataclasses import replace
-
 from zcu_tools.cfg_model import Expr, Hidden, Range, Slot, Template
 from zcu_tools.gui.form_adapter import Form, FormContext
 
@@ -18,7 +16,7 @@ def make_form(ctx: FormContext) -> Form[ChevronCfg]:
     """Seed the chevron from GUI aliases $qubit1, $qubit2, $mux and $coupler.
 
     Missing or inconsistent bindings raise ValueError on Open/Reset. Notebook
-    bindings of the same names are separate. Tone indices are hidden. Copy
+    bindings of the same names are separate. Tone indices are hidden. Reference
     the coupler's cz_qubit1/cz_qubit2 slots when present, otherwise offer
     cosine templates on captured qubit wiring. Scan endpoints and missing
     calibration must be supplied before Run.
@@ -29,7 +27,7 @@ def make_form(ctx: FormContext) -> Form[ChevronCfg]:
         # CZ slots: $coupler.module.cz_qubit1 and $coupler.module.cz_qubit2.
         slot = f"$coupler.module.cz_{position}"
         # Run replaces both line frequencies with the common scan coordinate.
-        node = source(
+        drive[position] = source(
             ctx,
             slot,
             Template(
@@ -44,9 +42,6 @@ def make_form(ctx: FormContext) -> Form[ChevronCfg]:
                 },
             ),
         )
-        if isinstance(node, Slot):
-            node = replace(node, copy=True, set={"freq": Hidden(0.0)})
-        drive[position] = node
     readout = mux_readout_initial(ctx)
     return TwoQubitForm(
         ChevronCfg,
