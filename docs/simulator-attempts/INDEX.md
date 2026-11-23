@@ -89,7 +89,7 @@ superseded_by: null
 
 ## 表示與合併
 
-- 2026-11-24，[異形同載波的 shaped Sambe](./2026-11-24-same-carrier-shaped-sambe.md)，`paused`。保留各線包絡，在共同載波座標加總 Fourier block；兩場 guard 均拒收。既有 DP5(4) 0.592／0.603 CPU s（`fd160e255`，FAST-DRAG／cosine 與不同 β 的 FAST-DRAG 雙線，8 態、100 ns，各一次 Engine 演化）。
+- 2026-11-24，[異形同載波的 shaped Sambe](./2026-11-24-same-carrier-shaped-sambe.md)，`paused`。保留各線包絡，在共同載波座標加總 Fourier block；兩場 guard 均拒收。既有 DP5(4) 0.592 CPU s（`fd160e255`，FAST-DRAG／cosine 雙線，8 態、100 ns，一次 Engine 演化）。
 - 2026-11-23，[同頻多線摺成單 tone](./2026-11-23-same-carrier-drive-merge.md)，`investigating`。同形線合成一對 I/Q 算符，改走單 tone family。27.693 → 1.731 CPU s（`3e86bba6d` 上的原型，plain RB 兩臂、depth `[0,4,8]`、CPU 單 worker，各一次 profile process；不是 S 實作驗收）。
 - 2026-11-22，[FTF 真空續演化與 Markov chain](./2026-11-22-ftf-projective-markov.md)，`partial`。投影後清零腔場，讓同點、同層、同 DC 態只續演化一次。獨立同模型參考通過 41／75 個 key（`e602f0dc6`，兩個 floor，兩個縮樣讀出掃描及 heralded conditional phase 的首讀）。
 - 2026-11-18，[FTF 的 Engine 內子空間約化](./2026-11-18-ftf-subspace-reduction.md)，`rejected`。比較低能截斷、逐點選態與誤差界，尋找便宜又可靠的自動約化。24 態對 32 態的完整 density 最大絕對元素差，15／15 點均 `≤1e-3`（非整體精度目標 `2e-3`；`c04fb3823` 上的研究原型，固定 DC、F1 單一常數 tone 的三組五點掃描）。
