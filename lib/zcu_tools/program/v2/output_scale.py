@@ -24,6 +24,31 @@ def pulse_output_scale(
     """
     if style not in ("const", "flat_top", "arb"):
         raise ValueError(f"unsupported pulse style: {style!r}")
+    headroom = _generator_headroom(soccfg, gen_ch)
+    if style == "const":
+        return 1.0
+
+    # ADR-0072: QICK pulse compilation owns this ratio, not a simulation model.
+    # The product output takes DDS × envelope bits [31:16]. Arb and ramp gain
+    # words use maxv, whereas const gain words include the headroom factor.
+    product = float(soccfg.get_maxv(gen_ch)) / (65536 * headroom)
+    if style == "arb":
+        return product
+    return max(product, _plateau_scale(headroom))
+
+
+def flat_top_plateau_scale(soccfg: QickConfig, gen_ch: int) -> float:
+    """Return a flat-top's ideal DDS plateau relative to const at equal gain.
+
+    Use the board's QickConfig and a single-tone generator channel. The ratio
+    excludes gain word quantization and describes only the plateau, even if
+    the product ramp has a higher full-scale peak. An absent channel or missing
+    generator scale metadata raises ValueError naming the field.
+    """
+    return _plateau_scale(_generator_headroom(soccfg, gen_ch))
+
+
+def _generator_headroom(soccfg: QickConfig, gen_ch: int) -> float:
     try:
         generators = soccfg["gens"]
     except KeyError as error:
@@ -35,18 +60,10 @@ def pulse_output_scale(
         if field not in gen:
             raise ValueError(f"soccfg generator {gen_ch} is missing {field!r}")
 
-    if style == "const":
-        return 1.0
-    headroom = gen["maxv_scale"]
+    return gen["maxv_scale"]
 
-    # ADR-0072: QICK pulse compilation owns this ratio, not a simulation model.
-    # The product output takes DDS × envelope bits [31:16]. Arb and ramp gain
-    # words use maxv, whereas const gain words include the headroom factor.
-    product = float(soccfg.get_maxv(gen_ch)) / (65536 * headroom)
-    if style == "arb":
-        return product
 
-    # QICK generates a separate DDS plateau; match its scale, not the integer
-    # quantization of the ramp or plateau gain words.
+def _plateau_scale(headroom: float) -> float:
+    # QICK generates a separate DDS plateau with this rational gain factor.
     plateau = Fraction(1, 2) * Fraction(headroom).limit_denominator(20)
-    return max(product, float(plateau) / headroom)
+    return float(plateau) / headroom

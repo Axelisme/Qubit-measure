@@ -3,6 +3,7 @@
 from collections.abc import Sequence
 from pathlib import Path
 
+from zcu_tools.cfg_model import ArbWaveformCfg as ArbWaveformSpec
 from zcu_tools.cfg_model import PulseSpec
 from zcu_tools.core.waveform_format import hash_samples
 from zcu_tools.experiment import RunRecord
@@ -18,6 +19,7 @@ from zcu_tools.gui.app.measure.adapter import (
     WritebackRequest,
 )
 from zcu_tools.plotting.plots import Plots
+from zcu_tools.program.v2 import ModuleCfgFactory
 
 from ._assets import start_asset_issues, start_asset_paths
 from .core import (
@@ -43,11 +45,8 @@ def _get_writeback_items(
     req: WritebackRequest[_Run, CZOptimizeAnalysis | CZOptimizeUnavailable],
 ) -> Sequence[WritebackItem]:
     cfg, best = req.run_result.cfg, req.analyze_result
-    if cfg is None:
-        raise ValueError(
-            "CZ optimization writeback requires the saved starting cfg; see Load diagnostics"
-        )
-    if isinstance(best, CZOptimizeUnavailable):
+    # These records support analysis but cannot supply safe writeback items.
+    if cfg is None or isinstance(best, CZOptimizeUnavailable):
         return []
     if best.best_evaluation == 0:
         issues = start_asset_issues(
@@ -55,7 +54,7 @@ def _get_writeback_items(
             paths=start_asset_paths(cfg.drive),
         )
         if issues:
-            raise ValueError("; ".join(issues))
+            return []
     parameters = req.ctx.parameters
     if parameters is None:
         raise ValueError("CZ optimization writeback requires a Run/Load capture")
@@ -87,16 +86,19 @@ def _get_writeback_items(
         (("qubit1", cfg.drive.qubit1), ("qubit2", cfg.drive.qubit2))
     ):
         label = position.capitalize()
-        changes = {}
-        if key is not None and best.best_raw_gains is not None:
-            changes = {
-                "gain": best.best_raw_gains[index],
-                "waveform": {"style": "arb", "data": key},
-            }
-        # A saved native arb adds a host path, which is not part of a persistent Spec.
-        proposal = PulseSpec.model_validate(
-            {**pulse.to_dict(), **changes}, extra="ignore"
-        )
+        proposal = ModuleCfgFactory.to_spec(pulse)
+        if not isinstance(proposal, PulseSpec):
+            raise TypeError("A CZ drive must project to a pulse Spec")
+        if key is not None:
+            if best.best_raw_gains is None:
+                raise ValueError("The selected CMA candidate has no raw gains")
+            proposal = PulseSpec.model_validate(
+                {
+                    **proposal.model_dump(),
+                    "gain": best.best_raw_gains[index],
+                    "waveform": ArbWaveformSpec(data=key),
+                }
+            )
         # Pulse library keys: $coupler.pulses.cz_qubit1 and $coupler.pulses.cz_qubit2.
         target = f"$coupler.pulses.cz_{position}"
         items.extend(
@@ -155,10 +157,11 @@ def _summary_lines(source: _Run) -> tuple[str, ...]:
     cfg = source.cfg
     duration = f"Starting CZ duration {source.result.start_duration_s * 1e9:.6g} ns"
     acquisition = () if cfg is None else (f"Reps×Rounds {cfg.reps}×1",)
+    paths = start_asset_paths(cfg.drive) if cfg is not None else None
     return (
         *acquisition,
         duration,
-        *start_asset_issues(source.result.start_asset_fingerprints),
+        *start_asset_issues(source.result.start_asset_fingerprints, paths=paths),
     )
 
 
