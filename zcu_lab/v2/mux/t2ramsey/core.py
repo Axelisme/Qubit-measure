@@ -94,13 +94,15 @@ A finite fit is not a calibration-quality guarantee.
 `save_run(source, path, spec=MuxT2RamseyExp.AXES_SPEC)` validates source.metadata
 against RunMetadata and stores full cfg, inactive tones, original
 indices, shared requested delay, IQ, actual detunes and source frequencies.
+Available shot moments are stored on the same tone and delay grid as IQ.
+Native files without moments load as mean-only records and Analyze omits bars.
 Time and frequency use seconds and Hz on disk, us and MHz in memory.
 `save_run` writes only native data and returns None. `save(source, path)` is
 the separate Labber export. The grouped axes spec declares the Labber
 `independent` layout. Both formats preserve IQ on the delay/tone grid and detune
-and source frequency on the tone-only grid. The Labber writer follows this
-declaration without an automatic grid fallback, broadcasting per-tone values
-or splitting files.
+and source frequency on the tone-only grid. Labber does not export shot moments.
+The Labber writer uses the declared grids without broadcasting per-tone values,
+splitting files or falling back to another layout.
 For multi-output saving and per-output SaveReport status/errors, see
 `save_artifacts` in lib/zcu_tools/experiment/README.md, section "實驗介面與資料".
 Recipe completion alone does not prove that every output saved.
