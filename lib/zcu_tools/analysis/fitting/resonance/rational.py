@@ -17,6 +17,15 @@ class RationalFitResult:
     denominator: tuple[complex, complex]
     residual_rms: float
 
+    @property
+    def pole(self) -> complex | None:
+        """Return the denominator root in frequency units, or None if not finite."""
+        c, d = self.denominator
+        if d == 0:
+            return None
+        pole = self.freq_center - self.freq_scale * (c / d)
+        return pole if np.isfinite(pole) else None
+
     def evaluate(self, freqs: NDArray[np.float64]) -> NDArray[np.complex128]:
         x = (freqs - self.freq_center) / self.freq_scale
         a, b = self.numerator

@@ -58,7 +58,7 @@ Labber 轉出保留為 datafile 內的獨立模組。`write_labber` 消費 Conta
 
 **邊界。** `validate_variable` 不檢查外層 key、整份 Container、Labber 網格、單位、有限值或統計語意。成功只代表這個 Variable 當下符合結構，不保證陣列修改後仍有效，也不保證寫檔成功。不改 `Variable` 建構、writer 或 reader。
 
-**依據。** 2026-11-22，designer 代裁共用既有檢查，使用者未覆核。選項與驗收見 [Amp Rabi 的 shot moments](../discussions/2026-11-22-amp-rabi-shot-moments.md)。
+**依據。** 2026-11-22，designer 代裁共用既有檢查，使用者 2026-11-23 追認（「都採用建議」）。選項與驗收見 [Amp Rabi 的 shot moments](../discussions/2026-11-22-amp-rabi-shot-moments.md)。
 
 ### 獨立性
 

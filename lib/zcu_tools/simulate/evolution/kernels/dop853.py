@@ -28,20 +28,26 @@ _MAX_DP54_DURATION_NS = 10_000.0
 _DP54_CPU_WORK_SCALE = 0.6
 
 
-def cpu_dp54_rows(duration_ns: NDArray[np.float64], budget: float) -> NDArray[np.bool_]:
-    """Mark positive-duration dop853 rows that use DP5(4) if run on CPU.
+def cpu_dp54_rows(
+    table: SegmentTable, rows: NDArray[np.int64], budget: float
+) -> NDArray[np.bool_]:
+    """Mark dop853 rows that would use DP5(4) on CPU, in the supplied row order.
 
-    Supply validated row durations in ns and a positive finite evolve budget.
-    The result aligns with duration_ns.
+    Use the positive finite evolve budget. Only rows up to 10 µs, with no
+    explicit collapse operators, qualify at budgets of at least 1e-3.
     """
-    return (budget >= DP54_MIN_BUDGET) & (duration_ns <= _MAX_DP54_DURATION_NS)
+    return (
+        (budget >= DP54_MIN_BUDGET)
+        & (table.duration_ns[rows] <= _MAX_DP54_DURATION_NS)
+        & ~table.has_collapse_operators[rows]
+    )
 
 
 def cpu_work_scale(
-    duration_ns: NDArray[np.float64], budget: float
+    table: SegmentTable, rows: NDArray[np.int64], budget: float
 ) -> NDArray[np.float64]:
     """Scale DOP853 CPU work estimates by the eligible production tableau."""
-    return np.where(cpu_dp54_rows(duration_ns, budget), _DP54_CPU_WORK_SCALE, 1.0)
+    return np.where(cpu_dp54_rows(table, rows, budget), _DP54_CPU_WORK_SCALE, 1.0)
 
 
 @dataclass(frozen=True)
@@ -98,6 +104,15 @@ class DOP853Prepared:
 
 
 @njit(nogil=True, cache=True)
+def _full_dissipator(rho, models, model):
+    loss = models.loss[model] @ rho
+    result = -0.5 * (loss + loss.conj().T)
+    for index in range(models.jump_offsets[model], models.jump_offsets[model + 1]):
+        result += models.jumps[index] @ rho @ models.jumps_adjoint[index]
+    return result
+
+
+@njit(nogil=True, cache=True)
 def _rhs(time, state, context):
     drive, h, product, derivative = context
     size = drive.models.energies.shape[1]
@@ -118,6 +133,11 @@ def _rhs(time, state, context):
             derivative[target, target] += (
                 drive.models.rates[drive.model, target, source] * rho[source, source]
             )
+    if (
+        drive.models.jump_offsets[drive.model + 1]
+        > drive.models.jump_offsets[drive.model]
+    ):
+        derivative += _full_dissipator(rho, drive.models, drive.model)
     return derivative.ravel()
 
 
@@ -194,6 +214,11 @@ def _interaction_rhs(time, state, context):
             derivative[target, target] += (
                 models.rates[model, target, source] * rho[source, source]
             )
+    if models.jump_offsets[model + 1] > models.jump_offsets[model]:
+        # Apply the lab-basis dissipator to the unrotated state, then rotate
+        # it back. This transforms the recycling and anticommutator together.
+        rotation = phases[:, None] * phases.conj()[None, :]
+        derivative += rotation * _full_dissipator(rotation.conj() * rho, models, model)
     return derivative.ravel()
 
 
@@ -287,7 +312,7 @@ class DOP853Kernel:
         Backend selection happens later, on the scheduler's ready wave.
         """
         duration = table.duration_ns[rows]
-        scale = 1.0 if budget is None else cpu_work_scale(duration, budget)
+        scale = 1.0 if budget is None else cpu_work_scale(table, rows, budget)
         return np.asarray(
             0.8 * scale * (1.0 + table.tones[rows]) * np.maximum(1.0, duration / 0.1),
             dtype=np.float64,
@@ -366,8 +391,9 @@ class DOP853Kernel:
         Samples outside the row's envelope window and all flux waveform samples
         are ignored. Constant envelopes add no internal stops.
         Independent rows use sigma(t)=exp(+i*2*pi*H0*t) rho(t)
-        exp(-i*2*pi*H0*t), integrating the full transformed drive and unchanged
-        secular dissipator, then return to model eigenbasis. Each row keeps its
+        exp(-i*2*pi*H0*t), integrating the full transformed drive and dissipator,
+        then return to the model eigenbasis. Secular rates are invariant under
+        this rotation; explicit L terms are transformed with the density. Each row keeps its
         own adaptive step controller and original normalized RMS error norm,
         independent of the other rows in the call. There is no gain grouping or
         pooled RMS. On CPU, context.plan specifies the frame, chain and
@@ -458,7 +484,7 @@ def advance_endpoints(
 ) -> None:
     """Integrate density endpoints with caller-selected frames and local errors.
 
-    data supplies validated packed secular operators and playback arrays.
+    data supplies validated packed model operators and playback arrays.
     row_models contains global row IDs and their packed model indices,
     aligned with writable complex states of shape (rows,M,M) in each model's
     eigenbasis. plan supplies global-row frames and chain IDs; no frame selection

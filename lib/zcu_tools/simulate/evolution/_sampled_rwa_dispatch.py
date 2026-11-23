@@ -259,7 +259,7 @@ def _prefer(
     rows = np.asarray(group.rows, dtype=np.int64)
     probe_direct = _direct_seconds(table, rows, context)
     rwa_cost = _rwa_seconds(table, rows, probe_direct, group.spot_rows, context)
-    direct = probe_direct * cpu_work_scale(table.duration_ns[rows], context.budget)
+    direct = probe_direct * cpu_work_scale(table, rows, context.budget)
     allow_direct = context.families is None or "dop853" in context.families
     if not allow_direct:
         direct = np.full_like(direct, np.inf)

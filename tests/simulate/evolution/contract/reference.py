@@ -54,6 +54,8 @@ def converged_reference(
     maximum absolute density difference across all points and matrix entries.
     Reject an unconverged reference with AssertionError when that error exceeds
     2e-6. coarse and fine override local solver tolerances, not this threshold.
+    UnsupportedCollapseOperators and other input errors from reference_timeline
+    propagate.
     """
     approximate = reference_timeline(source, batch, rtol=coarse.rtol, atol=coarse.atol)
     density = reference_timeline(source, batch, rtol=fine.rtol, atol=fine.atol)
@@ -62,6 +64,19 @@ def converged_reference(
         f"reference did not converge: density error {error:.9g} > 2e-6"
     )
     return ReferenceResult(density, error)
+
+
+class UnsupportedCollapseOperators(ValueError):
+    """The independent secular reference cannot evolve an explicit jump."""
+
+
+def require_secular_bath(model: evolution.SecularModel) -> None:
+    """Raise UnsupportedCollapseOperators if the bath has explicit jumps."""
+    if model.collapse_operators:
+        raise UnsupportedCollapseOperators(
+            "the reference solvers do not support explicit collapse operators "
+            f"at flux level {model.level}"
+        )
 
 
 @dataclass(frozen=True)
@@ -73,10 +88,11 @@ class _Dynamics:
 
 
 def _lindblad_rhs(
-    dynamics: _Dynamics, interval: tuple[float, float]
+    dynamics: _Dynamics,
+    interval: tuple[float, float],
+    bath: evolution.SecularModel,
 ) -> Callable[[float, NDArray[np.complex128]], NDArray[np.complex128]]:
     left, right = interval
-    bath = dynamics.bath((left + right) / 2)
     size = len(bath.energies_ghz)
     overlap = dynamics.basis.conj().T @ bath.eigenvectors
     rates = np.where(bath.rates_per_ns > 0, bath.rates_per_ns, 0.0)
@@ -103,12 +119,17 @@ def _lindblad_rhs(
 def _integrate(
     dynamics: _Dynamics, state: NDArray[np.complex128], *, rtol: float, atol: float
 ) -> NDArray[np.complex128]:
+    intervals = list(
+        zip(dynamics.boundaries[:-1], dynamics.boundaries[1:], strict=True)
+    )
+    baths = [dynamics.bath((left + right) / 2) for left, right in intervals]
+    for model in baths or [dynamics.bath(dynamics.boundaries[0])]:
+        require_secular_bath(model)
+
     result = state.copy().ravel()
-    for left, right in zip(
-        dynamics.boundaries[:-1], dynamics.boundaries[1:], strict=True
-    ):
+    for (left, right), bath in zip(intervals, baths, strict=True):
         solution = solve_ivp(
-            _lindblad_rhs(dynamics, (left, right)),
+            _lindblad_rhs(dynamics, (left, right), bath),
             (left, right),
             result,
             method="DOP853",
@@ -145,7 +166,8 @@ def reference(
     H(flux) uses source.flux_expansion when table.flux_waveform is present.
     Stop at bath switches, flux samples and envelope knots, including nonzero
     envelope-local offsets. rtol/atol are DOP853 tolerances; defaults are the
-    fine reference level. Solver failure raises AssertionError.
+    fine reference level. Explicit collapse operators in the selected bath raise
+    UnsupportedCollapseOperators. Solver failure raises AssertionError.
     """
     table = case.table
     model = case.source.model(tuple(int(v) for v in table.level[row]))
@@ -261,7 +283,8 @@ def reference_timeline(
     samples, the Hamiltonian. With flux_waveform, source.flux_expansion defines
     H(flux) independently of the bath schedule. Continuations keep absolute
     carrier phase and pulse-local envelope time. SegmentShift inputs are not
-    supported and raise NotImplementedError; solver failure raises AssertionError.
+    supported and raise NotImplementedError. Explicit collapse operators in any
+    selected bath raise UnsupportedCollapseOperators. Solver failure raises AssertionError.
     """
     if batch.segment_shifts:
         raise NotImplementedError("reference does not support segment shifts")
