@@ -32,8 +32,8 @@ ADR 宣告 package 之間的依賴方向時，同時在 `.importlinter` 建立�
 
 ## Concurrency / Lifecycle
 
-- [0001 — Domain guard 與 Lease 分離](0001-permit-lease-typed-guard.md)：Domain guard 與 lease 的責任分界，typed Permit proof 由 [[0066]] 接替。
-- [0002 — Version table + off-main handler（handle 模型沿革）](0002-version-table-async-handle-off-main.md)：資源版本表與 RPC off-main handler，handle 模型由 [[0066]] 接替。
+- [0001 — Domain guard 與 Lease 分離](0001-permit-lease-typed-guard.md)：Domain guard 與 lease 的責任分界；typed Permit proof 已由 [ADR-0066](0066-operation-lifecycle.md#問題與決策) 取代。
+- [0002 — Version table + off-main handler](0002-version-table-async-handle-off-main.md)：資源版本表與 RPC off-main handler；handle 舊模型已由 [ADR-0066](0066-operation-lifecycle.md#問題與決策) 取代。
 - [0053 — Owner scheduler 與 gate presence](0053-owner-scheduler-and-gate-presence.md)：Owner scheduler、State guard、completion facts 與 gate presence。
 - [0066 — Operation 執行、取消與關閉](0066-operation-lifecycle.md)：Operation admission、lease、取消、完成、shutdown 與 disconnect 的責任分界。
 
@@ -53,8 +53,8 @@ ADR 宣告 package 之間的依賴方向時，同時在 `.importlinter` 建立�
 
 - [0008 — Headless Form 與 writeback draft](0008-cfg-editor-session.md)：Headless Form 與 writeback draft 的宿主所有權及 Apply 提交邊界。
 - [0037 — Session value lookup](0037-measure-gui-value-lookup-resolve-once.md)：唯讀 value lookup、resolve-once 與固定 capture。
-- [0065 — Cfg 編輯模型與使用邊界](0065-cfg-editing.md)：共用 Form、持久 Spec、固定來源與 Library／Inspect／writeback 提交邊界。
-- [0073 — Measure 表單從 core cfg 推導](0073-measure-form-derivation.md)：Measure Form 從 core cfg 推導、宣告初值 factory 與實驗 record 的邊界。
+- [0065 — Cfg 編輯模型與使用邊界](0065-cfg-editing.md)：共用 Form、持久 Spec、固定來源與 Library／Inspect／writeback 提交邊界；欄位轉換與草稿還原見 [ADR-0079](0079-form-field-transitions.md#決策狀態與問題)。
+- [0073 — Measure 表單從 core cfg 推導](0073-measure-form-derivation.md)：Measure Form 從 core cfg 推導、宣告初值 factory 與實驗 record 的邊界；欄位轉換與草稿還原見 [ADR-0079](0079-form-field-transitions.md#決策狀態與問題)。
 - [0079 — Form 欄位轉換、固定元素與逐元素操作](0079-form-field-transitions.md)：已採用但尚未完成實作的 Form converter、scoped command 與固定元素設計。
 
 ## Remote / Transport
@@ -216,6 +216,10 @@ ADR 宣告 package 之間的依賴方向時，同時在 `.importlinter` 建立�
 - [0060 — Measure agent interface](retired/0060-measure-agent-interface-shared-gui-view.md)：跨模組邊界由 [[0068]] 接替。
 - [0061 — Measure interactive plugin session](retired/0061-measure-interactive-plugin-session.md)：session ownership 由 0067 接替，互動細節見 measure README。
 - [0077 — Numerical candidates、plan ownership 與 checked replay](retired/0077-numerical-plans-and-replay.md)：Numerical planner 與 checked replay 已移除，現行分工見 [[0078]]。
+- [Domain guard 的 typed Permit proof](retired/typed-permit-proof.md#現況)：摘自 ADR-0001，領域檢查與 RunInputs 見 [ADR-0066](0066-operation-lifecycle.md#問題與決策)。
+- [Operation handle 舊模型](retired/operation-handle.md#2-operation-handle歷史設計)：摘自 ADR-0002，現行 runner 與 lease 分工見 [ADR-0066](0066-operation-lifecycle.md#問題與決策)。
+- [Cfg 編輯模型的局部取代範圍](retired/cfg-editing-replacement-scope.md#局部取代範圍)：摘自 ADR-0065，欄位轉換與草稿還原見 [ADR-0079](0079-form-field-transitions.md#決策狀態與問題)。
+- [Measure 表單推導的局部取代範圍](retired/measure-form-derivation-replacement-scope.md#局部取代範圍)：摘自 ADR-0073，欄位轉換與草稿還原見 [ADR-0079](0079-form-field-transitions.md#決策狀態與問題)。
 - [Pydantic 表單、輸入與宿主提交](retired/pydantic-form-tool.md)：superseded，穩定邊界併入 0065／0062，持久 Spec 與推導由 0008／0073 承接；原稿留存歷史。
 - [量測成果 Artifact、設定快照與讀回](retired/artifact-persistence.md)：superseded，由 0063、0069、0067 接替；保留原提案與討論連結供追溯。
 - [Cfg 編輯接縫與使用邊界](retired/cfg-editing-boundaries.md)：superseded，由 0065、0008、0073 接替，正文只供歷史追溯。

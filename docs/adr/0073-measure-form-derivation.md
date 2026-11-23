@@ -4,11 +4,11 @@ status: accepted
 
 # 0073 — Measure 表單從 core cfg 推導
 
+本篇接替 [[0012]] 的 measure definition／seed 契約與 [[0009]] 的角色 default 表。Library、writeback 與 Inspect 也使用共用 Form，持久 Spec 與提交邊界見 [[0065]]、[[0008]]。實驗核心與前端分工見 [[0069]]。
+
 ## 局部取代範圍
 
-[ADR-0079](0079-form-field-transitions.md#決策狀態與問題) 局部取代本篇關於普通切換補 fresh defaults、數值葉 command 改 parent，以及僅保存 input 並丟棄不相容葉的規則。欄位轉換與保存還原以該篇為準。[Form core](../../lib/zcu_tools/gui/form/README.md) 提供 `select` 與 `restore_input`，Measure 的 tab 由 Form owner 還原已保存的原始輸入，見 [Measure owner](../../lib/zcu_tools/gui/app/measure/README.md#sources-and-workflow)。其餘 owner 邊界不變。
-
-本篇接替 [[0012]] 的 measure definition／seed 契約與 [[0009]] 的角色 default 表。Library、writeback 與 Inspect 也使用共用 Form，持久 Spec 與提交邊界見 [[0065]]、[[0008]]。實驗核心與前端分工見 [[0069]]。
+已由 ADR-0079 取代，見 [ADR-0079〈決策狀態與問題〉](0079-form-field-transitions.md#決策狀態與問題)；[原文](retired/measure-form-derivation-replacement-scope.md#局部取代範圍)僅供追溯。
 
 ## 問題
 
