@@ -1,6 +1,6 @@
 # `tests/` — test suite
 
-**Last updated:** 2026-11-23，實驗圖與寫回提案驗收
+**Last updated:** 2026-11-23，離線 probe 的保存差異與 fit 失敗
 
 **讀者：** framework-dev、agent。查閱測試的 owner、fixture、執行方式與搬遷驗收契約。
 
@@ -102,9 +102,12 @@ Agent 在 review-done 前完成下列檢查，將證據留在 task scratch，不
 
 1. 保存 Python 腳本、靜態檢查及執行的精確命令與 exit status。
    腳本保留 cfg、Result、options、環境接線與 seed；執行紀錄保留選用階段、回傳結果與錯誤輸出。
-2. 核對 run record 的 shape／dtype 與預期資料形狀。驗證存檔時確認 `roundtrip_equal is True`，
-   並判讀 `cfg_issue`。驗證分析時記錄實際 analysis 結果的判讀。
+2. 核對 run record 的 shape／dtype 與預期資料形狀。驗證存檔時通常確認 `roundtrip_equal is True`，
+   並判讀 `cfg_issue`。若 Result 有已知不保存的 run-only 欄位，按
+   [probe 保存比較範例](../lib/zcu_tools/experiment/README.md#offline-experiment-probe) 記錄原 record 的差異，再用副本驗其餘欄位。
+   驗證分析時記錄實際 analysis 結果的判讀。
    階段會傳出原始例外，失敗時記錄階段與 traceback，不以殘留檔案當本次成功證據。
+   若 fit 在畫出量測 trace 後才拋錯，按 [lab 的殘留圖檢查範例](../zcu_lab/README.md#準備-python-檔) 查看同一 `Plots`。
 3. 將選用階段的每張 PNG 保存到 scratch，親自開啟並逐張記錄路徑、預期畫面與實際判讀。
    核對曲線或熱圖、軸標、單位、圖例及本次變更影響的外觀。
    只有檔案存在或數值結果通過不算看圖驗收。預期有圖卻未產生時，記錄為驗收缺口。
