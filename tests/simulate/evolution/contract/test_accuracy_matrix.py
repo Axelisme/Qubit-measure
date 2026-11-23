@@ -71,6 +71,7 @@ CASE_NAMES = (
     "adiabatic_ramp",
     "single_tone_sideband",
     *COMPLEX_SINGLE_GATE_CASES,
+    "single_gate_diagonal_inside_real",
     *DISSIPATIVE_DC_CASES,
 )
 KNOWN_EDGE_ERRORS = {
@@ -153,7 +154,10 @@ def test_pinned_family_density(
     case = accuracy_case(name)
     reference = matrix_reference(case)
     families = (case.idle_family, family) if case.idle_family is not None else (family,)
-    diagonal_edge = name == "single_gate_diagonal_inside"
+    diagonal_edge = name in (
+        "single_gate_diagonal_inside",
+        "single_gate_diagonal_inside_real",
+    )
     budget = 2e-3 if name in COMPLEX_SINGLE_GATE_CASES and not diagonal_edge else 1e-3
     with closing(Engine(1, families=families, backend="cpu")) as engine:
         result = engine.evolve(case.source, (case.batch,), budget=budget)
@@ -177,13 +181,15 @@ def test_pinned_family_density(
     assert error <= limit, f"{name}/{family}: density error {error:.9g} > {limit}"
 
 
+@pytest.mark.parametrize("complex_envelope", [True, False], ids=["complex", "real"])
 def test_single_gate_diagonal_density(
+    complex_envelope: bool,
     request: pytest.FixtureRequest,
     matrix_reference: Callable[[AccuracyCase], ReferenceResult],
 ) -> None:
     budget = 1e-3
     family = "single_tone_gate"
-    case = single_gate_diagonal_case(inside=False)
+    case = single_gate_diagonal_case(inside=False, complex_envelope=complex_envelope)
     with (
         closing(case.source),
         closing(Engine(1, families=(family,), backend="cpu")) as gate,
