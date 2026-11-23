@@ -225,7 +225,7 @@ def _admitted(
             continue
         key = FactKey(
             (
-                "covariant-gate-admission",
+                "covariant-gate-admission-v2",
                 GATE_POLICY,
                 RWA_POLICY,
                 single_tone,
@@ -271,7 +271,7 @@ def _admit_physics(
         amplitudes = np.abs(table.tone_amplitude[row, :count]) * bounds.peaks[envelopes]
         duration = float(table.duration_ns[row])
         accepted[index] = pruning_admitted(graph, amplitudes, duration, context.budget)
-        if accepted[index] and single_tone and not bounds.real[envelopes[0]]:
+        if accepted[index] and single_tone:
             drive = table.model(context.source, row).drives[table.tone_port[row, 0]]
             # A carrier diagonal cannot satisfy q[i]-q[i]=1, even if the
             # RWA retention window restores it. Bound its omission without
@@ -280,8 +280,9 @@ def _admit_physics(
                 np.ptp(drive.in_phase_ghz.diagonal().real),
                 np.ptp(drive.quadrature_ghz.diagonal().real),
             )
-            # Re(z)X + Im(z)Y has diagonal spectral spread <= |z| times
-            # spread_ghz. Scalar identity terms cancel in a commutator.
+            # For real or complex z, Re(z)X + Im(z)Y has diagonal spectral
+            # spread <= |z| * spread_ghz. Scalar identity terms cancel in a
+            # commutator.
             # Duhamel bounds the trace distance from this term alone by
             # π * GHz * ns (dimensionless), not the total gate/RWA error.
             accepted[index] = (
