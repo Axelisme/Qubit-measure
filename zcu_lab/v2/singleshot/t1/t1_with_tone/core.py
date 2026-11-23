@@ -8,7 +8,7 @@ from numpy.typing import NDArray
 from pydantic import Field
 from pydantic.dataclasses import dataclass as pydantic_dataclass
 from zcu_tools.analysis.fitting.multi_decay import (
-    calc_lambdas,
+    excited_population_decay_times,
     fit_dual_transition_rates,
     model_func,
 )
@@ -78,8 +78,9 @@ class T1WithToneAnalyzeOptions:
 class T1WithToneAnalysis:
     """Two model decay times under the probe tone, which can be equal.
 
-    t1: Shorter decay time in µs (1 / lambdas[2]).
-    t1_b: Longer decay time in µs (1 / lambdas[1]).
+    t1: Decay time in µs of the mode with the larger absolute amplitude in the
+        e-prepared e population. Equal amplitudes select the longer time.
+    t1_b: Decay time in µs of the other mode.
     """
 
     t1: float
@@ -357,7 +358,8 @@ class T1WithToneExp(Experiment[T1WithToneResult, T1WithToneCfg]):
 
         Normalize source counts per row after options.skip, optionally corrected by the
         supplied confusion matrix. Fit both I/pi preparations together, return
-        the two decay times in us, and publish their population curves to plots.
+        T1 and T1b in µs by their amplitudes in the e-prepared e population,
+        and publish the population curves to plots.
         """
         # 1. Select durations and correct readout populations for both preparations.
         result = source.result
@@ -384,10 +386,7 @@ class T1WithToneExp(Experiment[T1WithToneResult, T1WithToneCfg]):
         # 2. Infer shared transition rates and their two decay times.
         fit_result = fit_dual_transition_rates(lens, populations1, populations2)
 
-        lambdas, _ = calc_lambdas(fit_result.rates)
-
-        t1 = 1.0 / lambdas[2]
-        t1_b = 1.0 / lambdas[1]
+        times = excited_population_decay_times(fit_result.rates)
 
         # 3. Render counted fractions and physical decay fit on matching panels.
         fig, _ = plots.subplots(
@@ -405,7 +404,7 @@ class T1WithToneExp(Experiment[T1WithToneResult, T1WithToneCfg]):
         diagnostics = fit_result.diagnostics
         fig.suptitle(
             f"{title}\n"
-            f"Relaxation times (short to long) = {t1:.3g}, {t1_b:.3g} µs · "
+            f"T1 = {times.t1:.3g}, T1b = {times.t1_b:.3g} µs · "
             f"Reduced χ² = {diagnostics.reduced_chi_square:.3g}"
         )
         dense_time = np.linspace(float(lens.min()), float(lens.max()), 250)
@@ -430,4 +429,4 @@ class T1WithToneExp(Experiment[T1WithToneResult, T1WithToneCfg]):
             )
         fig.axes[2].legend(loc="best", fontsize=10)
 
-        return T1WithToneAnalysis(t1=float(t1), t1_b=float(t1_b))
+        return T1WithToneAnalysis(t1=times.t1, t1_b=times.t1_b)

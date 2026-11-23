@@ -53,7 +53,7 @@ def _writeback(
         ParameterWriteback(
             target_name="$qubit.ext.t1_with_tone",
             description=(
-                "Shorter model decay time under the probe tone (µs). "
+                "T1 of the dominant e-population decay mode under the probe tone (µs). "
                 "Stop starts at 5 × this value."
             ),
             proposed_value=result.t1,

@@ -157,7 +157,7 @@ DualToneFreq 與 BathFreqGain 不提 module。逐列 Apply 與 ledger 失敗政�
 ## Singleshot 與 Readout optimize
 
 Singleshot Amp／Len Rabi、Check、ResetCheck、AC Stark 的 run 回傳 RunRecord，FIT 使用 explicit source／typed options／Plots，不在 GUI 數值結果保存 Figure。Rabi 保留完整 numeric fit 供共同 calibration writeback 判斷；ResetCheck 只投影 populations summary，不推導 reset fidelity。Check 的 GE centers 與 AC Stark 的 chi／kappa 仍由分析當次 md 讀取，再交 core options。
-Singleshot T1／Tone／Tone sweep adapters 直接組裝含 uniform 的 typed cfg，將同次 cfg／Result 配成 RunRecord。FIT 向本次 Plots 發布 fit 圖；Tone 保留 t1_with_tone writeback，其餘兩者只提交空數值結果。Correction／photon-axis 參數仍從分析當次 md 讀取。
+Singleshot T1／Tone／Tone sweep adapters 將同次 cfg／Result 配成 RunRecord。Analyze 使用保存的 readout 校準，向本次 Plots 發布 fit 圖。普通 T1 與固定 tone 版回傳 `t1` 和 `t1_b`，各自以主模 `t1` 提案寫回 `$qubit.t1` 與 `$qubit.ext.t1_with_tone`。Tone sweep 不回傳數值摘要或 writeback；光子數換算參數讀取分析的固定來源。
 Singleshot MIST Freq／Power／FreqPower adapters 將本次校準 cfg 與純 Result 配成 RunRecord。FIT 使用 explicit source 與 typed options，只提交空數值結果，fit 圖另交 Plots。Confusion matrix 仍讀分析當次 md；只有 Power 使用 ac_stark_coeff／log_scale，FreqPower 不轉交無作用的參數。
 Readout AutoOpt 將 num_points 保留在 typed cfg，run 配對 cfg／Result，FIT 只發布三個最佳 scalar 與具名 fit；readout_dpm 由 source.cfg 產生，缺 cfg 時只保留 scalar writeback。Native restore 與保存內容準備沿用核心的 grouped persistence spec。
 Readout optimize Freq／FreqGain／Length／Power adapters 將 cfg／Result 配成 RunRecord，FIT 將表單 smoothing／duration／penalty 轉為 core options，只提交 best scalar 與獨立具名 fit。Writeback 保留 `$qubit.ext.best_ro_*` scalar；readout_dpm 以 source.cfg 的 pulse readout 配合固定 capture 補足缺少的最佳值，cfg=None 時略過 module，不以目前表單補來源。

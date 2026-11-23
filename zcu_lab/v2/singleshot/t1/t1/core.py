@@ -8,7 +8,8 @@ from numpy.typing import NDArray
 from pydantic import Field
 from pydantic.dataclasses import dataclass as pydantic_dataclass
 from zcu_tools.analysis.fitting.multi_decay import (
-    calc_lambdas,
+    ExcitedPopulationDecayTimes,
+    excited_population_decay_times,
     fit_dual_transition_rates,
     model_func,
 )
@@ -298,13 +299,13 @@ class T1Exp(Experiment[T1Result, T1Cfg]):
         options: T1AnalyzeOptions,
         *,
         plots: Plots,
-    ) -> None:
-        """Plot both preparation populations, their joint fit, and its two decay times.
+    ) -> ExcitedPopulationDecayTimes:
+        """Plot both preparation populations and return their fitted T1 and T1b.
 
-        source supplies delay times in us and G/E/Other counts, normalized per row. Skip the first
-        options.skip points, optionally correct readout with the saved cfg classifier's
-        confusion matrix, and fit the two traces together. Publish the fit in
-        plots; fitting errors propagate.
+        source supplies delay times in µs and g/e/Other counts, normalized per row.
+        Skip the first options.skip points, optionally correct with the saved
+        confusion matrix, and fit the two traces together. Name the decay times by
+        their amplitudes in the e-prepared e population. Fitting errors propagate.
         """
         # 1. Select delays and correct measured G/E/Other populations.
         result = source.result
@@ -334,10 +335,7 @@ class T1Exp(Experiment[T1Result, T1Cfg]):
         # 2. Fit shared transition rates from the two initial-state traces.
         fit_result = fit_dual_transition_rates(lens, populations1, populations2)
 
-        lambdas, _ = calc_lambdas(fit_result.rates)
-
-        t1 = 1.0 / lambdas[2]
-        t1_b = 1.0 / lambdas[1]
+        times = excited_population_decay_times(fit_result.rates)
 
         # 3. Render counted fractions and physical decay fit on matching panels.
         fig, _ = plots.subplots(
@@ -355,7 +353,7 @@ class T1Exp(Experiment[T1Result, T1Cfg]):
         diagnostics = fit_result.diagnostics
         fig.suptitle(
             f"{title}\n"
-            f"Relaxation times (short to long) = {t1:.3g}, {t1_b:.3g} µs · "
+            f"T1 = {times.t1:.3g}, T1b = {times.t1_b:.3g} µs · "
             f"Reduced χ² = {diagnostics.reduced_chi_square:.3g}"
         )
         dense_time = np.linspace(float(lens.min()), float(lens.max()), 250)
@@ -379,3 +377,5 @@ class T1Exp(Experiment[T1Result, T1Cfg]):
                 xlabel="Free evolution time (µs)", ylabel=f"P({state})", title=branch
             )
         fig.axes[2].legend(loc="best", fontsize=10)
+
+        return times

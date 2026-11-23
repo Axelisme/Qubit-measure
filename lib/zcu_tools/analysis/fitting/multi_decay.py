@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import logging
 from collections.abc import Mapping
 from dataclasses import dataclass
+from math import isclose
 from typing import ClassVar
 
 import matplotlib.pyplot as plt
@@ -19,6 +21,8 @@ RATE_UPPER_GUESS_MULTIPLIER = 5.0
 SINGLE_INITIAL_GROUND_BOUND = 0.01
 SINGLE_INITIAL_EXCITED_BOUND = 0.001
 DUAL_INITIAL_POPULATION_BOUND = 0.01
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -407,6 +411,43 @@ def clac_amplitude(
     except np.linalg.LinAlgError:
         amplitudes = np.array([0.0, 0.0, 0.0])
     return tuple(amplitudes)
+
+
+@dataclass(frozen=True)
+class ExcitedPopulationDecayTimes:
+    """Decay times in µs for the two modes of e-prepared e population.
+
+    t1 is the time of the mode with the larger absolute amplitude.
+    t1_b is the other mode's time. If the amplitudes tie, t1 is the longer time.
+    """
+
+    t1: float
+    t1_b: float
+
+
+def excited_population_decay_times(
+    rates: TransitionRates,
+) -> ExcitedPopulationDecayTimes:
+    """Name the two fitted decay times by their amplitudes for pure e preparation.
+
+    rates contains the g/e/other transition rates in µs⁻¹. Only the two
+    nonstationary modes enter the comparison. Log a tie and put the longer time
+    first. A complex-conjugate pair has two equal envelope decay times.
+    """
+    lambdas, vectors = calc_lambdas(rates)
+    _, slow_weight, fast_weight = clac_amplitude(vectors, p0g=0.0, p0e=1.0)
+    # Project each eigenmode onto the observed e population, not its full norm.
+    slow_amp = slow_weight * abs(vectors[1, 1])
+    fast_amp = fast_weight * abs(vectors[1, 2])
+    slow, fast = float(1.0 / lambdas[1]), float(1.0 / lambdas[2])
+    # Allow for roundoff from the eigensolve when comparing equal amplitudes.
+    if isclose(slow_amp, fast_amp, rel_tol=1e-15):
+        logger.info(
+            "Equal e-population mode amplitudes; using longer decay time for T1"
+        )
+    elif fast_amp > slow_amp:
+        return ExcitedPopulationDecayTimes(t1=fast, t1_b=slow)
+    return ExcitedPopulationDecayTimes(t1=slow, t1_b=fast)
 
 
 def fit_with_vadality(
