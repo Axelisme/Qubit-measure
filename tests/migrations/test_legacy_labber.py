@@ -90,16 +90,15 @@ class _EchoResult:
     iq_moments: np.ndarray | None = None
 
 
-def test_declared_historical_echo_schema_reads_unmarked_log_with_native_moments(
-    tmp_path: Path,
-) -> None:
+@pytest.fixture
+def echo_spec() -> GroupedAxesSpec[_EchoResult, _EchoCfg]:
     time = VariableAxisSpec(label="Time", unit="s", field_name="times", scale=1e-6)
 
     def restore(data: GroupedLoadData[_EchoCfg]) -> _EchoResult:
         signal = data.variable("data")
         return _EchoResult(signal.axes[0], signal.z)
 
-    spec = GroupedAxesSpec(
+    return GroupedAxesSpec(
         variables=(
             VariableSpec(
                 "data",
@@ -120,6 +119,18 @@ def test_declared_historical_echo_schema_reads_unmarked_log_with_native_moments(
         result_builder=restore,
         tag="synthetic/echo",
     )
+
+
+def test_declaration_rejects_empty_historical_schema(
+    echo_spec: GroupedAxesSpec[_EchoResult, _EchoCfg],
+) -> None:
+    with pytest.raises(ValueError, match="at least one legacy log"):
+        declare_migration_experiment(echo_spec, schemas=())
+
+
+def test_declared_historical_echo_schema_reads_unmarked_log_with_native_moments(
+    tmp_path: Path, echo_spec: GroupedAxesSpec[_EchoResult, _EchoCfg]
+) -> None:
     history = LegacyVariableSchema(
         variable="data",
         axes=(LegacyAxisSchema(name="Time", unit="s", dtype=np.dtype("float64")),),
@@ -127,7 +138,7 @@ def test_declared_historical_echo_schema_reads_unmarked_log_with_native_moments(
         signal_unit="a.u.",
         signal_dtype=np.dtype("complex128"),
     )
-    declaration = declare_migration_experiment(spec, schemas=(history,))
+    declaration = declare_migration_experiment(echo_spec, schemas=(history,))
     source = tmp_path / "echo.hdf5"
     LabberData(
         ("Signal", "a.u.", np.array([1 + 2j, 3 + 4j])),

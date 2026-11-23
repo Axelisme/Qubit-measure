@@ -93,11 +93,14 @@ def declare_migration_experiment(
 
     spec supplies the native cfg and file validators; None raises ValueError.
     source_tag defaults to the native tag. Pass schemas to retain an exact
-    historical Labber disk declaration. None derives it from all native
-    variables as before. No files are read until a validator is called.
+    historical Labber disk declaration. An empty tuple raises ValueError.
+    None derives the schemas from all native variables. No files are read
+    until a validator is called.
     """
     if spec is None:
         raise ValueError("Missing native experiment declaration")
+    if schemas is not None and not schemas:
+        raise ValueError("schemas must declare at least one legacy log")
 
     def validate_cfg(snapshot: CfgSnapshot) -> None:
         validate_cfg_snapshot(snapshot)

@@ -13,11 +13,7 @@ from zcu_tools.experiment import (
     VariableZSpec,
 )
 
-from zcu_lab.v2.mux._moments import (
-    iq_moments_variable,
-    restore_iq_moments,
-    validate_iq_moments,
-)
+from zcu_lab.v2.mux._moments import iq_moments_variable, restore_iq_moments
 
 from .mux_coherence import MuxCoherenceResult, validate_coherence_result
 
@@ -68,10 +64,6 @@ def coherence_spec[T: ConfigBase](
             restore_iq_moments(data.variables.get(DataVariable("iq_moments")), signals),
         )
 
-    def validate(result: MuxCoherenceResult) -> None:
-        validate_coherence_result(result)
-        validate_iq_moments(result.iq_moments, result.signals)
-
     # Save the delay grid and per-tone metadata independently, without broadcasting.
     return GroupedAxesSpec(
         variables=(
@@ -108,7 +100,7 @@ def coherence_spec[T: ConfigBase](
         cfg_type=cfg_type,
         tag=tag,
         result_builder=build,
-        result_validator=validate,
+        result_validator=validate_coherence_result,
         cfg_schema_version="3.0",
         # ADR-0069: Native optional variables do not change the Labber export.
         labber_layout="independent",
