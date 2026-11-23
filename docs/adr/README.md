@@ -2,7 +2,7 @@
 
 **讀者：** framework-dev、agent。透過本索引與各篇 ADR 查找跨模組決策及其依據。
 
-每篇 ADR 以現在式描述目前生效的跨模組設計。索引只放定位用摘要；細節留在 ADR 本文。
+每篇 ADR 以現在式描述目前生效的跨模組設計。單一模組的取捨原則寫在該模組的 README。索引只放跨模組原則的摘要與指標；細節留在 ADR 本文。
 ADR 正文寫目前生效的規則與客觀事實。裁決日期、使用者原話與沿革的放置方式見下方[格式規定](#格式規定)。依據中的「使用者未覆核」只標尚未覆核的代裁；已覆核時記下覆核結果。
 
 程式碼註解與記憶檔以 `ADR-NNNN` 引用本目錄；ADR 之間以 `[[NNNN]]` 互鏈。
@@ -92,8 +92,6 @@ ADR 宣告 package 之間的依賴方向時，同時在 `.importlinter` 建立�
 
 原則：Measure 圖磚以 12×9 in 排版，只等比縮放整張圖；R7 在存檔 PNG 檢查版面，見 [ADR-0069](0069-experiment-core-and-frontends.md#圖以固定存檔幾何排版)。
 原則：平均 IQ 的一維圖預設用主軸投影，二維 flux／頻率圖用逐 bias 扣背景後的幅值，改用其他量須寫明理由，見 [ADR-0069](0069-experiment-core-and-frontends.md#平均-iq-的投影慣例)。
-
-原則：只有準備誤差不移動 gg、ee 兩組共用的參數時，才保留獨立 heralded 實驗，見 [ADR-0074](0074-flat-readout-module.md#保留獨立-heralded-實驗的條件)。
 
 原則：Timeline 編譯器推算每發 ADC 讀取數，每個 Branch 出口與作者 label 都逐 ADC 對齊，見 [ADR-0083](0083-program-macros-and-timelines.md#每發-adc-讀取數)。
 原則：Timeline program 提供通用跳轉，builder 只轉交同名動作。只往後跳，迭代用 Repeat 或 sweep。見 [ADR-0083](0083-program-macros-and-timelines.md#往後跳轉與-label-合併)。

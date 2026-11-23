@@ -2,7 +2,7 @@
 
 **讀者：** lab-author、agent。查找實驗的檔案分工、作者契約與各家族入口。
 
-**Last updated:** 2026-11-23，實驗呈現指南與 GE 診斷
+**Last updated:** 2026-11-23，獨立 heralded 入口的取捨
 
 先從 [tutorial](../tutorial/README.md) 新增實驗，再按下列入口查契約與操作。
 實驗定義改動的驗收方式與命令範例見 [離線驗收](../README.md#實驗定義的離線驗收)。
@@ -41,6 +41,28 @@ Open／Defaults 使用 point aliases `qubit1`、`qubit2` 和 `mux`。表單不�
 | Paired RB／IRB | [`two_qubit/rb`](two_qubit/rb/guide.md) | [`two_qubit/rb_heralded`](two_qubit/rb/guide_heralded.md) |
 
 一般入口保存兩個位置的 9 類 terminal 聯合計數。除了 `conditional_phase`，表內一般入口可用 `reset/mux_herald` 在序列前篩選 shot，仍只保存這 9 類終端計數。三個 `_heralded` 入口保存 81 類 herald × 終端計數。RB 與 conditional phase 聯合分析 herald g,g 與 e,e；conditional spectroscopy 合併名目準備後畫 herald gg、ge、eg、ee 四支頻譜。採樣與保存量見 [two-qubit guide](two_qubit/guide.md#採樣數與成本)。
+
+### 何時保留獨立 heralded 入口
+
+#### gg／ee 共用參數
+
+**規則。** 只有分析在 gg 和 ee 兩組共用一個參數，且準備誤差只進各組自己的振幅或偏移、不移動共用參數，才保留獨立的 heralded 入口。
+
+**例子。** RB 的兩組各自擬合振幅與偏移，共用衰減參數 `p`。Conditional phase 只用 π 交點寫回；兩組在 π 交點相符，不代表離開 π 時也等效。
+
+**邊界。** 準備誤差若會拉動共用參數，或分析本就不共用參數，就用 `reset/mux_herald` 只留 gg。例如 idle ZZ 的 ζ 會受準備污染拉動，joint readout 矩陣也直接含準備誤差。
+
+**依據。** 2026-11-20，使用者說：「有一些实验呢，它天生不在意 GG 还是 EE，它在意的是 GE 的交换，或者是保留在 GGEE 的属性。这种情况下，利用 hurdling 去。诶，具体来说，用交叉矩以及 hurdling 这两种方案去分析，有助于提高拟合可信度。那其他实验就用 reset 模块就好了。」使用者追問 gg／ee 是否等效，核對後同意保留獨立的 RB 與 conditional phase。語音用詞、數值及選項比較見[只為共用參數保留獨立 heralded 實驗](../../docs/discussions/2026-11-20-heralded-experiment-pruning.md)。
+
+#### 依 probe 前實測類別分開分析
+
+**規則。** 分析要依 probe 前的實測類別分開，且 gg、ge、eg、ee 各自都是分析對象時，保留獨立 heralded 入口，不要求各分支共用擬合參數。先做四種名目 I／Xπ 準備，使各類取得相近的 shot 數，再做 herald 分類。不要用 reset 先丟掉其他類別。
+
+**例子。** [`two_qubit/conditional_spectroscopy_heralded`](two_qubit/conditional_spectroscopy/guide_heralded.md) 依準備後的 herald 類別畫四支頻譜，不做聯合擬合。
+
+**邊界。** 只需要篩選初態的實驗使用 `reset/mux_herald`，不另開入口。
+
+**依據。** 2026-11-23，使用者說：「我覺得你應該安排的不是準備在gg/ge/eg/ee，而是post-selection分類gg/ge/eg/ee」、「你還是可以用pi來製備來是分類比例與熱態無關」、「你搞錯了…當然是先打Xpi然後在herald讀出」，並對更正後的獨立入口方案答「可以」。見[以準備後的 herald 分支量條件頻譜](../../docs/discussions/2026-11-23-heralded-conditional-spectroscopy.md)。
 
 ### Two-qubit 持久名稱
 
