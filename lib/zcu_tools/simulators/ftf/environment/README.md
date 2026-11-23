@@ -655,13 +655,13 @@ These driven contributions are separate from residual thermal-photon dephasing.
 
 FTF queries evolution's final spans with [`segment_spans`](../../../simulate/evolution/README.md#public-entry-points),
 then advances density and cavity memory sequentially. The first span and each
-projection start from vacuum. Otherwise, `CavityDrive.advance` takes the
-previous main branch's final field as `initial_field` for all state-conditioned
-branches. The main branch has the largest population in the span-start DC
-density; exact ties select the lowest energy. Each span supplies the inherited
-field and absolute `initial_time_ns` to ADC. Fields retain ringdown after pulse
-switch-off. See [Cavity drive composition](../physics/README.md#cavity-drive-composition)
-for this semiclassical branch selection.
+projection start from vacuum. Otherwise, all state-conditioned branches inherit
+the previous main branch's final field. Each span passes its starting field and
+absolute start time to ADC through
+[`initial_field` and `initial_time_ns`](../../../simulate/adc/README.md#readout-model).
+Fields retain ringdown after pulse switch-off. See
+[Cavity drive composition](../physics/README.md#cavity-drive-composition)
+for how `CavityDrive.advance` selects the main branch.
 
 Production FTF uses semiclassical state-conditioned fields for cavity memory
 and [readout](#readout-and-sampling), without adding photon states to the
