@@ -156,7 +156,10 @@ class HangerModel:
         signals: NDArray[np.complex128],
         edelay: float,
     ) -> HangerParams:
-        """Seed joint refinement from a rational-smoothed circle/phase fit.
+        """Seed joint refinement with circle/phase fitting at the supplied delay.
+
+        Smooth with the rational fit only if its error is low and its pole is
+        inside the sweep. Otherwise fit the raw trace.
 
         If phase fitting puts Ql at or below the joint lower bound of one, use
         the peak absolute circle-phase slope: Ql = |freq * dphase/df| / 4.
@@ -175,7 +178,13 @@ class HangerModel:
                 stacklevel=2,
             )
         else:
-            if rational_fit.residual_rms <= 0.25:
+            pole = rational_fit.pole
+            # Low RMS alone can describe the background while missing the notch.
+            if (
+                rational_fit.residual_rms <= 0.25
+                and pole is not None
+                and np.min(freqs) < pole.real < np.max(freqs)
+            ):
                 fit_signals = rational_fit.evaluate(freqs) * np.exp(
                     -1j * 2.0 * np.pi * freqs * edelay
                 )
