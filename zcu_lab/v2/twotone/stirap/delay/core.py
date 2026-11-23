@@ -301,10 +301,10 @@ class StirapDelayExp(Experiment[StirapDelayResult, StirapDelayCfg]):
         if peak is not None and peak_value is not None and peak_lead is not None:
             peak_ax.axvline(peak_lead, color="C2", linestyle=":")
             f_sem = sems[-1][peak, 2]
-            uncertainty = f" ± {f_sem:.3f}" if np.isfinite(f_sem) else ""
+            uncertainty = f" ± {f_sem:.3g}" if np.isfinite(f_sem) else ""
             basis = "classified" if corrected is None else "corrected"
             peak_ax.set_title(
-                f"Peak {basis} f fraction = {peak_value:.3f}{uncertainty}\n"
+                f"Peak {basis} f fraction = {peak_value:.3g}{uncertainty}\n"
                 f"Stokes lead = {peak_lead:.4g} µs"
             )
         return StirapDelaySummary(
