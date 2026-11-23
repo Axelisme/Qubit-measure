@@ -132,7 +132,7 @@ Recipe 的 `target` 物件仍用來綁定 aliases。
 使用同一組輸入欄位。Gate count 的間距須符合 [heralded adapter 的輸入條件](../v2/two_qubit/conditional_phase/guide_heralded.md#inputs-and-sequence)，例如 `[1, 2, 3]`。
 每發都在相位序列前做 mux herald。兩個 conditional phase adapter 的 `reset` 只接受一般 reset，不能套用上文的 mux-herald reset override。
 
-`frequency_mhz` 來自 [joint gg/ee 斜率的 π 交點](../v2/two_qubit/conditional_phase/guide_heralded.md#counts-and-plots)，不以只有 gg 的交點替代。
+`frequency_mhz` 來自 [joint gg/ee 斜率的 π 交點](../v2/two_qubit/conditional_phase/guide_heralded.md#read-the-joint-conditional-phase)，不以只有 gg 的交點替代。
 沒有唯一交點時同樣回 null 與 `frequency_reason`，不詢問寫回。
 有交點時，候選同樣是兩筆脈衝頻率和兩筆 slot 更新。
 

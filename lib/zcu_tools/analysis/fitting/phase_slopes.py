@@ -27,6 +27,28 @@ class PhaseSlopeFit:
     fits: tuple[tuple[SharedFitResult | None, ...], ...]
     reasons: tuple[tuple[str | None, ...], ...]
 
+    def accumulated_phase_deg(
+        self,
+        n: NDArray[np.int64] | NDArray[np.float64],
+        *,
+        channel: int,
+        coordinate: int,
+        group: int,
+    ) -> NDArray[np.float64] | None:
+        """Evaluate the unwrapped fitted angle in degrees at each integer or real n.
+
+        Select a channel and coordinate slice of the shared fit, and an input
+        group for its fitted phase offset. Return None for an unavailable fit;
+        invalid array indices or missing group parameters raise IndexError or KeyError.
+        """
+        fit = self.fits[channel][coordinate]
+        if fit is None:
+            return None
+        return (
+            np.asarray(n, dtype=np.float64) * fit.values["slope"]
+            + fit.values[f"phase_{group}"]
+        )
+
 
 def _gate_count_alias_reason(n: NDArray[np.int64]) -> str | None:
     """Return the slope alias reason for fewer than two n or difference gcd≠1.

@@ -42,6 +42,26 @@ def test_shared_slope_recovers_both_quadratures_with_covariance(groups):
         )
 
 
+def test_accumulated_phase_uses_shared_slope_and_each_groups_offset():
+    owner = import_module("zcu_tools.analysis.fitting")
+    n = np.arange(9, dtype=np.int64)
+    shots = 2000
+    excited = np.rint(shots * (1 + quadratures(n, groups=2)) / 2)
+    values = 2 * excited / shots - 1
+    result = owner.fit_phase_slopes(
+        n, values, (1 - values**2) / shots, np.full_like(values, shots)
+    )
+
+    # Both groups accumulate -47°/gate in channel e; only group 1 starts at 43°.
+    grid = np.array([0.0, 2.5, 8.0])
+    for group, expected in enumerate(([0, -117.5, -376], [43, -74.5, -333])):
+        phases = result.accumulated_phase_deg(
+            grid, channel=1, coordinate=0, group=group
+        )
+        np.testing.assert_allclose(phases, expected, atol=0.5)
+    assert result.errors_deg[1, 0] == pytest.approx(0.0224, rel=0.35)
+
+
 def test_each_group_must_identify_its_own_gate_count_alias():
     owner = import_module("zcu_tools.analysis.fitting")
     n = np.arange(5, dtype=np.int64) * 2

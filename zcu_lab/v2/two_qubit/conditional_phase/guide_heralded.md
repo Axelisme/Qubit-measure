@@ -17,18 +17,20 @@ Set **Ramsey target**, **CZ gates per shot** (at least two unique positive count
 
 Set **Mux readout** post-delay from `5/(2π·κ)` µs with the smallest FWHM linewidth κ of the shared readout, in MHz. The wait starts at the end of the generator waveform, not the ADC window, and both reads share it. Residual photons can detune the next qubit pulse. In [Joint readout](../joint_readout/guide.md), use gg herald and sum the target terminal-e columns in the row with target Xπ and spectator I. Lengthen only post-delay and repeat; if the e fraction still rises, adjust the wait before trying to resolve a π crossing. This comparison is not a fidelity estimate.
 
-## Counts and plots
+## Read the joint conditional phase
 
-The joint fit shares phase slope per gate for each actual spectator and frequency, with separate contrast and phase offset per herald. The ee group negates both σ values and swaps the nominal I/Xπ labels to actual e/g. In both groups, `σ=(N_e−N_g)/N_total` before correction and other remains in the denominator.
+The joint fit shares a phase slope per gate for each actual spectator and frequency. It fits a separate contrast and phase offset for each herald group. The ee group negates both σ values and swaps the nominal I/Xπ labels to actual e/g. Both groups use `σ=(N_e−N_g)/N_total` before this correction; other stays in the denominator.
 
-- **Run and first Analyze quadratures** connect measured gg quadratures for the current or last started train; empty groups stay blank. Further Analyze panels show gg and sign-corrected ee X/Y, contrast and wrapped phase for every planned train. X/Y bars are ±1 shot SEM (sample SD / √N from that herald group's retained shots), not slope uncertainty or round spread. Low or zero acceptance is not incomplete acquisition: both projections need complete Reps × Rounds counted across all 81 classes before selection.
-- **Wrapped phase** bars show ±1 standard error from propagating each herald group’s retained multinomial X/Y count variance through `atan2`. They measure this run’s shot sampling error, not the slope fit SE or uncertainty in the fixed classifier. If either projection in that herald and actual spectator group retains fewer than two shots, a calculable phase is still shown without a bar. Bars stop at the ±180° axis limits. Zero contrast or missing X/Y projections leave no phase point or bar.
-- **Slopes** compares the joint and gg-only fit, with fit SE and reduced χ² as in the [ordinary guide](guide.md#read-phase-and-quadratures). Each individual herald group must retain at least two usable counts with difference gcd 1; combining two aliased sets does not fix either. Missing fits are not zero.
-- **Herald heatmap:** panels split nominal spectator and X/Y; MHz runs across each panel. Each vertical gate-count band lists nine herald classes, Qubit1 slowest, Qubit2 fastest. Gray means no probability. The gg fraction measures acceptance, not ground-state purity. Compare it with the quadrature contrast before trusting the slope.
-- **π crossing** compares joint and gg-only conditional phase (spectator-e slope minus spectator-g). Only a unique unambiguous joint crossing supports a proposal; no gg fallback or interpolation uncertainty. Missing, flat, ambiguous or multiple crossings block it.
+**Conditional phase** shows the three panels described in the [ordinary guide](guide.md#read-the-conditional-phase). The Bloch vectors and accumulated-phase markers show gg measurements. The fitted lines use the joint slopes and the fitted gg offsets. The frequency scan subtracts the joint spectator-g slope from the joint spectator-e slope. It alone determines the π crossing and proposal status; the gg-only fit is not a fallback.
+
+**Live** shows the same joint phase per CZ and 180° reference. A frequency needs complete Reps × Rounds in all planned projections, counted across all 81 classes, before it can contribute. Zero accepted shots in a herald group is not incomplete acquisition, but can leave its slope unavailable.
+
+## Inspect diagnostics
+
+- **Herald gg / Herald ee, sign corrected** show X/Y by actual spectator for each train. **Phase points** shows each group's contrast and wrapped single-train angle. X/Y bars show ±1 retained-shot SEM; angle bars propagate each group's X/Y count variance. A calculable angle can have no bar if either projection retains fewer than two shots. Missing X/Y or zero contrast leaves no angle.
+- **Slope diagnostics** compares joint and gg-only spectator slopes, their fit SE and reduced χ². The bottom panel compares both conditional-phase curves in the 0–360° view. Each individual group needs usable gate counts with difference gcd 1; combining two aliased sets does not fix either.
+- **Herald** splits the initial readout distribution by nominal spectator and X/Y. Each gate-count band lists nine herald classes in Qubit1-major order. Gray means no probability is available. The gg fraction measures acceptance, not ground-state purity. Compare it with the quadrature contrast before trusting the slope.
 
 ## Next step
 
 Writeback substitutes the joint crossing frequency in both CZ pulses and offers their two separate coupler slot rows. Recheck amplitude and local Z after accepting. Heralding does not prove gate fidelity. Older files and missing source cfg: see the [family load note](../guide.md#opendefaults-與人工-apply). For common GUI actions, see [`zcu_lab/v2/operator-workflow.md`](../../operator-workflow.md).
-
-In the wrapped phase, per-CZ slope and π-crossing panels, a break between adjacent samples can mark the ±180° cut or an ambiguous half-turn: angles separated by 180° or more are not joined. A frequency with no available value has no point or bridging line. The red π marker is the crossing from joint interpolation, not the gg-only trace.

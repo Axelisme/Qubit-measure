@@ -1,18 +1,15 @@
 """Joint gg/ee heralded conditional phase."""
 
 import logging
-from collections.abc import Callable
 from dataclasses import dataclass
-from textwrap import fill
 from typing import ClassVar
 
 import numpy as np
-from matplotlib.artist import Artist
 from matplotlib.cm import ScalarMappable
 from matplotlib.colors import Normalize
 from matplotlib.ticker import MaxNLocator
 from numpy.typing import NDArray
-from zcu_tools.analysis.fitting.phase_slopes import PhaseSlopeFit, fit_phase_slopes
+from zcu_tools.analysis.fitting.phase_slopes import PhaseSlopeFit
 from zcu_tools.analysis.shot_uncertainty import class_probability_covariance
 from zcu_tools.experiment import (
     Experiment,
@@ -37,16 +34,27 @@ from zcu_tools.program.v2 import (
 )
 from zcu_tools.program.v2.modules import MuxReadout
 
-from zcu_lab.v2.support import live_errorbar
-
-from .._phase import QuadraturePhase, phase_display_sem, phase_variance
-from .._phase_plot import wrapped_phase_plot_data
+from .._phase import (
+    CountQuadratures,
+    QuadraturePhase,
+    complete_projections,
+    conditional_phase_deg,
+    count_quadratures,
+    fit_count_phase_slopes,
+    quadrature_phase_sem,
+)
+from .._phase_plot import (
+    ConditionalPhaseScan,
+    conditional_phase_plot_data,
+    format_conditional_phase_axis,
+    plot_conditional_phase,
+    start_conditional_phase_live,
+    wrapped_phase_plot_data,
+)
 from .._sums import herald_probabilities, qubit_sigma, terminal_counts
 from .core import (
     ConditionalPhaseAnalysis,
     ConditionalPhaseCfg,
-    PhaseCrossings,
-    count_quadratures,
     fitted_crossings,
     phase_points,
     started_trains,
@@ -149,51 +157,20 @@ def _plot_terminal_quadratures(
     fig.axes[-1].set_xlabel("Common CZ frequency (MHz)")
 
 
-def _start_live_view(
-    plots: Plots, frequencies: NDArray[np.float64], config: ConditionalPhaseHeraldedCfg
-) -> Callable[[NDArray[np.float64]], None]:
-    """Create the live chart and return its owner-thread refresh callback."""
-    fig, _ = plots.subplots(
-        num="measurement", nrows=2, sharex=True, layout="constrained"
+def _fit_groups(
+    sums: NDArray[np.float64], cfg: ConditionalPhaseHeraldedCfg
+) -> tuple[CountQuadratures, CountQuadratures]:
+    """Return complete gg and corrected ee projections in actual spectator order."""
+    complete = complete_projections(
+        sums.sum(axis=(-4, -3, -2, -1)), cfg.reps * cfg.rounds
     )
-    title = f"Heralded conditional phase · {config.target.capitalize()} · herald (g,g)"
-    fig.suptitle(f"{title}\nWaiting for shots")
-    viewers = []
-    for b, ax in enumerate(fig.axes):
-        ax.set(title=f"Actual spectator {('g', 'e')[b]}", ylabel="Target P(e) − P(g)")
-        ax.xaxis.set_major_locator(MaxNLocator(nbins=5))
-        ax.ticklabel_format(useOffset=False)
-        viewers.append(live_errorbar(ax, num_lines=2))
-        for line, projection in zip(ax.lines, ("X", "Y"), strict=True):
-            line.set(label=f"{projection} ± shot SEM")
-    fig.legend(
-        *fig.axes[0].get_legend_handles_labels(), loc="outside lower center", ncols=2
+    gg = terminal_counts(sums, ("g", "g"))
+    # The ee herald reverses the target sigma and swaps the nominal I/Xπ spectator.
+    ee = terminal_counts(sums, ("e", "e"))[::-1]
+    return (
+        count_quadratures(gg, cfg.target).for_fit(complete),
+        count_quadratures(ee, cfg.target).for_fit(complete[::-1], sign=-1),
     )
-    fig.axes[-1].set_xlabel("Common CZ frequency (MHz)")
-    fig.show()
-
-    @plots.on_plot_thread
-    def update_view(sums: NDArray[np.float64]) -> tuple[Artist, ...]:
-        active = started_trains(sums)
-        if active.size == 0:
-            return ()
-        j = int(active[-1])
-        counts = terminal_counts(sums[j], ("g", "g"))
-        totals = counts.sum(axis=(-2, -1))
-        seen = totals[np.isfinite(totals)]
-        status = f"{len(active)}/{len(config.gate_count)} trains started"
-        if seen.size:
-            status += f" · {int(seen.min())}–{int(seen.max())} retained shots/point"
-        fig.suptitle(f"{title} · {config.gate_count[j]} CZ gates\n{status}")
-        values = qubit_sigma(counts, config.target)
-        sem = _projected_sem(counts, config.target)
-        return tuple(
-            artist
-            for b, viewer in enumerate(viewers)
-            for artist in viewer.set(frequencies, values[b], sem[b])
-        )
-
-    return update_view
 
 
 class ConditionalPhaseHeraldedExp(
@@ -264,8 +241,17 @@ class ConditionalPhaseHeraldedExp(
         """
         # 1. Use the common CZ frequency axis for every gate-count train.
         frequencies = sweep2array(config.frequency)
-        # 2. Track gg-heralded target X/Y sigma for both spectator preparations across frequency.
-        update_view = _start_live_view(context.plots, frequencies, config)
+        # 2. Show the joint conditional phase as frequency points acquire all trains.
+        gate_counts = np.array(config.gate_count, dtype=np.int64)
+        update_view = start_conditional_phase_live(
+            context.plots,
+            frequencies,
+            f"Heralded conditional phase · {config.target.capitalize()} · joint fit",
+            expected_shots=config.reps * config.rounds,
+            fit=lambda sums: fit_count_phase_slopes(
+                gate_counts, *_fit_groups(sums, config)
+            ),
+        )
 
         # 3. Sweep spectator/quadrature/frequency in hardware, with herald before each host-length CZ train.
         buffer = SignalBuffer(
@@ -346,7 +332,7 @@ class ConditionalPhaseHeraldedExp(
         buffer.trigger_update(flush=True)
         # 4. Preserve all herald classes and partial acquisitions on the spectator/quadrature/train/frequency axes.
         return ConditionalPhaseHeraldedResult(
-            np.array(config.gate_count, dtype=np.int64),
+            gate_counts,
             frequencies,
             np.moveaxis(buffer.array, 0, 2),
         )
@@ -384,79 +370,34 @@ class ConditionalPhaseHeraldedExp(
             raise ValueError(
                 "Expected spectator × quadrature × n × frequency × 3 × 3 counts"
             )
-        gg = terminal_counts(data.sums, ("g", "g"))
-        # ee starts the target in e (both sigma signs reverse); nominal I/Xπ
-        # now means actual spectator e/g. Reorder to actual g/e before sharing.
-        ee = terminal_counts(data.sums, ("e", "e"))[::-1]
-        gg_stats, ee_stats = (
-            count_quadratures(gg, cfg.target),
-            count_quadratures(ee, cfg.target),
-        )
-        # Check acquisition before herald selection; low/zero acceptance is not
-        # an incomplete round. ee uses the reversed actual-spectator order.
-        complete = np.isclose(
-            data.sums.sum(axis=(-4, -3, -2, -1)),
-            cfg.reps * cfg.rounds,
-            rtol=8 * np.finfo(float).eps,
-            atol=0,
-        )
-        gg_values, ee_values = (
-            np.where(complete, gg_stats.values, np.nan),
-            np.where(complete[::-1], -ee_stats.values, np.nan),
-        )
-        phases = (phase_points(gg_values), phase_points(ee_values))
-        quadratures = np.stack((gg_values, ee_values))
-        variances = np.stack((gg_stats.variances, ee_stats.variances))
-        phase_var = phase_variance(
-            quadratures[:, :, 0],
-            quadratures[:, :, 1],
-            variances[:, :, 0],
-            variances[:, :, 1],
-        )
-        retained = np.stack((gg_stats.acquired, ee_stats.acquired))
-        phase_sem = phase_display_sem(phase_var, retained[:, :, 0], retained[:, :, 1])
-        # 2. Share sign-corrected gg/ee slopes by actual spectator; retain gg-only comparison.
-        fitted = fit_phase_slopes(
-            data.gate_counts,
-            quadratures,
-            variances,
-            np.stack(
-                (
-                    np.where(complete, gg_stats.acquired, np.nan),
-                    np.where(complete[::-1], ee_stats.acquired, np.nan),
-                )
-            ),
-        )
-        gg_fitted = fit_phase_slopes(
-            data.gate_counts,
-            gg_values[None],
-            gg_stats.variances[None],
-            np.where(complete, gg_stats.acquired, np.nan)[None],
-        )
-        conditional = (fitted.slopes_deg[1] - fitted.slopes_deg[0] + 180) % 360 - 180
-        gg_conditional = (
-            gg_fitted.slopes_deg[1] - gg_fitted.slopes_deg[0] + 180
-        ) % 360 - 180
-        crossings = fitted_crossings(data.frequencies, conditional, fitted)
-        herald_matrix = herald_probabilities(data.sums)
-        answer = ConditionalPhaseHeraldedAnalysis(
-            crossings.frequencies_mhz[0] if crossings.reason is None else None,
-            crossings.reason,
+        gg_group, ee_group = _fit_groups(data.sums, cfg)
+        groups = (gg_group, ee_group)
+        phases = tuple(phase_points(group.values) for group in groups)
+        phase_sem = np.stack([quadrature_phase_sem(group) for group in groups])
+        # 2. Share the two groups' slopes and find the joint π crossing; keep the gg-only diagnostic.
+        fitted = fit_count_phase_slopes(data.gate_counts, *groups)
+        gg_fitted = fit_count_phase_slopes(data.gate_counts, gg_group)
+        crossings = fitted_crossings(
+            data.frequencies, conditional_phase_deg(fitted), fitted
         )
 
+        # 3. Use gg observations as the phase reference, with joint slopes and crossing.
+        plot_conditional_phase(
+            plots,
+            ConditionalPhaseScan(frequencies, data.gate_counts, fitted, crossings),
+            gg_group,
+            title=f"Heralded conditional phase · {cfg.target.capitalize()}",
+            reference_label="Herald gg",
+        )
+        gg = terminal_counts(data.sums, ("g", "g"))
+        ee = terminal_counts(data.sums, ("e", "e"))[::-1]
         active = set(started_trains(np.moveaxis(data.sums, 2, 0)))
-        if not active:
-            _, ax = plots.subplots(num="measurement", layout="constrained")
-            ax.set_axis_off()
-            ax.set_title(
-                f"Heralded conditional phase · {cfg.target.capitalize()} · herald (g,g)\nNo CZ trains started"
-            )
         order = sorted(
             range(len(data.gate_counts)), key=lambda j: (j in active, j), reverse=True
         )
         for sign_corrected, values, sem in (
-            (False, gg_stats.values, _projected_sem(gg, cfg.target)),
-            (True, -ee_stats.values, _projected_sem(ee, cfg.target)),
+            (False, qubit_sigma(gg, cfg.target), _projected_sem(gg, cfg.target)),
+            (True, -qubit_sigma(ee, cfg.target), _projected_sem(ee, cfg.target)),
         ):
             for j in order:
                 _plot_terminal_quadratures(
@@ -467,14 +408,6 @@ class ConditionalPhaseHeraldedExp(
                     sem[:, :, j],
                     sign_corrected_ee=sign_corrected,
                 )
-        _plot_phase_crossing(
-            plots,
-            frequencies,
-            cfg.target.capitalize(),
-            conditional,
-            crossings,
-            gg_conditional,
-        )
         _plot_slopes(plots, frequencies, cfg.target.capitalize(), fitted, gg_fitted)
         # Compare wrapped phase and contrast for each train, without pooling spectator preparations.
         for j, n in enumerate(data.gate_counts):
@@ -487,9 +420,14 @@ class ConditionalPhaseHeraldedExp(
                 phase_sem[:, :, j],
             )
 
-        _plot_herald_map(plots, data.gate_counts, data.frequencies, herald_matrix)
+        _plot_herald_map(
+            plots, data.gate_counts, data.frequencies, herald_probabilities(data.sums)
+        )
         # 4. Propose only the unique joint-fit pi crossing; retain the reason when it is unresolved.
-        return answer
+        return ConditionalPhaseHeraldedAnalysis(
+            crossings.frequencies_mhz[0] if crossings.reason is None else None,
+            crossings.reason,
+        )
 
 
 def _plot_herald_map(
@@ -554,53 +492,6 @@ def _plot_herald_map(
     )
 
 
-def _plot_phase_crossing(
-    plots: Plots,
-    xs: NDArray[np.float64],
-    target: str,
-    conditional: NDArray[np.float64],
-    crossings: PhaseCrossings,
-    gg_only: NDArray[np.float64],
-) -> None:
-    """Mark existing interpolated roots of the wrapped conditional phase."""
-    fig, ax = plots.subplots(num="phase", figsize=(7, 4.8), layout="constrained")
-    ax.plot(
-        *wrapped_phase_plot_data(xs, conditional),
-        ".-",
-        color="C0",
-        label="Joint (g,g)/(e,e)",
-    )
-    ax.plot(*wrapped_phase_plot_data(xs, gg_only), ".-", color="C1", label="(g,g) only")
-    ax.axhline(-180, color="0.45", linestyle="--", label="π modulo 360°")
-    ax.axhline(180, color="0.45", linestyle="--")
-    if crossings.frequencies_mhz:
-        ax.scatter(
-            crossings.frequencies_mhz,
-            np.full(len(crossings.frequencies_mhz), -180),
-            color="C3",
-            marker="x",
-            label="Interpolated crossing",
-        )
-    result = (
-        f"Selected π crossing = {crossings.frequencies_mhz[0]:.7g} MHz"
-        if crossings.reason is None
-        else "\n".join(
-            fill(reason, width=60) for reason in crossings.reason.split("; ")
-        )
-    )
-    ax.set(
-        xlabel="Common CZ frequency (MHz)",
-        ylabel="Conditional phase per gate (deg)",
-        title=result,
-    )
-    ax.xaxis.set_major_locator(MaxNLocator(nbins=5))
-    ax.ticklabel_format(useOffset=False)
-    if not (np.isfinite(conditional).any() or np.isfinite(gg_only).any()):
-        ax.set_xlim(xs[0], xs[-1])
-    ax.legend(loc="upper center", bbox_to_anchor=(0.5, -0.22), ncols=2)
-    fig.suptitle(f"Heralded conditional phase · {target} · π crossing")
-
-
 def _plot_slopes(
     plots: Plots,
     xs: NDArray[np.float64],
@@ -610,9 +501,27 @@ def _plot_slopes(
 ) -> None:
     """Compare spectator-resolved phase slopes, fit errors and residual quality."""
     fig, _ = plots.subplots(
-        num="slopes", nrows=2, sharex=True, figsize=(7, 6), layout="constrained"
+        num="slope_diagnostics",
+        nrows=3,
+        sharex=True,
+        figsize=(9, 8),
+        layout="constrained",
     )
-    ax, quality_ax = fig.axes
+    ax, quality_ax, comparison_ax = fig.axes
+    format_conditional_phase_axis(comparison_ax, xs)
+    comparison_ax.plot(
+        *conditional_phase_plot_data(xs, conditional_phase_deg(fitted)),
+        ".-",
+        color="C0",
+        label="Joint gg/ee",
+    )
+    comparison_ax.plot(
+        *conditional_phase_plot_data(xs, conditional_phase_deg(gg_only)),
+        "x-",
+        color="C1",
+        label="gg only",
+    )
+    comparison_ax.legend(loc="upper center", bbox_to_anchor=(0.5, -0.36), ncols=3)
     for b, state in enumerate(("g", "e")):
         for fit_group, marker, label in (
             (fitted, ".-", f"Joint spectator {state}"),
@@ -639,9 +548,7 @@ def _plot_slopes(
                 color=f"C{b}",
             )
     ax.set_ylabel("Phase slope (deg/gate)")
-    quality_ax.set(xlabel="Common CZ frequency (MHz)", ylabel="Reduced χ²")
-    quality_ax.xaxis.set_major_locator(MaxNLocator(nbins=5))
-    quality_ax.ticklabel_format(useOffset=False)
+    quality_ax.set_ylabel("Reduced χ²")
     if not (
         np.isfinite(fitted.slopes_deg).any() or np.isfinite(gg_only.slopes_deg).any()
     ):
@@ -649,8 +556,8 @@ def _plot_slopes(
     if not any(np.isfinite(line.get_ydata()).any() for line in quality_ax.lines):
         quality_ax.set_title("Reduced χ² unavailable")
         quality_ax.set_xlim(xs[0], xs[-1])
-    fig.legend(*ax.get_legend_handles_labels(), loc="outside lower center", ncols=2)
-    fig.suptitle(f"Heralded conditional phase · {target} · slope ± fit SE")
+    ax.legend(loc="upper center", bbox_to_anchor=(0.5, -0.03), ncols=2)
+    fig.suptitle(f"Heralded conditional phase · {target} · fit diagnostics")
 
 
 def _plot_phase_diagnostics(
