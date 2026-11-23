@@ -8,11 +8,16 @@ from numpy.typing import NDArray
 from pydantic import Field
 from pydantic.dataclasses import dataclass as pydantic_dataclass
 from zcu_tools.analysis.fitting.multi_decay import (
-    calc_lambdas,
+    ExcitedPopulationDecayAnalysis,
     fit_dual_transition_rates,
     model_func,
+    summarize_excited_population_decay,
 )
-from zcu_tools.analysis.shot_uncertainty import class_probability_covariance
+from zcu_tools.analysis.shot_uncertainty import (
+    class_probability_covariance,
+    corrected_population_sem,
+)
+from zcu_tools.analysis.singleshot import correct_populations
 from zcu_tools.cfg_model import ConfigBase, FieldMeta
 from zcu_tools.datafile import DataVariable
 from zcu_tools.experiment import AxesSpec, Experiment
@@ -35,12 +40,6 @@ from zcu_tools.program.v2 import (
 )
 
 from zcu_lab.v2.support import live_errorbar
-from zcu_lab.v2.support.singleshot.population_analysis import (
-    CLASSIFIED_FIGURE,
-    UNAVAILABLE_NOTICE,
-    ReadoutSeries,
-    circle_readout_series,
-)
 from zcu_lab.v2.support.singleshot.util import readout_confusion_matrix
 
 POPULATION_STATES = (0, 1, 2)
@@ -55,35 +54,6 @@ _PANELS = (
     ("With π pulse", "e", "tab:red"),
     ("With π pulse", "other", "tab:green"),
 )
-
-
-def _plot_classified_fractions(
-    plots: Plots, delays: NDArray[np.float64], series: ReadoutSeries
-) -> None:
-    fig, _ = plots.subplots(
-        num=CLASSIFIED_FIGURE, nrows=2, ncols=3, figsize=(10, 6), layout="constrained"
-    )
-    fig.suptitle(f"Single-shot T1 · qubit · classified fractions\n{UNAVAILABLE_NOTICE}")
-    for index, (ax, (branch, state, color)) in enumerate(
-        zip(fig.axes, _PANELS, strict=True)
-    ):
-        prep, outcome = divmod(index, 3)
-        ax.errorbar(
-            delays,
-            series.values[:, prep, outcome],
-            yerr=series.sem[:, prep, outcome],
-            fmt="o-",
-            markersize=3,
-            capsize=2,
-            color=color,
-            label="Data ± shot SEM",
-        )
-        ax.set(
-            xlabel="Free evolution time (µs)",
-            ylabel=f"Fraction ({state})",
-            title=branch,
-        )
-    fig.axes[2].legend(loc="best", fontsize=10)
 
 
 @dataclass(frozen=True)
@@ -329,14 +299,13 @@ class T1Exp(Experiment[T1Result, T1Cfg]):
         options: T1AnalyzeOptions,
         *,
         plots: Plots,
-    ) -> None:
-        """Plot both preparation populations, their joint fit, and its two decay times.
+    ) -> ExcitedPopulationDecayAnalysis:
+        """Plot both preparations and report T1, T1b and joint fit quality.
 
-        source supplies delay times in us and G/E/Other counts, normalized per row. Skip the first
-        options.skip points, optionally correct readout with the saved cfg classifier's
-        confusion matrix, and fit the two traces together. Publish the fit in
-        plots; fitting errors propagate. For an unsolvable correction, publish
-        only classified fractions without fitting.
+        source supplies delay times in µs and g/e/Other counts, normalized per row.
+        Skip the first options.skip points, optionally correct with the saved
+        confusion matrix, and fit the two traces together. Name the decay times by
+        their amplitudes in the e-prepared e population. Fitting errors propagate.
         """
         # 1. Select delays and correct measured G/E/Other populations.
         result = source.result
@@ -353,14 +322,12 @@ class T1Exp(Experiment[T1Result, T1Cfg]):
         lens = lens[skip:]
         populations = populations[skip:]
 
-        series = circle_readout_series(
-            populations, result.counts[skip:], confusion_matrix
+        classified = populations
+        populations = correct_populations(
+            classified, confusion_matrix, clip=False, fallback_on_nonfinite=True
         )
-        if series.correction_unavailable:
-            _plot_classified_fractions(plots, lens, series)
-            return
-
-        populations, sem = series.values, series.sem
+        confusion_matrix = None if populations is classified else confusion_matrix
+        sem = corrected_population_sem(result.counts[skip:], confusion_matrix)
 
         populations1 = populations[:, 0]  # init in g
         populations2 = populations[:, 1]  # init in e
@@ -368,10 +335,9 @@ class T1Exp(Experiment[T1Result, T1Cfg]):
         # 2. Fit shared transition rates from the two initial-state traces.
         fit_result = fit_dual_transition_rates(lens, populations1, populations2)
 
-        lambdas, _ = calc_lambdas(fit_result.rates)
-
-        t1 = 1.0 / lambdas[2]
-        t1_b = 1.0 / lambdas[1]
+        summary = summarize_excited_population_decay(
+            fit_result, populations1, populations2
+        )
 
         # 3. Render counted fractions and physical decay fit on matching panels.
         fig, _ = plots.subplots(
@@ -389,7 +355,7 @@ class T1Exp(Experiment[T1Result, T1Cfg]):
         diagnostics = fit_result.diagnostics
         fig.suptitle(
             f"{title}\n"
-            f"Relaxation times (short to long) = {t1:.3g}, {t1_b:.3g} µs · "
+            f"T1 = {summary.t1:.3g}, T1b = {summary.t1_b:.3g} µs · "
             f"Reduced χ² = {diagnostics.reduced_chi_square:.3g}"
         )
         dense_time = np.linspace(float(lens.min()), float(lens.max()), 250)
@@ -413,3 +379,5 @@ class T1Exp(Experiment[T1Result, T1Cfg]):
                 xlabel="Free evolution time (µs)", ylabel=f"P({state})", title=branch
             )
         fig.axes[2].legend(loc="best", fontsize=10)
+
+        return summary

@@ -1,7 +1,7 @@
 ---
 date: 2026-11-23
-status: active
-superseded_by: null
+status: superseded
+superseded_by: 2026-11-23-singular-matrix-as-absent.md
 related:
   - ../adr/0069-experiment-core-and-frontends.md
   - ../adr/0074-flat-readout-module.md

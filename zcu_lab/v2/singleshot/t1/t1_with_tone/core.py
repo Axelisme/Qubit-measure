@@ -8,11 +8,18 @@ from numpy.typing import NDArray
 from pydantic import Field
 from pydantic.dataclasses import dataclass as pydantic_dataclass
 from zcu_tools.analysis.fitting.multi_decay import (
-    calc_lambdas,
+    ExcitedPopulationDecayAnalysis as T1WithToneAnalysis,
+)
+from zcu_tools.analysis.fitting.multi_decay import (
     fit_dual_transition_rates,
     model_func,
+    summarize_excited_population_decay,
 )
-from zcu_tools.analysis.shot_uncertainty import class_probability_covariance
+from zcu_tools.analysis.shot_uncertainty import (
+    class_probability_covariance,
+    corrected_population_sem,
+)
+from zcu_tools.analysis.singleshot import correct_populations
 from zcu_tools.cfg_model import ConfigBase, FieldMeta
 from zcu_tools.datafile import DataVariable
 from zcu_tools.experiment import AxesSpec, Experiment
@@ -37,12 +44,6 @@ from zcu_tools.program.v2 import (
 )
 
 from zcu_lab.v2.support import live_errorbar
-from zcu_lab.v2.support.singleshot.population_analysis import (
-    CLASSIFIED_FIGURE,
-    UNAVAILABLE_NOTICE,
-    ReadoutSeries,
-    circle_readout_series,
-)
 
 POPULATION_STATES = (0, 1, 2)
 POPULATION_COUNT = len(POPULATION_STATES)
@@ -56,35 +57,6 @@ _PANELS = (
     ("With π pulse", "e", "tab:red"),
     ("With π pulse", "other", "tab:green"),
 )
-
-
-def _plot_classified_fractions(
-    plots: Plots, delays: NDArray[np.float64], series: ReadoutSeries
-) -> None:
-    fig, _ = plots.subplots(
-        num=CLASSIFIED_FIGURE, nrows=2, ncols=3, figsize=(10, 6), layout="constrained"
-    )
-    fig.suptitle(f"T1 with tone · qubit · classified fractions\n{UNAVAILABLE_NOTICE}")
-    for index, (ax, (branch, state, color)) in enumerate(
-        zip(fig.axes, _PANELS, strict=True)
-    ):
-        prep, outcome = divmod(index, 3)
-        ax.errorbar(
-            delays,
-            series.values[:, prep, outcome],
-            yerr=series.sem[:, prep, outcome],
-            fmt="o-",
-            markersize=3,
-            capsize=2,
-            color=color,
-            label="Data ± shot SEM",
-        )
-        ax.set(
-            xlabel="Probe exposure time (µs)",
-            ylabel=f"Fraction ({state})",
-            title=branch,
-        )
-    fig.axes[2].legend(loc="best", fontsize=10)
 
 
 @dataclass(frozen=True)
@@ -103,18 +75,6 @@ class T1WithToneResult:
 class T1WithToneAnalyzeOptions:
     confusion_matrix: NDArray[np.float64] | None = None
     skip: int = Field(default=0, ge=0)
-
-
-@dataclass(frozen=True)
-class T1WithToneAnalysis:
-    """Two model decay times under the probe tone, which can be equal.
-
-    t1: Shorter decay time in µs (1 / lambdas[2]).
-    t1_b: Longer decay time in µs (1 / lambdas[1]).
-    """
-
-    t1: float
-    t1_b: float
 
 
 def _sum_rounds(data: NDArray[np.float64]) -> NDArray[np.float64]:
@@ -383,13 +343,14 @@ class T1WithToneExp(Experiment[T1WithToneResult, T1WithToneCfg]):
         options: T1WithToneAnalyzeOptions,
         *,
         plots: Plots,
-    ) -> T1WithToneAnalysis | None:
+    ) -> T1WithToneAnalysis:
         """Fit transitions between G, E and Other during the applied probe tone.
 
         Normalize source counts per row after options.skip, optionally corrected by the
-        supplied confusion matrix. Fit both I/pi preparations together, return
-        the two decay times in us, and publish their population curves to plots.
-        For an unsolvable correction, publish only classified fractions and return None.
+        supplied confusion matrix read from the saved cfg. Fit both I/pi
+        preparations together and report the two times in µs, named by their
+        amplitudes in the e-prepared e population, and the joint fit quality.
+        Publish the population curves to plots.
         """
         # 1. Select durations and correct readout populations for both preparations.
         result = source.result
@@ -403,14 +364,12 @@ class T1WithToneExp(Experiment[T1WithToneResult, T1WithToneCfg]):
         lens = lens[skip:]
         populations = populations[skip:]
 
-        series = circle_readout_series(
-            populations, result.counts[skip:], confusion_matrix
+        classified = populations
+        populations = correct_populations(
+            classified, confusion_matrix, clip=False, fallback_on_nonfinite=True
         )
-        if series.correction_unavailable:
-            _plot_classified_fractions(plots, lens, series)
-            return None
-
-        populations, sem = series.values, series.sem
+        confusion_matrix = None if populations is classified else confusion_matrix
+        sem = corrected_population_sem(result.counts[skip:], confusion_matrix)
 
         populations1 = populations[:, 0]  # init in g
         populations2 = populations[:, 1]  # init in e
@@ -418,10 +377,9 @@ class T1WithToneExp(Experiment[T1WithToneResult, T1WithToneCfg]):
         # 2. Infer shared transition rates and their two decay times.
         fit_result = fit_dual_transition_rates(lens, populations1, populations2)
 
-        lambdas, _ = calc_lambdas(fit_result.rates)
-
-        t1 = 1.0 / lambdas[2]
-        t1_b = 1.0 / lambdas[1]
+        summary = summarize_excited_population_decay(
+            fit_result, populations1, populations2
+        )
 
         # 3. Render counted fractions and physical decay fit on matching panels.
         fig, _ = plots.subplots(
@@ -439,7 +397,7 @@ class T1WithToneExp(Experiment[T1WithToneResult, T1WithToneCfg]):
         diagnostics = fit_result.diagnostics
         fig.suptitle(
             f"{title}\n"
-            f"Relaxation times (short to long) = {t1:.3g}, {t1_b:.3g} µs · "
+            f"T1 = {summary.t1:.3g}, T1b = {summary.t1_b:.3g} µs · "
             f"Reduced χ² = {diagnostics.reduced_chi_square:.3g}"
         )
         dense_time = np.linspace(float(lens.min()), float(lens.max()), 250)
@@ -464,4 +422,4 @@ class T1WithToneExp(Experiment[T1WithToneResult, T1WithToneCfg]):
             )
         fig.axes[2].legend(loc="best", fontsize=10)
 
-        return T1WithToneAnalysis(t1=float(t1), t1_b=float(t1_b))
+        return summary

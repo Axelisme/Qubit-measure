@@ -16,12 +16,14 @@ Optional **Reset** → no drive for g preparation or **g↔e π pulse** for e �
 
 Live shows raw g/e/Other fractions. Analyze uses only the selected result's saved confusion matrix for correction; without it, it shows classified fractions. Other includes shots outside both circles or tied and is not an identified energy level. Compare the g- and e-prepared traces against the rate-model fit. Reduced χ² compares residual size with the assumed errors; check for systematic residuals before using the fitted times. Bars show one shot SEM from the retained counts at each delay, estimating the sampling uncertainty of the class probabilities. Analyze plots and fits the linear estimates without clipping them to [0, 1]. It propagates shot-count covariance with the saved calibration matrix treated as known. Fewer than two retained shots give no bar. The bars do not show fit errors or round-to-round variation.
 
-**Relaxation times (short to long)** lists the two model decay times in µs. Each is the inverse of the negative real part of a nonstationary mode's eigenvalue. The numbers are not separate lifetimes of the g and e preparations, and neither is singled out as qubit T₁. The times can be equal. For a complex-conjugate pair they describe the same e-folding time of the oscillation envelope.
+**T1** is the decay time of the mode with the larger absolute amplitude in the fitted e population for an ideal e preparation. **T1b** is the other mode's decay time. If the amplitudes are equal, Analyze uses the longer time for T1 and logs the tie. The times are not separate lifetimes for the two preparations. A complex-conjugate pair gives the same envelope decay time for both modes.
 
-If the saved matrix cannot produce finite corrected fractions, Analyze shows **Readout correction unavailable** and only the G/E/Other classified fractions from this Run, with shot SEM where available. These are counts after classification, before correction. There is no rate-model fit or decay time. When only a corrected bar is unavailable, the corrected point remains.
+If the saved matrix is singular or solving it gives a nonfinite value at a valid point, Analyze logs one warning and uses classified populations for the whole scan. Analyze still fits both preparations. An unavailable shot SEM bar does not by itself disable correction.
 
 ## Next step
 
-Check the last points of both preparations. If either trace is still changing, extend Stop and keep enough points near the early drop. This run does not write T₁ back. Older files without class counts cannot be converted on Load; acquire again.
+Check the last points of both preparations. If either trace is still changing, extend Stop and keep enough points near the early drop. Writeback proposes T1 in µs at `$qubit.t1`. Use Apply to store it.
+
+Older files without class counts cannot be converted on Load; acquire again.
 
 For general operations, see [`zcu_lab/v2/operator-workflow.md`](../../../operator-workflow.md).

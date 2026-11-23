@@ -219,6 +219,16 @@ Run 與 Analyze 的一維連續掃描，沒有擬合曲線時連接量測點，�
 
 **依據。** 2026-11-23，使用者：「B，這種投影方式應該作為慣例存在，沒有獨特理由就保持一致」。見[平均 IQ 圖的投影慣例](../discussions/2026-11-23-mean-iq-plot-projection.md)。原始問答未入庫。
 
+### 報告只寫本次做了什麼
+
+**規則。** Analyze 摘要與 recipe report 只填本次做過的處理。沒做讀出校正等步驟時，相應欄位為 null；異常原因記在 warning log。
+
+**例子。** STIRAP 沒校正時，`confusion_matrix`、`condition_number`、`minimum_singular_value` 都為 null。分類 f 峰另用 `classified_f_peak` 回報；`f_population_estimate` 只指校正結果。
+
+**邊界。** 只有程式讀者需要自動區分缺席、奇異或反解溢位等原因時，才加具名狀態欄。合法缺席不記壞矩陣警告。不要用 identity matrix、空 dict 或非有限 JSON 數字代替 null。
+
+**依據。** 2026-11-23，designer 問「沒有做校正時，只報本次做了什麼，壞矩陣的原因只記 log；需要自動稽核才把原因放進 report……有數值讀者需要區分 absent、singular、overflow 時，才加具名狀態，對嗎？」使用者答「邊界對」。見[讀出矩陣奇異就當作沒有矩陣](../discussions/2026-11-23-singular-matrix-as-absent.md)與[無校正的 Raman／STIRAP 分類圖與摘要](../discussions/2026-11-23-classified-raman-stirap-analysis.md)。原始問答未入庫。
+
 ### 三種分析生命週期
 
 - T1 提供同步 analyze，消費 explicit RunRecord 與 typed options。Notebook 成功後發布 AnalysisRecord；GUI 發布插件定義的 typed 分析輸出、來源與圖。

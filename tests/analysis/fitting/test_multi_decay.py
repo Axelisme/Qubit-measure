@@ -1,8 +1,11 @@
+import logging
+
 import matplotlib.pyplot as plt
 import numpy as np
 import pytest
 from zcu_tools.analysis.fitting.multi_decay import (
     TransitionRates,
+    excited_population_decay_times,
     fit_dual_transition_rates,
     fit_dual_with_vadality,
     fit_transition_rates,
@@ -47,6 +50,63 @@ def test_fit_dual_transition_rates_returns_named_global_result():
     assert result.fitted_populations2.shape == populations2.shape
     assert result.covariance.shape == (10, 10)
     assert result.shared_fit.parameter_names[:6] == TransitionRates.NAMES
+
+
+@pytest.mark.parametrize(
+    ("rates", "expected"),
+    [
+        # Symmetric rates: e->e weights are 1/2 at 1/6 µs and 1/6 at 1/12 µs.
+        (TransitionRates(1, 1, 4, 4, 4, 4), (1 / 6, 1 / 12)),
+        # Increase g<->e and reduce other links to exchange the mode lifetimes.
+        (TransitionRates(5, 5, 2, 2, 2, 2), (1 / 12, 1 / 6)),
+    ],
+    ids=["slow-dominant", "fast-dominant"],
+)
+def test_excited_population_decay_times_order_by_amplitude(rates, expected):
+    times = excited_population_decay_times(rates)
+
+    assert (times.t1, times.t1_b) == pytest.approx(expected)
+
+
+def test_equal_excited_population_amplitudes_choose_longer_and_log(caplog):
+    # e<->other with other->g: P(e | e) is the sum of two exponentials with
+    # coefficients 1/2 and rates 2 ± sqrt(2).
+    rates = TransitionRates(0, 0, 2, 1, 0, 1)
+    with caplog.at_level(logging.INFO, logger="zcu_tools.analysis.fitting.multi_decay"):
+        times = excited_population_decay_times(rates)
+
+    assert (times.t1, times.t1_b) == pytest.approx(
+        (1 / (2 - np.sqrt(2)), 1 / (2 + np.sqrt(2)))
+    )
+    (message,) = caplog.messages
+    assert "equal" in message.lower() and "longer" in message.lower()
+
+
+@pytest.mark.parametrize(
+    "rates",
+    [
+        TransitionRates(0, 0, 0, 0, 0, 0),
+        TransitionRates(1, 2, 0, 0, 0, 0),
+        TransitionRates(1, 0, 1, 0, 0, 0),  # Equal-rate one-way chain (Jordan block).
+    ],
+    ids=["no-transitions", "disconnected-other-state", "defective-chain"],
+)
+def test_excited_population_decay_times_requires_two_decaying_modes(
+    rates: TransitionRates,
+) -> None:
+    with pytest.raises(ValueError, match="two finite decaying modes"):
+        excited_population_decay_times(rates)
+
+
+def test_excited_population_decay_times_preserves_complex_mode_envelopes() -> None:
+    # g -> e -> other -> g at the same rate gives a complex-conjugate pair.
+    times = excited_population_decay_times(TransitionRates(1, 0, 1, 0, 0, 1))
+    assert (times.t1, times.t1_b) == pytest.approx((2 / 3, 2 / 3))
+
+
+def test_excited_population_decay_times_preserves_two_equal_real_modes() -> None:
+    times = excited_population_decay_times(TransitionRates(1, 1, 1, 1, 1, 1))
+    assert (times.t1, times.t1_b) == pytest.approx((1 / 3, 1 / 3))
 
 
 @pytest.mark.parametrize("dual", [False, True], ids=["single", "dual"])

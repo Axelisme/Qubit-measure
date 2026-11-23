@@ -34,14 +34,14 @@ status: accepted
 
 **規則。** Library readout module 擁有分類校準。Pulse readout 與 mux 的每筆 tone 都有可選 `classifier`，預設 `None`。Readout module 只保存，不在宣告或播放時分類。Spec、native cfg、library 與 `data.h5` 的 run cfg 都保留欄位，不升容器版本；校準不另建 experiment storage。分類取自 run 使用的 cfg，不查 live library。取數與結果保存見 [Shot sums 與 heralding](#shot-sums-與-heralding)。
 
-**例子。** 三態 reference 只用 acquired IQ 和 preparation labels 建立中心及 training confusion，並用既有的完整 module proposal／Apply 流程更新 Run 捕捉的 library 目標。只改 classifier，保留其他欄位與 child keys。Reference 與 centroid3 分類共用 `utils.shot_classification` 的最近中心規則。STIRAP 的 [delay](../../zcu_lab/v2/twotone/stirap/delay/guide.md)、[amplitude](../../zcu_lab/v2/twotone/stirap/amplitude/guide.md)、[detuning](../../zcu_lab/v2/twotone/stirap/detuning/guide.md) 與單頻 [g↔f Raman](../../zcu_lab/v2/twotone/raman_gf/guide.md) 都從 saved run cfg 取 centroid3。
+**例子。** 三態 reference 只用 acquired IQ 和 preparation labels 建立中心及 training confusion，並用既有的完整 module proposal／Apply 流程更新 Run 捕捉的 library 目標。只改 classifier，保留其他欄位與 child keys。Reference 與 centroid3 分類共用 `utils.shot_classification` 的最近中心規則。STIRAP 的 [delay](../../zcu_lab/v2/twotone/stirap/delay/guide.md)、[amplitude](../../zcu_lab/v2/twotone/stirap/amplitude/guide.md)、[detuning](../../zcu_lab/v2/twotone/stirap/detuning/guide.md) 與單頻 [g↔f Raman](../../zcu_lab/v2/twotone/raman_gf/guide.md) 在 Run 前都要求指定 ADC 有 centroid3 classifier。
 
 - 型別、矩陣方向與驗證、正規化 ADC 座標及複數編碼見 [cfg_model](../../lib/zcu_tools/cfg_model/README.md)。[Program 的 readout 契約](../../lib/zcu_tools/program/v2/modules/README.md#readout-configuration) 說明按 ADC 取校準與各模式的分類軸。Circle 的半徑邊界和等距算 other；linear 旋轉後實部等於 threshold 算 ground，大於才算 excited；centroid3 選 Euclidean 距離最近的中心，平手依 g/e/f 順序取第一個，沒有拒判區。f 不是 circle 的 other。
 - 單 qubit GE Primary 提案只有 circle 中心，Post 提案有中心、radius 與 matrix。兩者都是完整 module replacement，批次依 Primary→Post 接受，分開 Apply 則最後一次生效。Post→Primary 會回到只有中心。Mux GE 每個 phase 合成一個完整 proposal，只更新成功 tone 的 classifier 路徑。GE 的 Run slot、proposal builder 與 materialized 比對見 [[0008]]。
 
 **邊界。** 沒有捕捉的 library 目標，或非更新欄位與實測 readout 不符時，writeback 失敗，不建也不猜目標。這項比對只防止新校準寫到不同設定；已存 classifier 不附校準時的 readout 設定，改設定不清除它，取用時也不比對。改 readout 後，操作員重新做相應校準再 Apply：circle 做 singleshot GE 與 Post，centroid3 做三態 reference。舊條目沒有 classifier 時讀作 `None`，不讀寫 point 的 `readout_cal` 或搬用舊值。
 
-- Centroid3 consumer 遇到缺欄位、錯型或未知 ADC 就失敗，不退回 circle、不查 live library，也不讀 simulator truth。Training confusion 包含準備污染；correction 回到 preparation-label 座標，保留負值與大於 1 的結果，不代表 pure energy-state population 或 readout fidelity。
+- Raman 與上述三個 STIRAP 的 Analyze 讀保存的 g/e/f counts，不再分類。它們要求合法完整的 saved cfg，錯 classifier 型別或未知 ADC 仍拒絕。合法 cfg 缺 classifier 時只畫分類比例；矩陣奇異或把有效點解成非有限值時，記一筆 warning 後走相同路徑。兩階段都不退回 circle、不查 live library，也不讀 simulator truth。Training confusion 包含準備污染。成功校正回到 preparation-label 座標，保留負值與大於 1 的結果，不代表 pure energy-state population 或 readout fidelity。
 - 雙 qubit 分類實驗在 Run 前驗證兩個角色 tone 都有 circle 與 GE Post 的 radius，否則 cfg 驗證報錯。一般入口保存終端讀出的 9 類計數，獨立 heralded 入口保存含 herald 的 81 類計數。Result 存原 float64 總和，不存逐 shot IQ，也不在 Analyze 分類，見 [雙 qubit guide](../../zcu_lab/v2/two_qubit/guide.md)。Readout 的單 ADC circle lookup 不解讀 lab 角色。
 - T1 需要 other，不收 linear 或 centroid3。舊 cfg 沒有 classifier 時略過 confusion 修正。需要 radius 的 consumer 提示做 Post。其餘 singleshot population consumers 在取數時分類，confusion correction 只用 saved cfg。Amplitude／Length Rabi 保留單 ADC raw IQ 與聯合 fit；未校準只略過 live population preview。有效 fit 透過同一中立 builder 更新捕捉的 resonator readout，Pulse 改 `classifier`，單 tone Mux 改 `tones.0.classifier`，不支援多 tone 分析。Check 的 raw Run 不要求 classifier，Analyze 才從 saved cfg 要求 circle 與 radius，見 [Check guide](../../zcu_lab/v2/singleshot/check/guide.md)。
 
@@ -49,6 +49,7 @@ status: accepted
 - 2026-10-29，使用者提議「將center/radius/confusion matrix等資訊直接放到readout cfg裡的可選欄位中」，並說「module本身不利用，但可以自然綁定到對應的readout module上」。對 library 所有權與不搬舊值答「2A 3A 4同意」，對比對校準設定答「QC3我認為分類參數比對需求還不確定，先A」。見 [Singleshot 分類參數放進 readout cfg](../discussions/2026-10-29-readout-classifier.md)；其中早期取數與兩次 Apply 的說法不代表現行契約。
 - 2026-10-29，使用者對三態校準交接答「3A」；對沿用 QICK 的 float64 I/Q 分量答「我想推進Program設計一致性，選A」。Reducer 收 I/Q 分量，需要複數時自己轉換，`acquire_decimated` 不因這項選擇變更。原始討論未入庫，見 Git `9005d4ede`。同日提出的每 ADC processor、單一 payload 軸及框架取平均，在 2026-10-30 由 [shot-sums 裁決](#shot-sums-與-heralding) 取代。
 - 使用者 2026-11-18 過目分類軸等 agent 選擇時說「我大概看了一遍，基本上是没问题」，並說「并不算是裁决，而算是建议」。引用這些選擇時只作參考。原始討論未入庫，見 Git `1f4b16aa0`。
+- 2026-11-23，使用者對保存矩陣奇異答「0423矩陣奇異就不校正我接受，但還是可以提writeback，還有recipe接口本來就可以改，他是連動修改的」、「2矩陣奇異就跟沒矩陣一樣處理」；對 Raman／STIRAP 無校正的 Analyze 答「M1、邊界對，D」。Run 仍要求 centroid3；Analyze 只讀已分類 counts。見[讀出矩陣奇異就當作沒有矩陣](../discussions/2026-11-23-singular-matrix-as-absent.md)與[無校正的 Raman／STIRAP 分類圖與摘要](../discussions/2026-11-23-classified-raman-stirap-analysis.md)。
 
 ### 原生 QICK projection 的 readout 與 caller 分工
 

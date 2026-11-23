@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 from typing import Literal
 
 import numpy as np
@@ -10,14 +11,36 @@ from zcu_tools.program.v2 import TimelineProgramV2
 from zcu_tools.program.v2.modules.readout import (
     PulseReadoutCfg,
     ReadoutCfg,
+    centroid3_classifier,
     circle_classifier,
 )
+
+logger = logging.getLogger(__name__)
+
+
+def _usable_saved_matrix(
+    values: list[list[float]] | None,
+) -> NDArray[np.float64] | None:
+    if values is None:
+        return None
+    matrix = np.asarray(values, dtype=np.float64)
+    # A zero LU pivot indicates singularity for the transposed solve. Do
+    # not use det (which may underflow) or a rank/condition-number cutoff.
+    with np.errstate(over="ignore", invalid="ignore"):
+        sign, _ = np.linalg.slogdet(matrix.T)
+    if sign == 0:
+        logger.warning(
+            "Readout correction: skipping correction; singular confusion matrix"
+        )
+        return None
+    return matrix
 
 
 def readout_confusion_matrix(cfg: PulseReadoutCfg | None) -> NDArray[np.float64] | None:
     """Read saved single-qubit circle correction, never point calibration.
 
-    Missing historical cfg/classifier/matrix skips correction. Linear has no
+    Missing historical cfg/classifier/matrix skips correction. A singular saved
+    matrix logs a warning and is treated as missing. Linear has no
     other state and cannot correct a three-state population analysis.
     Pulse readout supplies the single ADC's classifier. Radius is only needed
     during acquisition.
@@ -31,8 +54,22 @@ def readout_confusion_matrix(cfg: PulseReadoutCfg | None) -> NDArray[np.float64]
         raise ValueError(
             "Population correction requires other; linear has only g/e states"
         )
-    matrix = classifier.confusion_matrix
-    return None if matrix is None else np.asarray(matrix, dtype=np.float64)
+    return _usable_saved_matrix(classifier.confusion_matrix)
+
+
+def centroid3_confusion_matrix(
+    cfg: PulseReadoutCfg, *, ro_ch: int
+) -> NDArray[np.float64] | None:
+    """Read optional saved g/e/f correction for already classified counts.
+
+    A declared ADC without a classifier has no matrix. A singular matrix warns
+    and is treated as absent. A wrong classifier type or unknown ADC still
+    raises ValueError. Run uses the strict centroid3_classifier instead.
+    """
+    if cfg.ro_ch == ro_ch and cfg.classifier is None:
+        return None
+    classifier = centroid3_classifier(cfg, ro_ch=ro_ch)
+    return _usable_saved_matrix(classifier.confusion_matrix)
 
 
 def rabi_preview_classifier(cfg: ReadoutCfg) -> CircleClassifier | None:

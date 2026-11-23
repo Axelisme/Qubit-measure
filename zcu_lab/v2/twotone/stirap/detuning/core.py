@@ -8,11 +8,7 @@ from typing import Annotated, ClassVar, Self
 import numpy as np
 from numpy.typing import NDArray
 from pydantic import Field, model_validator
-from zcu_tools.analysis.singleshot import (
-    Centroid3Summary,
-    analyze_centroid3_populations,
-    summarize_centroid3,
-)
+from zcu_tools.analysis.singleshot import Centroid3Summary
 from zcu_tools.cfg_model import ConfigBase, FieldMeta
 from zcu_tools.experiment import Experiment
 from zcu_tools.experiment.axes_spec import (
@@ -38,6 +34,10 @@ from zcu_tools.program.v2 import (
 from zcu_tools.program.v2.modules.readout import centroid3_classifier
 from zcu_tools.program.v2.modules.waveform import EnvelopeWaveformCfg
 
+from zcu_lab.v2.support.singleshot.centroid3_analysis import (
+    correct_saved_centroid3,
+)
+
 from .._population_peak import first_finite_peak
 from .._pulses import drive_pulse
 
@@ -60,16 +60,31 @@ class StirapDetuningResult:
 
 
 @dataclass(frozen=True)
-class StirapDetuningSummary(Centroid3Summary):
-    """Saved confusion diagnostics and the largest finite corrected f population.
+class StirapDetuningClassifiedPeak:
+    """Largest finite fraction of shots labeled f (0–1) and its sampled coordinates.
 
-    The population estimate is dimensionless and unclipped, not fidelity.
-    Peak coordinates are Pump and Stokes offsets from measured carriers (MHz). With no finite value, all peak fields are None.
+    The coordinates are Pump and Stokes detunings relative to the measured carriers (MHz).
+    """
+
+    f_label_fraction: float
+    pump_detuning_mhz: float
+    stokes_detuning_mhz: float
+
+
+@dataclass(frozen=True)
+class StirapDetuningSummary(Centroid3Summary):
+    """Applied matrix diagnostics and the sampled f peak.
+
+    f_population_estimate is an unclipped corrected fraction, not fidelity.
+    Its coordinates are Pump and Stokes detunings relative to the measured carriers (MHz). These fields are None without a
+    corrected peak. classified_f_peak is separate: only report it when no
+    correction was applied and a finite classified f fraction is available.
     """
 
     f_population_estimate: float | None
     pump_detuning_mhz: float | None
     stokes_detuning_mhz: float | None
+    classified_f_peak: StirapDetuningClassifiedPeak | None
 
 
 class StirapDetuningCfg(ConfigBase):
@@ -318,52 +333,53 @@ class StirapDetuningExp(Experiment[StirapDetuningResult, StirapDetuningCfg]):
         *,
         plots: Plots,
     ) -> StirapDetuningSummary:
-        """Normalize acquired counts and correct with the saved readout confusion.
+        """Plot saved g/e/f counts on the requested scan grid.
 
-        Require source.cfg and its saved ADC classifier; missing/wrong-type
-        calibration fails explicitly. No current Form, library or simulator
-        truth is consulted. Plot raw/unclipped corrected g/e/f fractions;
-        return training confusion diagnostics and the corrected f peak. Plot
-        requested scan coordinates; preparation-label estimates are not fidelity.
-        Incomplete/nonfinite or empty counts and singular confusion fail explicitly.
+        Require valid saved cfg and finite, nonempty counts with nonnegative
+        entries at every point.
+        Plot classified fractions only when no saved centroid3 correction
+        is usable. Otherwise also plot unclipped preparation-label estimates.
+        Return applied matrix diagnostics and the corrected or classified
+        sampled f peak, not fidelity. No live calibration is used.
         """
-        # 1. Recover g/e/f populations across detunings with the saved readout calibration.
         del options
         cfg = source.cfg
         if cfg is None:
             raise ValueError("STIRAP analysis requires the saved run readout cfg")
-        calibration = centroid3_classifier(cfg.readout, ro_ch=cfg.readout.ro_ch)
         counts = source.result.counts
-        if not np.isfinite(counts).all() or np.any(counts.sum(axis=-1) <= 0):
+        if (
+            not np.isfinite(counts).all()
+            or np.any(counts < 0)
+            or np.any(counts.sum(axis=-1) <= 0)
+        ):
             raise ValueError(
-                "STIRAP analysis requires finite, nonempty counts at every point"
+                "STIRAP detuning analysis requires finite, nonempty counts with nonnegative entries at every point"
             )
-        raw = counts / counts.sum(axis=-1, keepdims=True)
-        result = analyze_centroid3_populations(raw, calibration)
-        # 2. Compare raw and confusion-corrected transfer maps for all three labels.
+        classified = counts / counts.sum(axis=-1, keepdims=True)
+        corrected, confusion = correct_saved_centroid3(cfg.readout, classified)
+        series = (
+            [(classified, "Classified")]
+            if corrected is None
+            else [(classified, "Measured"), (corrected, "Corrected")]
+        )
+        f_values = series[-1][0][..., 2]
+        peak = first_finite_peak(f_values)
+        peak_value = pump_detuning_mhz = stokes_detuning_mhz = None
+        if peak is not None:
+            stokes_index, pump_index = divmod(peak, f_values.shape[1])
+            peak_value = float(f_values.flat[peak])
+            pump_detuning_mhz = float(source.result.x_values[pump_index])
+            stokes_detuning_mhz = float(source.result.y_values[stokes_index])
+
         figure, _ = plots.subplots(
             num="fit",
-            nrows=2,
+            nrows=len(series),
             ncols=len(STATE_LABELS),
             figsize=(11, 7),
             layout="constrained",
         )
-
-        corrected = result.corrected_populations
-        corrected_f = corrected[..., 2]
-        peak = first_finite_peak(corrected_f)
-        pump_detuning_mhz = stokes_detuning_mhz = None
-        if peak is not None:
-            stokes_index, pump_index = divmod(peak, corrected_f.shape[1])
-            pump_detuning_mhz = float(source.result.x_values[pump_index])
-            stokes_detuning_mhz = float(source.result.y_values[stokes_index])
         axes = figure.axes
-        for row, (values, label) in enumerate(
-            (
-                (result.raw_populations, "Measured"),
-                (corrected, "Corrected"),
-            )
-        ):
+        for row, (values, label) in enumerate(series):
             for column, state in enumerate(STATE_LABELS):
                 ax = axes[row * len(STATE_LABELS) + column]
                 ax.grid(False)
@@ -379,38 +395,47 @@ class StirapDetuningExp(Experiment[StirapDetuningResult, StirapDetuningCfg]):
                     ylabel="Stokes detuning (MHz)",
                     title=f"{label} {state} label",
                 )
-        confusion = summarize_centroid3(result)
-        headline = (
-            "STIRAP detuning · g → f · preparation-label fractions\n"
-            f"Readout condition number: {confusion.condition_number:.3g} · "
-            f"Minimum singular value: {confusion.minimum_singular_value:.3g}"
-        )
+        if corrected is None:
+            headline = "STIRAP detuning · g → f · classified populations"
+        else:
+            condition = confusion.condition_number
+            minimum = confusion.minimum_singular_value
+            condition_text = "unavailable" if condition is None else f"{condition:.3g}"
+            minimum_text = "unavailable" if minimum is None else f"{minimum:.3g}"
+            headline = (
+                "STIRAP detuning · g → f · preparation-label fractions\n"
+                f"Readout condition number: {condition_text} · Minimum singular value: {minimum_text}"
+            )
+        classified_peak = None
         if (
-            peak is not None
+            peak_value is not None
             and pump_detuning_mhz is not None
             and stokes_detuning_mhz is not None
         ):
-            axes[5].plot(
+            axes[-1].plot(
                 pump_detuning_mhz,
                 stokes_detuning_mhz,
                 "x",
                 color="black",
                 markeredgewidth=2,
             )
+            basis = "classified" if corrected is None else "corrected"
             headline += (
-                f"\nPeak corrected f fraction = {corrected_f.flat[peak]:.3f} · "
+                f"\nPeak {basis} f fraction = {peak_value:.3f} · "
                 f"Pump = {pump_detuning_mhz:.4g} MHz · Stokes = {stokes_detuning_mhz:.4g} MHz"
             )
+            if corrected is None:
+                classified_peak = StirapDetuningClassifiedPeak(
+                    peak_value, pump_detuning_mhz, stokes_detuning_mhz
+                )
         figure.suptitle(headline)
         figure.show()
-
         return StirapDetuningSummary(
             confusion_matrix=confusion.confusion_matrix,
             condition_number=confusion.condition_number,
             minimum_singular_value=confusion.minimum_singular_value,
-            f_population_estimate=(
-                None if peak is None else float(corrected_f.flat[peak])
-            ),
-            pump_detuning_mhz=pump_detuning_mhz,
-            stokes_detuning_mhz=stokes_detuning_mhz,
+            f_population_estimate=peak_value if corrected is not None else None,
+            pump_detuning_mhz=pump_detuning_mhz if corrected is not None else None,
+            stokes_detuning_mhz=stokes_detuning_mhz if corrected is not None else None,
+            classified_f_peak=classified_peak,
         )

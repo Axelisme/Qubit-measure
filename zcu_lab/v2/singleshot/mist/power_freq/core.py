@@ -292,14 +292,16 @@ class FreqPowerExp(Experiment[FreqPowerResult, FreqPowerCfg]):
                 "Acquire a new run."
             )
 
-        populations = correct_populations(populations, options.confusion_matrix)
+        corrected = correct_populations(
+            populations, options.confusion_matrix, fallback_on_nonfinite=True
+        )
 
         fig, _ = plots.subplots(
             num="fit", ncols=3, figsize=(11, 4), layout="constrained"
         )
         quantity = (
             "classified populations"
-            if options.confusion_matrix is None
+            if corrected is populations
             else "readout-corrected populations"
         )
         fig.suptitle(f"MIST gain–frequency map · qubit · {quantity}")
@@ -314,6 +316,6 @@ class FreqPowerExp(Experiment[FreqPowerResult, FreqPowerCfg]):
             ax.grid(False)
             ax.set_facecolor("0.9")
             (image,) = live_heatmap(ax, uniform=False).set(
-                gains, freqs, populations[..., index]
+                gains, freqs, corrected[..., index]
             )
             fig.colorbar(image, ax=ax)

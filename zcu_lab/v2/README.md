@@ -76,8 +76,9 @@ AC Stark spectroscopy 的 [core.py](twotone/ac_stark/core.py) 對應 `twotone/ac
 Singleshot GE 與 mux GE 的混淆矩陣求解由 `zcu_tools.analysis.singleshot` 擁有。
 兩個 core 在 Analyze 都啟用 [共用 GE 診斷](../../lib/zcu_tools/experiment/README.md#ge-模型診斷)。擬合成功時，Single 發布 `diagnostic`，mux 以原始 tone 序號發布 `diagnostic_i`；各 core 仍另外產生 Fit 圖。
 各實驗的 `core.py` 自行選擇分析資料並繪製分類圖，數值擬合工具由 `zcu_tools.analysis.fitting` 擁有。
-跨實驗的 row mapping 在 [support/singleshot/util.py](support/singleshot/util.py)，
-mux IQ 平均轉換在 [support/mux.py](support/mux.py)，
+已分類 counts 的 saved-matrix reader 與跨實驗 row mapping 在 [support/singleshot/util.py](support/singleshot/util.py)。
+Raman／STIRAP 共用已分類 counts 的[可選校正](support/singleshot/centroid3_analysis.py)，各 core 自己繪圖並回傳摘要。
+Mux IQ 平均轉換在 [support/mux.py](support/mux.py)，
 AC Stark／CKP 的連續共振中心擷取在 [support/resonance.py](support/resonance.py)。
 兩個 GE core 各自排 Post 版面，並用 [support/singleshot/classification_plot.py](support/singleshot/classification_plot.py) 畫分類色的密度、疊分類線與中心，再將兩格準備圖的 I/Q 範圍對齊。
 Two-qubit chevron／constructive phase 各自在 `run()` 寫出序列，

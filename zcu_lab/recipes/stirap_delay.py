@@ -14,7 +14,10 @@ from zcu_tools.mcp.measure.recipe_api import (
     report_number,
 )
 
-from zcu_lab.v2.twotone.stirap.delay.core import StirapDelaySummary
+from zcu_lab.v2.twotone.stirap.delay.core import (
+    StirapDelayClassifiedPeak,
+    StirapDelaySummary,
+)
 
 
 class StirapDelayInputs(RecipeInputs):
@@ -77,7 +80,7 @@ class StirapDelayInputs(RecipeInputs):
 
 
 class StirapDelayReport(RecipeReport):
-    """Saved readout diagnostics and the peak within the measured scan grid."""
+    """Applied readout diagnostics and a sampled f peak on one population basis."""
 
     f_population_estimate: float | None = Field(
         default=None,
@@ -88,13 +91,18 @@ class StirapDelayReport(RecipeReport):
         description="Stokes lead in µs at the grid peak; null when unavailable.",
     )
 
+    classified_f_peak: StirapDelayClassifiedPeak | None = Field(
+        default=None,
+        description="Largest sampled fraction of shots labeled f (0–1) and its coordinates; null if corrected or unavailable.",
+    )
+
     condition_number: float | None = Field(
         default=None,
-        description="Saved confusion 2-norm condition number; null if analysis was cancelled.",
+        description="2-norm condition number of the applied readout matrix; null without correction or if unrepresentable.",
     )
     minimum_singular_value: float | None = Field(
         default=None,
-        description="Saved confusion minimum singular value; null if analysis was cancelled.",
+        description="Smallest singular value of the applied readout matrix; null without correction.",
     )
 
 
@@ -143,6 +151,7 @@ async def stirap_delay(
             return StirapDelayReport(analysis_failure=analysis.reason)
         return StirapDelayReport(
             f_population_estimate=analysis.result.f_population_estimate,
+            classified_f_peak=analysis.result.classified_f_peak,
             stokes_lead_us=analysis.result.stokes_lead_us,
             condition_number=report_number(analysis.result.condition_number),
             minimum_singular_value=report_number(

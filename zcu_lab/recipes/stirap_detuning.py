@@ -14,7 +14,10 @@ from zcu_tools.mcp.measure.recipe_api import (
     report_number,
 )
 
-from zcu_lab.v2.twotone.stirap.detuning.core import StirapDetuningSummary
+from zcu_lab.v2.twotone.stirap.detuning.core import (
+    StirapDetuningClassifiedPeak,
+    StirapDetuningSummary,
+)
 
 
 class StirapDetuningInputs(RecipeInputs):
@@ -98,7 +101,7 @@ class StirapDetuningInputs(RecipeInputs):
 
 
 class StirapDetuningReport(RecipeReport):
-    """Saved readout diagnostics and the peak within the measured scan grid."""
+    """Applied readout diagnostics and a sampled f peak on one population basis."""
 
     f_population_estimate: float | None = Field(
         default=None,
@@ -113,13 +116,18 @@ class StirapDetuningReport(RecipeReport):
         description="Stokes offset from the measured carrier in MHz at the grid peak; null when unavailable.",
     )
 
+    classified_f_peak: StirapDetuningClassifiedPeak | None = Field(
+        default=None,
+        description="Largest sampled fraction of shots labeled f (0–1) and its coordinates; null if corrected or unavailable.",
+    )
+
     condition_number: float | None = Field(
         default=None,
-        description="Saved training confusion matrix 2-norm condition number; null if analysis failed.",
+        description="2-norm condition number of the applied readout matrix; null without correction or if unrepresentable.",
     )
     minimum_singular_value: float | None = Field(
         default=None,
-        description="Saved training confusion matrix minimum singular value; null if analysis failed.",
+        description="Smallest singular value of the applied readout matrix; null without correction.",
     )
 
 
@@ -183,6 +191,7 @@ async def stirap_detuning(
             return StirapDetuningReport(analysis_failure=analysis.reason)
         return StirapDetuningReport(
             f_population_estimate=analysis.result.f_population_estimate,
+            classified_f_peak=analysis.result.classified_f_peak,
             pump_detuning_mhz=analysis.result.pump_detuning_mhz,
             stokes_detuning_mhz=analysis.result.stokes_detuning_mhz,
             condition_number=report_number(analysis.result.condition_number),

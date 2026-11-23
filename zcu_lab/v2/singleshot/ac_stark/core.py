@@ -328,12 +328,14 @@ class AcStarkExp(Experiment[AcStarkResult, AcStarkCfg]):
             gains = gains[valid_indices]
             populations = populations[valid_indices]
 
-        populations = correct_populations(populations, confusion_matrix)
+        corrected = correct_populations(
+            populations, confusion_matrix, fallback_on_nonfinite=True
+        )
 
         # 2. Subtract the off-peak baseline and extract one resonance per gain.
         contrast = (
-            np.abs(minus_background(populations[..., 0]))
-            + np.abs(minus_background(populations[..., 1]))
+            np.abs(minus_background(corrected[..., 0]))
+            + np.abs(minus_background(corrected[..., 1]))
         ) / 2
         s_gains, s_freqs = get_resonance_freq(gains, freqs, contrast)
         gains2 = gains**2
@@ -355,9 +357,9 @@ class AcStarkExp(Experiment[AcStarkResult, AcStarkCfg]):
             plots,
             gains,
             freqs,
-            populations,
+            corrected,
             xlabel="Cavity Stark gain (a.u.)",
-            corrected=confusion_matrix is not None,
+            corrected=corrected is not populations,
         )
         fig, ax = plots.subplots(num="fit", layout="constrained")
         heatmap = live_heatmap(ax, uniform=False)

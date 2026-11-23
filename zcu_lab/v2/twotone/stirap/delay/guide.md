@@ -18,7 +18,9 @@ See [`zcu_lab/v2/operator-workflow.md`](../../../operator-workflow.md) for the s
 
 ## Read the plots
 
-Live shows measured g/e/f fractions versus requested Stokes lead in µs; unfinished points stay blank. Analyze skips unfinished or empty points and plots measured and corrected fractions in separate panels, using the Run's saved calibration. The corrected values can lie outside [0, 1].
+Live shows measured g/e/f fractions versus requested Stokes lead in µs; unfinished points stay blank. Analyze skips unfinished or empty points and rejects a scan with no completed points. It requires valid saved cfg and rejects a wrong classifier type. With a usable saved matrix, it plots measured and corrected fractions in separate panels. Corrected values can lie outside [0, 1].
+
+If the saved cfg lacks a classifier, Analyze only shows **classified populations**. A singular matrix or a nonfinite solve at a valid point logs one warning and uses that same view.
 
 One bar is one shot SEM. For measured fraction p from N > 1 retained shots, SEM is √[p(1−p)/(N−1)]. The corrected panel propagates the retained shots' three-label count covariance with the saved calibration matrix treated as known. The bars do not show fit errors or shot or round spread. Missing, empty or single-shot points have no bar.
 
@@ -26,6 +28,6 @@ A large matrix condition number or small minimum singular value means the correc
 
 ## Next step
 
-The dotted marker is the largest finite sampled corrected f, not a global optimum. Ties use the first acquired point; no finite point yields no peak. Choose a region of high corrected f and low e. If the marker is at the +0.10 µs endpoint, extend that endpoint while retaining the original overlap, then repeat. No writeback is proposed.
+The dotted marker is the largest finite sampled f value on the displayed basis, not a global optimum. Ties use the first acquired point; no finite point yields no peak. Without correction, the recipe reports this point as `classified_f_peak` with its f label fraction and Stokes lead. It leaves the corrected peak and its lead null. If the marker is at the +0.10 µs endpoint, extend that endpoint while retaining the original overlap, then repeat. No writeback is proposed.
 
 For `stirap_delay`, null waveform or **Readout** selectors fail during selection, before overrides. Null channels, shots or relax delay leaves a blank; required blanks after overrides fail readiness before Run. Missing centroid3 blocks acquisition. A completed Run can still save if Analyze fails.

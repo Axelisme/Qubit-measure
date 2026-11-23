@@ -1,7 +1,7 @@
 ---
 date: 2026-11-23
-status: active
-superseded_by: null
+status: superseded
+superseded_by: 2026-11-23-singleshot-t1-amplitude-naming.md
 related:
   - ../adr/0069-experiment-core-and-frontends.md#呈現規範
   - ../adr/0071-coherence-units.md#pair-lifetime-與-manifold-model-t1

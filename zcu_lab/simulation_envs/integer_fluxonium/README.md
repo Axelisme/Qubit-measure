@@ -128,8 +128,9 @@ or arb waveforms. Each waveform supplies its own duration.
 
 Complete spectroscopy in the order above before entering their carriers.
 Apply the acquired reference readout, then open the STIRAP/Raman tab or choose Defaults there so the
-next Run captures it. Analysis uses that Run's saved centroid3 readout, not a
-later library edit. Missing inputs remain Invalid instead of using model values.
+next Run captures it. Run requires centroid3. Analyze only uses that Run's
+saved calibration. A saved scan with valid cfg and counts can show classified
+fractions even without a usable matrix. Missing Run inputs stay Invalid.
 
 MCP provides `stirap_delay`, `stirap_amplitude`, `stirap_detuning` and
 `raman_gf`, each with Run, Analyze and Save. Each STIRAP recipe opens its own
