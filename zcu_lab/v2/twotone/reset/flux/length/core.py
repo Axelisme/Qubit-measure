@@ -39,6 +39,10 @@ from zcu_tools.program.v2 import (
 
 from zcu_lab.v2.support import live_errorbar
 from zcu_lab.v2.twotone.reset._projection import principal_iq_direction
+from zcu_lab.v2.twotone.reset.flux._diagnostics import (
+    flux_ratio_sem,
+    plot_flux_ratio_residual,
+)
 
 
 @dataclass(frozen=True)
@@ -363,12 +367,13 @@ class LengthExp(Experiment[LengthResult, LengthCfg]):
             if residual[i] <= options.epsilon
             and np.all(residual[valid & (lengths > lengths[i])] <= options.epsilon)
         ]
-        selected = float(np.min(lengths[qualifying])) if qualifying else None
+        selected_index = min(qualifying, key=lambda i: lengths[i], default=None)
+        index = None if selected_index is None else int(selected_index)
 
         # 3. Show the measured branches alongside the derived diagnostics.
-        outcome = LengthAnalysis(selected_length=selected, epsilon=options.epsilon)
-        self._plot_result(plots, result, ratio, residual, outcome)
-        return outcome
+        self._plot_result(plots, result, ratio, residual, index, options.epsilon)
+        selected = None if index is None else float(lengths[index])
+        return LengthAnalysis(selected_length=selected, epsilon=options.epsilon)
 
     def _plot_result(
         self,
@@ -376,9 +381,10 @@ class LengthExp(Experiment[LengthResult, LengthCfg]):
         result: LengthResult,
         ratio: NDArray[np.float64],
         residual: NDArray[np.float64],
-        selection: LengthAnalysis,
+        selected_index: int | None,
+        epsilon: float,
     ) -> None:
-        """Plot I and Q with shot SEM and the unchanged residual selection."""
+        """Plot I/Q and derived diagnostics with shot SEM."""
         lengths, signals = result.lengths, result.signals
         fig, _ = plots.subplots(
             num="fit",
@@ -413,21 +419,27 @@ class LengthExp(Experiment[LengthResult, LengthCfg]):
         q_ax.set_ylabel(_Q_LABEL)
         i_ax.legend(loc="lower center", bbox_to_anchor=(0.5, 1.01), ncols=2)
 
-        ratio_ax.plot(lengths, ratio, ".-")
+        ratio_sem = (
+            None
+            if result.iq_moments is None
+            else flux_ratio_sem(signals, result.iq_moments, ratio)
+        )
+        plot_flux_ratio_residual(
+            (ratio_ax, residual_ax), lengths, ratio, residual, ratio_sem, selected_index
+        )
         ratio_ax.set(xlabel=_XLABEL, ylabel="Contrast ratio r (a.u.)")
-        residual_ax.plot(lengths, residual, ".-")
         residual_ax.set(xlabel=_XLABEL, ylabel="Residual with p₀ ≈ 0 (a.u.)")
         residual_ax.axhline(
-            selection.epsilon,
+            epsilon,
             color="gray",
             linestyle=":",
-            label=f"Residual limit = {selection.epsilon:.3g} a.u.",
+            label=f"Residual limit = {epsilon:.3g} a.u.",
         )
         residual_ax.legend(loc="upper center", bbox_to_anchor=(0.5, -0.20))
-        selected = selection.selected_length
-        if selected is None:
+        if selected_index is None:
             residual_ax.set_title("No qualifying duration")
         else:
+            selected = float(lengths[selected_index])
             residual_ax.set_title(f"Selected duration = {selected:.6g} µs")
             for ax in fig.axes:
                 ax.axvline(selected, color="gray", linestyle="--")
