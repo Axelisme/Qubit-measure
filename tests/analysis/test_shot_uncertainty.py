@@ -40,6 +40,17 @@ def test_independent_iq_sem_combines_groups_with_pointwise_gradients() -> None:
     np.testing.assert_allclose(sem, [5.0, np.nan, np.nan])
 
 
+def test_propagated_iq_sem_keeps_large_finite_projection() -> None:
+    # Shots ±(sqrt(5e307), sqrt(5e307)) project to ±sqrt(2e308) with I+Q.
+    # The squared projection sum overflows, but the two-shot SEM is finite.
+    moments = np.array([[[2.0, 0, 0, 1e308, 1e308, 1e308]]])
+    sem = shot_uncertainty.propagated_iq_shot_sem(
+        moments, gradients=np.array([[1 + 1j]])
+    )
+
+    np.testing.assert_allclose(sem, [np.sqrt(2.0) * 1e154], rtol=1e-14)
+
+
 def test_iq_sem_rejects_weights_with_extra_point_axes() -> None:
     moments = np.array([[2.0, 3, 4, 9, 12, 16]])
     with pytest.raises(ValueError, match="broadcast"):

@@ -10,6 +10,10 @@ logger = logging.getLogger(__name__)
 _ROUNDING_RTOL = 16 * np.finfo(np.float64).eps
 
 
+class IQCovarianceError(ValueError):
+    """Finite IQ sums cannot support a covariance or its projection."""
+
+
 def _validate_counts(counts: NDArray[np.float64] | NDArray[np.int64]) -> None:
     finite = counts[~np.isnan(counts)]
     if (
@@ -38,12 +42,12 @@ def _validate_centered_iq(
         centered_q = qq - q_mean_term
         centered_cross = iq - cross_mean_term
     if np.isinf([centered_i, centered_q, centered_cross]).any():
-        raise ValueError("centered IQ moments overflow float64")
+        raise IQCovarianceError("centered IQ moments overflow float64")
 
     i_tol = _ROUNDING_RTOL * np.maximum(np.abs(ii), i_mean_term)
     q_tol = _ROUNDING_RTOL * np.maximum(np.abs(qq), q_mean_term)
     if np.any(centered_i < -i_tol) or np.any(centered_q < -q_tol):
-        raise ValueError("IQ moments give a negative centered sum of squares")
+        raise IQCovarianceError("IQ moments give a negative centered sum of squares")
 
     cross_tol = _ROUNDING_RTOL * np.maximum(np.abs(iq), np.abs(cross_mean_term))
     # Allow rounding in each difference, including when a variance rounds to zero.
@@ -53,7 +57,32 @@ def _validate_centered_iq(
     with np.errstate(over="ignore"):
         cross_bound = i_bound * q_bound
     if np.any(np.abs(centered_cross) - cross_bound > cross_tol):
-        raise ValueError("centered IQ cross sum exceeds the covariance bound")
+        raise IQCovarianceError("centered IQ cross sum exceeds the covariance bound")
+
+
+def _project_iq_sem(
+    moments: NDArray[np.float64],
+    n: NDArray[np.float64],
+    a: NDArray[np.float64],
+    b: NDArray[np.float64],
+) -> NDArray[np.float64]:
+    """Project validated sums; return NaN on overflow, reject negative variance."""
+    _, i, q, ii, iq, qq = np.moveaxis(moments, -1, 0)
+    with np.errstate(over="ignore", invalid="ignore"):
+        total = a * i + b * q
+        i_term = a * (a * ii)
+        iq_term = 2 * (a * (b * iq))
+        q_term = b * (b * qq)
+        mean_term = total * (total / n)
+        centered = i_term + iq_term + q_term - mean_term
+    centered = np.where(np.isfinite(centered), centered, np.nan)
+    # Cancellation can expose rounding of any of the four subtracted terms.
+    scale = np.maximum.reduce(
+        [np.abs(i_term), np.abs(iq_term), np.abs(q_term), mean_term]
+    )
+    if np.any(centered < -_ROUNDING_RTOL * scale):
+        raise IQCovarianceError("IQ moments give a negative centered sum of squares")
+    return np.asarray(np.sqrt(np.maximum(centered, 0)) / np.sqrt(n) / np.sqrt(n - 1))
 
 
 def iq_shot_sem(
@@ -72,11 +101,11 @@ def iq_shot_sem(
     divided by sqrt(N).
     Fewer than two retained shots or NaN moments leave the error undefined
     (NaN). A rounding-scale negative centered sum of squares is clipped to zero.
-    Invalid shape, nonfinite weights, invalid counts, or infinite moments
-    raise ValueError. At defined points, both centered sums of squares and the
-    centered cross sum must describe a valid covariance up to rounding, even
-    outside the projection direction. Invalid covariance or overflow raises
-    ValueError.
+    Invalid shape, nonfinite weights, invalid counts, infinite moments or
+    negative squared sums at defined points raise ValueError. At defined points,
+    the centered moments must describe a valid covariance up to rounding, even
+    outside the projection direction. Inconsistent centered moments or
+    overflow that prevents estimation raise IQCovarianceError (a ValueError).
     """
     if moments.shape[-1:] != (6,):
         raise ValueError("IQ moments must have shape (..., 6)")
@@ -96,24 +125,26 @@ def iq_shot_sem(
     if np.isinf(moments).any():
         raise ValueError("IQ moments must not be infinite")
     defined = (n >= 2) & ~np.isnan(moments).any(axis=-1)
+    if np.any(defined & ((ii < 0) | (qq < 0))):
+        raise ValueError("IQ squared sums must be nonnegative")
     n = np.where(defined, n, np.nan)
     _validate_centered_iq(n, i, q, ii, iq, qq)
-    with np.errstate(over="ignore", invalid="ignore"):
-        total = a * i + b * q
-        i_term = a * (a * ii)
-        iq_term = 2 * (a * (b * iq))
-        q_term = b * (b * qq)
-        mean_term = total * (total / n)
-        centered = i_term + iq_term + q_term - mean_term
-    if np.any(defined & ~np.isfinite(centered)):
-        raise ValueError("IQ projection overflows finite moments")
-    # Cancellation can expose rounding of any of the four subtracted terms.
-    scale = np.maximum.reduce(
-        [np.abs(i_term), np.abs(iq_term), np.abs(q_term), mean_term]
-    )
-    if np.any(centered < -_ROUNDING_RTOL * scale):
-        raise ValueError("IQ moments give a negative centered sum of squares")
-    return np.asarray(np.sqrt(np.maximum(centered, 0)) / np.sqrt(n) / np.sqrt(n - 1))
+    sem = _project_iq_sem(moments, n, a, b)
+    overflow = defined & ~np.isfinite(sem)
+    if np.any(overflow):
+        # Scale only overflowing projections by a power of two. With weights
+        # at most 1/4, even near-limit sums have headroom for the cross term.
+        a, b = a[overflow], b[overflow]
+        _, exponent = np.frexp(np.maximum(np.maximum(np.abs(a), np.abs(b)), 1.0))
+        shift = exponent + 1
+        scaled = _project_iq_sem(
+            moments[overflow], n[overflow], np.ldexp(a, -shift), np.ldexp(b, -shift)
+        )
+        with np.errstate(over="ignore"):
+            sem[overflow] = np.ldexp(scaled, shift)
+        if not np.isfinite(sem[overflow]).all():
+            raise IQCovarianceError("IQ projection overflows finite moments")
+    return sem
 
 
 def propagated_iq_shot_sem(
@@ -129,7 +160,8 @@ def propagated_iq_shot_sem(
     each group and add independent group variances. Return ``(...)`` in the
     observable's units. Missing group statistics leave the point's SEM NaN.
     Nonfinite gradients or propagated SEM leave NaN and log a warning.
-    Mismatched shapes or invalid shot statistics raise ValueError.
+    Invalid input raises ValueError; covariance estimation failures raise
+    IQCovarianceError, as in iq_shot_sem.
     """
     if (
         moments.ndim < 2

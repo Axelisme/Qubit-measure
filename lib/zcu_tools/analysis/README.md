@@ -45,6 +45,8 @@ I/Q 投影權重可固定或逐點給定。`propagated_iq_shot_sem` 用逐點梯
 兩者都以實際保留的 shots 為分母，不估計輪間散布、RB 的 seed 散布或擬合參數誤差。
 少於兩發或缺測（NaN）時，該點誤差未定。負、非整數、無窮計數及其加總溢位會報錯。
 IQ 估計也拒絕無窮矩、超過捨入誤差的負中心平方和，以及不可能的中心共變異，不受選定的投影方向影響。
+有限矩無法支持共變異估計時會拋出 `IQCovarianceError`（`ValueError` 的子型別）。
+`readout_metrics.first_read_contrast` 只隔離這類逐點估計失敗：保留 R1 均值距離，省略該點 SEM 並記錄原因。
 
 ## 雙讀出矩的自校準
 

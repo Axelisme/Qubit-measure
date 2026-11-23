@@ -16,9 +16,12 @@ Optional **Reset** → preparation I/π → R1 off/on → wait → middle I/π �
 
 1. **First-read contrast** is |IQπ−IQI| at R1 on and middle I, against gain (a.u.).
    Live reports accumulated shots per branch and gain. Analyze marks a manual selection with a red dashed line.
-   Both views show ±1 shot SEM from the same shots as each point, including projection noise but not drift between rounds.
+   Both views show ±1 shot SEM from the same shots as each point.
+   The moments pool retained shots across rounds and include projection noise.
+   Changes in the round means contribute to the pooled scatter; the bars neither estimate nor remove drift.
    The bars use first-order propagation of the two IQ means.
    A point with missing shot moments, fewer than two shots in either branch, or zero contrast has no bar.
+   If the saved sums cannot support a covariance estimate, the point keeps its contrast without the bar.
 2. **R1-on calibration** compares modeled g/e SNR, Gaussian separation Fsep and thermal excitation. Fsep is not measured assignment fidelity, and the population is not a classified shot fraction.
 3. **State disturbance** compares R1 on (circles) with off (squares), using the same R1-on calibration. Retention S and QND Q describe state memory between reads; Q includes relaxation between R1 and R2. The up/down flips and middle π miss are model estimates. Compare mean-based R1-on retention with covariance retention; a mismatch can flag model failure but does not identify leakage.
 4. **Separation versus QND** plots one point per gain, colored by gain. The red frontier and starred table rows are the points for which no other measured gain improves one metric without worsening the other. Use the table for the exact gain.

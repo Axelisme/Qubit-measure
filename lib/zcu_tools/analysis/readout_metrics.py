@@ -1,12 +1,15 @@
 """Two-state readout separation and QND estimates from repeated IQ moments."""
 
+import logging
 from dataclasses import dataclass
 from math import erfc, nan, sqrt
 
 import numpy as np
 from numpy.typing import NDArray
 
-from .shot_uncertainty import iq_shot_sem
+from .shot_uncertainty import IQCovarianceError, propagated_iq_shot_sem
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -76,9 +79,13 @@ def first_read_contrast(sums: NDArray[np.float64]) -> FirstReadContrast:
     readout_metrics. Only the R1 moments in branches 2 and 6 are used. Either
     missing mean leaves the distance undefined; a zero distance, fewer than
     two shots per branch, or missing moments leave the SEM undefined, not zero.
-    The SEM uses first-order propagation for independent preparation branches
-    and does not include drift between rounds. Invalid input shape raises
-    ValueError; at finite positive distances IQ moments must satisfy iq_shot_sem.
+    The SEM propagates the shot covariance of independent preparation branches
+    to first order. Their moments pool retained shots across rounds and include
+    projection noise. Round-to-round mean changes contribute to the scatter;
+    the SEM does not estimate or remove drift. At a finite positive distance,
+    a covariance estimation failure leaves that SEM undefined and logs the
+    point and cause. Invalid input shapes or invalid shot statistics (such as
+    invalid counts at finite positive distances) still raise ValueError.
     """
     if sums.shape[1:] != (8, 6, 6):
         raise ValueError(f"sums must have shape (Npoint, 8, 6, 6), got {sums.shape}")
@@ -91,8 +98,15 @@ def first_read_contrast(sums: NDArray[np.float64]) -> FirstReadContrast:
     for index in np.flatnonzero(np.isfinite(values) & (values > 0)):
         # The gradient of the norm is the unit vector along the IQ difference.
         i, q = difference[index] / values[index]
-        branch_sem = iq_shot_sem(moments[index], direction=(float(i), float(q)))
-        sem[index] = np.hypot.reduce(branch_sem)
+        direction = complex(i, q)
+        try:
+            sem[index] = propagated_iq_shot_sem(
+                moments[index], gradients=np.array([-direction, direction])
+            )
+        except IQCovarianceError as error:
+            logger.warning(
+                "Omitting first-read contrast SEM at point %d: %s", index, error
+            )
     return FirstReadContrast(values, sem)
 
 

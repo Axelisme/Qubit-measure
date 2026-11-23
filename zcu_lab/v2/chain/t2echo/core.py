@@ -342,7 +342,7 @@ class ChainT2EchoExp(Experiment[CycleSums, ChainT2EchoCfg]):
                 delays,
                 grid,
                 view,
-                ("Measured · all 65 numbers", "Joint model"),
+                ("Measured · all 65 numbers ± pooled SEM", "Joint model"),
             )
             fig.suptitle(f"{title}\n{diagnostics}")
             if delays.min() <= t2 <= delays.max():

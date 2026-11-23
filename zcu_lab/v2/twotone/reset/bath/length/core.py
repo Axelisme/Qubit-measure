@@ -63,6 +63,16 @@ def bathreset_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64
 def _contrast_sem(
     signals: NDArray[np.complex128], moments: NDArray[np.float64]
 ) -> NDArray[np.float64]:
+    """Return first-order contrast shot SEM in a.u.² for each duration.
+
+    signals has shape (duration, phase) in IQ a.u., with phases 0, 90, 180,
+    and 270 degrees in that order. moments has shape (duration, phase, 6)
+    in [N, ΣI, ΣQ, ΣI², ΣIQ, ΣQ²] order for the same branches. Missing
+    moments or fewer than two shots in any branch give NaN. The caller
+    draws no bar where the contrast itself is missing. Nonfinite
+    gradients give NaN and log a warning. Invalid shapes or shot
+    statistics raise ValueError. Neither input is modified.
+    """
     # Phase branches use separate shots. The gradient of |S₂−S₀|² with
     # respect to S₂'s I/Q is 2(S₂−S₀), and with respect to S₀ it is its negative.
     with np.errstate(over="ignore", invalid="ignore"):

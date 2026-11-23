@@ -390,7 +390,7 @@ class ChainT2RamseyExp(Experiment[CycleSums, ChainT2RamseyCfg]):
                 delays,
                 grid,
                 view,
-                ("Measured · all 65 numbers", "Joint model"),
+                ("Measured · all 65 numbers ± pooled SEM", "Joint model"),
             )
             if delays.min() <= t2 <= delays.max():
                 projection_ax.axvline(

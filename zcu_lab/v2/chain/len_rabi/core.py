@@ -306,7 +306,7 @@ class ChainLenRabiExp(Experiment[CycleSums, ChainLenRabiCfg]):
                 lengths,
                 grid,
                 view,
-                ("Measured · all 65 numbers", "Joint model"),
+                ("Measured · all 65 numbers ± pooled SEM", "Joint model"),
             )
             if lengths.min() <= pi_len <= lengths.max():
                 projection_ax.axvline(

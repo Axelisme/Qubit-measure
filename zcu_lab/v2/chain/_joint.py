@@ -56,8 +56,8 @@ def plot_joint_residuals(
 
     axis and grid are the acquired and model coordinates used to compute view.
     view contains both projections in pooled point-mean SEM units.
-    labels gives the base legend text for measured points and the fitted curve,
-    in that order. The caller owns all axis labels and figure layout.
+    labels gives the complete legend text for measured points and the fitted
+    curve, in that order. The caller owns the text and figure layout (ADR-0069).
     """
     (measured,) = projection_ax.plot(
         axis,
@@ -65,7 +65,7 @@ def plot_joint_residuals(
         linestyle="none",
         marker="o",
         markersize=4,
-        label=f"{labels[0]} ± pooled SEM",
+        label=labels[0],
     )
     # The view whitens with the saved pooled shot covariance, then projects
     # onto a unit vector and scales by sqrt(cycle count). One pooled SEM

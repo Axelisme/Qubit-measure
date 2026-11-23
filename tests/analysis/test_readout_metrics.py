@@ -110,6 +110,48 @@ def test_first_read_contrast_propagates_independent_shot_means_per_gain() -> Non
     )
 
 
+def test_first_read_contrast_omits_only_sem_lost_to_rounding(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    sums = np.zeros((3, 8, 6, 6))
+    # Valid per-round shot sums; sequential addition loses the consistency
+    # needed to infer the scatter of the constant I=1/3 shots at the middle gain.
+    shot = np.array([1.0, 1 / 3, 0, (1 / 3) ** 2, 0, 0])
+    for _ in range(12_200):
+        sums[1, 2, :, 0] += shot
+    sums[1, 6, :, 0] = [12_200, 0, 0, 0, 0, 0]
+    # Neighboring gains have I shots (0, 0) versus (1, 3) and (2, 8).
+    sums[::2, 2, :, 0] = [2, 0, 0, 0, 0, 0]
+    sums[0, 6, :, 0] = [2, 4, 0, 10, 0, 0]
+    sums[2, 6, :, 0] = [2, 10, 0, 68, 0, 0]
+
+    result = first_read_contrast(sums)
+
+    np.testing.assert_allclose(result.values, [2, sums[1, 2, 1, 0] / 12_200, 5])
+    np.testing.assert_allclose(result.sem, [1, np.nan, 3])
+    assert "point 1" in caplog.text
+    assert "negative centered sum of squares" in caplog.text
+
+
+@pytest.mark.parametrize(
+    "moments, reason",
+    [
+        ([-2, 4, 0, 8, 0, 0], "count"),
+        ([2, 4, 0, np.inf, 0, 0], "infinite"),
+        ([2, 4, 0, -8, 0, 0], "squared sums"),
+    ],
+)
+def test_first_read_contrast_does_not_hide_invalid_input(
+    moments: list[float], reason: str
+) -> None:
+    sums = np.zeros((1, 8, 6, 6))
+    sums[0, 2, :, 0] = [2, 0, 0, 0, 0, 0]
+    sums[0, 6, :, 0] = moments
+
+    with pytest.raises(ValueError, match=reason):
+        first_read_contrast(sums)
+
+
 def test_empty_point_has_no_metrics() -> None:
     result = readout_metrics(np.zeros((8, 6, 6), dtype=np.float64))
     assert np.all(np.isnan(astuple(result)))

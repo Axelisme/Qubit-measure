@@ -310,7 +310,7 @@ class ChainT1Exp(Experiment[CycleSums, ChainT1Cfg]):
                 delays,
                 grid,
                 view,
-                ("Measured · all 65 numbers", "Joint model"),
+                ("Measured · all 65 numbers ± pooled SEM", "Joint model"),
             )
             joint_fig.align_ylabels()
             projection_ax.set_ylabel("Joint projection\n(SEM units)")
