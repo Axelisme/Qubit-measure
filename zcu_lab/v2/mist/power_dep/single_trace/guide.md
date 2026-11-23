@@ -14,7 +14,7 @@ For inline **Resonator probe** and **Readout** (`Inline: readout/pulse`), set ea
 
 For each pulse, **Pre-delay** runs from that segment's start to RF playback. **Waveform › Length** sets how long the RF plays, and **Post-delay** starts when playback ends. In **Readout**, **RO ch** selects the ADC and **RO length** sets its integration time. Set **Trig offset** so the ADC window opens when the readout signal reaches it. Measure that offset from the readout segment's start, not from the end of **Pre-delay**. **Post-delay** does not extend the ADC window. All these times are in µs.
 
-Only the probe gain is swept. **Readout › Gain** stays fixed. The terminal **Classifier**, including its centers, radius and confusion matrix, does not contribute to the mean IQ or set the Ground IQ reference.
+Only the probe gain is swept. **Readout › Gain** stays fixed. Use one readout ADC with one integration per shot and no shot mask. The terminal **Classifier**, including its centers, radius and confusion matrix, does not contribute to the mean IQ or set the Ground IQ reference.
 
 ## Set the gain window
 
@@ -32,7 +32,11 @@ Each point shows `|mean IQ at this gain − reference IQ|` in a.u. Subtract the 
 
 Live and default Analyze use the complex mean of the first 5% of gain points in scan order, rounded down with a minimum of one point. If that reference is missing, the plot does not substitute a later point. Live reports completed rounds and nominal shots per point. The Analyze summary identifies the source Run and its requested Reps × Rounds when its configuration is available.
 
-The plots have no shot-SEM bars. They show a distance **after** averaging the complex shots, not a mean of per-shot distances or a linear IQ projection. A per-shot standard deviation divided by √N does not give an error bar for this distance. Do not use a small displacement by itself to claim a signal above noise.
+Live updates the error bars after each round. The bars show one shot standard error, estimated by propagating the uncertainty of the mean IQ into the distance. They include projection noise from the retained shots but do not estimate drift between rounds. The scan-start reference uses those same data, so its uncertainty and its correlation with the scan points contribute to the bars. A reference you enter is treated as exact.
+
+The first-order estimate can be too small near zero displacement. At exactly zero, no radial direction is defined, so the bar uses the largest directional standard error of the IQ difference. Do not use a small displacement by itself to claim a signal above noise.
+
+A point needs at least two retained shots and complete IQ moments for a bar. If the moments cannot support a covariance estimate, Live and Analyze log the gain index and the reason. The plot keeps the finite distances and omits only the bars that need that covariance. If the scan-start reference is affected, the plot does not replace it. With a one-point reference and complete moments for at least two shots, the self-comparison bar stays zero: it does not depend on the shot covariance. A mean-only file still shows the distance without bars.
 
 Analyze controls use the source Run without taking new data:
 
@@ -40,7 +44,7 @@ Analyze controls use the source Run without taking new data:
 - **Excited IQ (optional y-limit):** supply a complex IQ in a.u. to set the upper y limit to `1.1 × |Excited IQ − reference IQ|`. This only changes the display; blank uses automatic limits.
 - **Photon number / gain squared:** set an independently calibrated AC Stark coefficient in photons per a.u.² to plot `mean photon number = coefficient × gain²` on x. Blank keeps gain on x.
 
-Reanalyzing a loaded mean-IQ trace uses the same reference rule and options; previously saved figures stay as they were.
+Native Save retains the IQ moments, so reanalyzing the loaded data with the same options reproduces the bars. Previously saved figures stay as they were. Labber export still contains only the mean IQ trace.
 
 ## Use the response
 

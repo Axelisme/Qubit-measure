@@ -110,15 +110,18 @@ def test_first_read_contrast_propagates_independent_shot_means_per_gain() -> Non
     )
 
 
-def test_first_read_contrast_omits_only_sem_lost_to_rounding(
-    caplog: pytest.LogCaptureFixture,
+@pytest.mark.parametrize("impossible_scatter", [False, True])
+def test_first_read_contrast_distinguishes_serial_rounding_from_bad_scatter(
+    caplog: pytest.LogCaptureFixture, *, impossible_scatter: bool
 ) -> None:
     sums = np.zeros((3, 8, 6, 6))
-    # Valid per-round shot sums; sequential addition loses the consistency
-    # needed to infer the scatter of the constant I=1/3 shots at the middle gain.
+    # These constant I=1/3 shots acquire a small negative centered sum only
+    # because the completed rounds are added serially in float64.
     shot = np.array([1.0, 1 / 3, 0, (1 / 3) ** 2, 0, 0])
     for _ in range(12_200):
         sums[1, 2, :, 0] += shot
+    if impossible_scatter:
+        sums[1, 2, 3, 0] = 0  # Nonzero mean but no raw sum of squares.
     sums[1, 6, :, 0] = [12_200, 0, 0, 0, 0, 0]
     # Neighboring gains have I shots (0, 0) versus (1, 3) and (2, 8).
     sums[::2, 2, :, 0] = [2, 0, 0, 0, 0, 0]
@@ -128,9 +131,17 @@ def test_first_read_contrast_omits_only_sem_lost_to_rounding(
     result = first_read_contrast(sums)
 
     np.testing.assert_allclose(result.values, [2, sums[1, 2, 1, 0] / 12_200, 5])
-    np.testing.assert_allclose(result.sem, [1, np.nan, 3])
-    assert "point 1" in caplog.text
-    assert "negative centered sum of squares" in caplog.text
+    np.testing.assert_allclose(result.sem, [1, np.nan if impossible_scatter else 0, 3])
+    warnings = [
+        record.getMessage()
+        for record in caplog.records
+        if record.name == "zcu_tools.analysis.readout_metrics"
+    ]
+    if impossible_scatter:
+        (warning,) = warnings
+        assert "point 1" in warning and "negative centered sum of squares" in warning
+    else:
+        assert not warnings
 
 
 @pytest.mark.parametrize(
