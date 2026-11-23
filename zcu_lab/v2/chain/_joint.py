@@ -1,4 +1,4 @@
-"""Scalar publication and unlabeled trace artists for K-cycle diagnostics."""
+"""Scalar publication and trace artists for K-cycle diagnostics."""
 
 from dataclasses import dataclass
 
@@ -52,23 +52,38 @@ def plot_joint_residuals(
     view: CycleResidualProjection,
     labels: tuple[str, str],
 ) -> None:
-    """Draw measured and fitted projections and measured-minus-fitted residual points.
+    """Draw the joint projection with pooled shot SEM and a ±1 SEM residual band.
 
     axis and grid are the acquired and model coordinates used to compute view.
-    labels gives the experiment's legend text for measured points and the fitted
-    curve, in that order. The caller owns all axis labels and figure layout.
+    view contains both projections in pooled point-mean SEM units.
+    labels gives the base legend text for measured points and the fitted curve,
+    in that order. The caller owns all axis labels and figure layout.
     """
-    projection_ax.plot(
+    (measured,) = projection_ax.plot(
         axis,
         view.measured_sigma,
         linestyle="none",
         marker="o",
         markersize=4,
-        label=labels[0],
+        label=f"{labels[0]} ± pooled SEM",
+    )
+    # The view whitens with the saved pooled shot covariance, then projects
+    # onto a unit vector and scales by sqrt(cycle count). One pooled SEM
+    # of the mean is therefore one unit on each panel's vertical scale.
+    projection_ax.errorbar(
+        axis,
+        view.measured_sigma,
+        yerr=1.0,
+        fmt="none",
+        ecolor=measured.get_color(),
+        elinewidth=1,
+        capsize=3,
+        zorder=measured.get_zorder() - 0.1,
     )
     projection_ax.plot(
         grid, view.model_sigma, linestyle="-", marker="none", label=labels[1]
     )
+    residual_ax.axhspan(-1.0, 1.0, color="0.9", linewidth=0, zorder=0)
     residual_ax.axhline(0, color="0.4", linewidth=1)
     residual_ax.plot(
         axis,
