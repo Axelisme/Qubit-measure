@@ -31,7 +31,11 @@ superseded_by: null
 
 ### 再用同基底配對計時
 
-改前是 `addd6c8fb57a55bf36742ec01a5a87e51ca55d1a`，改後是同基底帶狀候選 `0f5d83887126c14d7b9af1a21520df44aacb8b41`。兩側用同一份 block1 manifest，SHA-256 為 `931fa4f599f4db8dc82ac9363cb1068ac6f94ce9286e6e1baec34545bce57a1f`，seed 123，離線 FTF、`time_scale=0`。各側從獨立的空快取開始，按相同順序跑五場。每側各用一個 CPU worker、一個 native thread，不採樣。每場各一次完整 Run，以 11 個 Result 格為分母，不用 acquire 點數。下表是單次配對的每格 core 秒數。
+改前是 `addd6c8fb57a55bf36742ec01a5a87e51ca55d1a`，改後是同基底帶狀候選 `0f5d83887126c14d7b9af1a21520df44aacb8b41`。兩側用同一份第 1 塊普查（block1）manifest。原始 manifest 未入庫，SHA-256 `931fa4f599f4db8dc82ac9363cb1068ac6f94ce9286e6e1baec34545bce57a1f` 僅供辨認。
+
+五場掃描都設為 11 格。`mux/amp_rabi` 的 Q2 drive waveform 長度設為 0.42 µs。`mux/len_rabi` 的 Q1、Q2 長度掃描終點分別設為 0.84、0.42 µs。`twotone/rabi/len_rabi` 的長度掃描終點設為 0.84 µs。其餘沿用相同的 fixture 與 Form 設定。
+
+兩側皆用 seed 123、離線 FTF、`time_scale=0`。各側從獨立的空快取開始，按相同順序跑五場。每側各用一個 CPU worker、一個 native thread，不採樣。每場各一次完整 Run，以 11 個 Result 格為分母，不用 acquire 點數。下表是單次配對的每格 core 秒數。
 
 | 場景 | 改前 core s／格 | 改後 core s／格 |
 | --- | ---: | ---: |

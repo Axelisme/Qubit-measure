@@ -48,7 +48,7 @@ superseded_by: null
 ## Family 與 guard
 
 - 2026-11-24，[Shaped Sambe 的帶狀 Hermitian 全譜求解](./2026-11-24-banded-shaped-sambe.md)，`rejected`。用下帶儲存取代密集矩陣後，`chain/amp_rabi` 由 6.294 增至 8.912 core s／格（`addd6c8fb` → `0f5d83887`，同 block1 manifest、seed 123、單 worker，兩側批次從空快取開始，各一次完整 11 格 Run）。
-- 2026-11-24，[長時強驅動雙載波的內建波形路由](./2026-11-24-long-dual-carrier-builtins.md)，`paused`。既有 `common_frame` guard 拒收，保留直接積分。DP5(4) apply 合計 6.449438 CPU s（`593426c2f`，24 態 FTF、單 CPU worker、8 個 1000 ns π／強振幅不同載波雙線格各一次，共 10 個直接積分段，不含平台）。
+- 2026-11-24，[長時強驅動雙載波的內建波形路由](./2026-11-24-long-dual-carrier-builtins.md)，`paused`。先分類，再用 `inspect_dispatch` 確認目標段的預設路由只列 `dop853`，另行診斷 `common_frame` guard 才觀察到拒收（`32dfb53a5`）。DP5(4) apply 合計 6.449438 CPU s（`593426c2f`，24 態 FTF、單 CPU worker、8 個 1000 ns π／強振幅不同載波雙線格各一次，共 10 個直接積分段，不含平台）。
 
 - 2026-11-23，[Sampled multitone RWA 探針提早判死](./2026-11-23-sampled-rwa-probe-early-rejection.md)，`rejected`。中途超標就退出會誤拒端點合格的列。D=4 正例在 10% span 的密度差為 `2.117e-4`，高於 `1e-4` 門檻（`8cd18afcd`，1.5 ns 的單一 spot-edge probe）。
 - 2026-11-22，[讓被拒的 sampled span 改走 common-frame](./2026-11-22-sampled-span-common-frame.md)，`rejected`。強制放行和加入包絡斜率修正都比留在 DP5(4) 慢。強制放行 0.877 s，DP5(4) 0.782 s（`47fbcf5e8`，heralded RB 的 400 ns 雙 tone 末段，單列 apply 牆鐘）。
