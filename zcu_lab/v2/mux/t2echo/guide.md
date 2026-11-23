@@ -20,7 +20,7 @@ In `mux_t2echo`, omission retains settings. Null `participants` leaves a missing
 
 ## Read the plots
 
-Live `measurement_i` and Analyze `fit_i` use the original tone index `i`, not the participant-list row. Both show signed principal-axis mean IQ (a.u.), not population, against requested total echo delay. Live connects acquired points and tracks points and accumulated shots per point. Analyze omits the first requested point and draws a solid model line; the dotted line marks T2 echo within the fitted window. If the fit fails, Analyze connects the remaining points and shows the reason instead of a model. The plot uses the I axis when fewer than two points are available for the projection.
+Live `measurement_i` and Analyze `fit_i` use the original tone index `i`, not the participant-list row. Both plot **IQ projection (a.u.)** against requested total echo delay. This is the signed projection of mean IQ onto its principal axis, not a population. Live connects acquired points and tracks points and accumulated shots per point. Analyze omits the first requested point and draws a solid model line; the dotted line marks T2 echo within the fitted window. If the fit fails, Analyze connects the remaining points and shows the reason instead of a model. Each plot uses the I axis if fewer than two finite points are available for estimating the principal axis.
 
 Shot SEM bars show the expected error of each projected mean: the sample standard deviation of the same shots that gave that point, divided by the square root of their count. They are not single-shot scatter, round-to-round scatter or fit uncertainty. Fewer than two shots give no bar.
 

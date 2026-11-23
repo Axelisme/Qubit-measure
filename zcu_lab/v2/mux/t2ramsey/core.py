@@ -165,7 +165,7 @@ from zcu_lab.v2.support.mux_coherence_analysis import (
 )
 from zcu_lab.v2.support.mux_coherence_persistence import coherence_spec
 
-_IQ_LABEL = "Principal-axis mean IQ (a.u.)"
+_IQ_LABEL = "IQ projection (a.u.)"
 _DELAY_LABEL = "Requested free-evolution delay (µs)"
 
 
