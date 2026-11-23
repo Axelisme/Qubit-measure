@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Literal
 
@@ -38,16 +39,13 @@ class CountQuadratures:
     variances: NDArray[np.float64]
     acquired: NDArray[np.float64]
 
-    def for_fit(
-        self, complete: NDArray[np.bool_], *, sign: int = 1
-    ) -> CountQuadratures:
-        """Mask incomplete projections and multiply X/Y by the preparation sign.
+    def for_fit(self, complete: NDArray[np.bool_]) -> CountQuadratures:
+        """Mask X/Y and acquired shots with the matching completion array.
 
-        Complete is a matching boolean array. Sign is +1, or -1 for a group
-        with inverted target preparation. Variances and original inputs stay intact.
+        Variances and original inputs stay intact.
         """
         return CountQuadratures(
-            np.where(complete, sign * self.values, np.nan),
+            np.where(complete, self.values, np.nan),
             self.variances,
             np.where(complete, self.acquired, np.nan),
         )
@@ -86,8 +84,10 @@ def fit_count_phase_slopes(
 ) -> PhaseSlopeFit:
     """Fit one shared per-gate slope per spectator/frequency from masked groups.
 
-    Supply the integer CZ counts and at least one group, in observation order.
-    Groups must have the same shape. Preserve the fitter's SE and failure reasons.
+    Supply the int64 CZ counts and at least one group in observation order.
+    Each group's float64 values, variances and acquired shots must share the
+    shape (2, 2, len(n), Nf): spectator (g/e) × X/Y × n × frequency.
+    NaN acquired shots mark incomplete projections. Preserve fit SE and failure reasons.
     """
     return fit_phase_slopes(
         n,
@@ -104,6 +104,32 @@ def complete_projections(
     return np.isclose(shots, expected_shots, rtol=8 * np.finfo(float).eps, atol=0)
 
 
+def update_complete_frequency_phases(
+    sums: NDArray[np.float64],
+    expected_shots: int,
+    processed: NDArray[np.bool_],
+    phase_deg: NDArray[np.float64],
+    fit: Callable[[NDArray[np.float64]], PhaseSlopeFit],
+) -> NDArray[np.bool_]:
+    """Fit newly complete frequencies and return the per-projection completion mask.
+
+    Cumulative sums axes are n × spectator × X/Y × frequency × count classes.
+    Fit receives newly complete frequencies in spectator × X/Y × n × frequency
+    × count classes order. A frequency is complete when all its projections
+    have the expected shots. Update the caller's phase_deg and processed arrays
+    in place, once per frequency. No plot operation runs here.
+    """
+    nominal_shots = sums.sum(axis=tuple(range(4, sums.ndim)))
+    complete = complete_projections(nominal_shots, expected_shots)
+    added = complete.all(axis=(0, 1, 2)) & ~processed
+    if added.any():
+        phase_deg[added] = conditional_phase_deg(
+            fit(np.moveaxis(sums[:, :, :, added], 0, 2))
+        )
+        processed[added] = True
+    return complete
+
+
 def conditional_phase_deg(fit: PhaseSlopeFit) -> NDArray[np.float64]:
     """Return e minus g slope in degrees per CZ, in [-180,180) for crossing."""
     return (fit.slopes_deg[1] - fit.slopes_deg[0] + 180) % 360 - 180
@@ -118,6 +144,24 @@ def phase_near(
     stay NaN. This representation does not fit, smooth or fill measured data.
     """
     return reference_deg + (phase_deg - reference_deg + 180) % 360 - 180
+
+
+def reference_frequency_index(
+    frequencies: NDArray[np.float64],
+    phase_deg: NDArray[np.float64],
+    crossings: PhaseCrossings,
+) -> int:
+    """Index the sample nearest the selected root or the fitted phase nearest π.
+
+    Supply a nonempty MHz sweep and its aligned conditional phase in degrees.
+    Use the middle sample when no fitted phase is available.
+    """
+    if crossings.reason is None:
+        return int(np.argmin(np.abs(frequencies - crossings.frequencies_mhz[0])))
+    phase = phase_near(phase_deg, 180)
+    if np.isfinite(phase).any():
+        return int(np.nanargmin(np.abs(phase - 180)))
+    return len(frequencies) // 2
 
 
 def wrap_phase(degrees: float) -> float:

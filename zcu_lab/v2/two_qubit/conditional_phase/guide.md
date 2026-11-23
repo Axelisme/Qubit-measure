@@ -19,10 +19,10 @@ Each shot runs **optional Reset → spectator I/Xπ → target Xπ/2 → n two-l
 **Conditional phase** shows three panels in measurement order:
 
 1. **Bloch vectors** shows the target's measured X/Y vector for each gate count `n`, with separate spectator g and e series. Panels 1 and 2 use the measured frequency nearest the selected crossing. When no crossing is selected, they use the sample closest to 180° in fitted phase, or the middle sample if no fit is available.
-2. **Accumulated phase** lifts the measured angles onto the fitted line's 360° branch. A slope is the phase added by each CZ. Point bars are ±1 shot SEM; the legend reports slope ±1 fit SE.
+2. **Accumulated phase** lifts the measured angles onto the fitted line's 360° branch. A slope is the phase added by each CZ. Point bars are ±1 shot SEM. The legend reports the slope; see **Slope diagnostics** for its fit SE.
 3. **Conditional phase per CZ** subtracts the spectator-g slope from the spectator-e slope at each frequency. The 0–360° view puts π at 180°, away from the branch cut. The red × marks the interpolated crossing; the dotted vertical line marks the sampled frequency used in panels 1–2.
 
-**Live** shows panel 3 as the data arrive. A frequency contributes only when all planned spectator, X/Y and gate-count projections have their full Reps × Rounds and both slopes can be fitted. The title counts acquired frequencies and projections; an acquired frequency can still lack an identifiable phase. Hardware completes most or all frequencies together in a sweep, so points can appear as a batch after the last train.
+**Live** shows panel 3 for complete frequencies. The host runs one CZ gate count at a time. Each completed hardware round supplies the entire frequency axis for that CZ train. When the last train has all planned spectator and X/Y projections at full Reps × Rounds, the frequencies can appear as a batch. The title counts acquired frequencies and projections; a complete frequency still needs both fitted slopes to show a phase. The current Live curve does not support widening the frequency window or deciding to stop early during the sweep.
 
 ## Read phase and quadratures
 

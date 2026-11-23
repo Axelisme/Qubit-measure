@@ -76,7 +76,7 @@ async def two_qubit_local_z(
 ) -> LocalZReport:
     """Sweep CZ gate counts and fit one phase line in degrees for each role.
 
-    See [Phase and slope](../v2/two_qubit/local_z/guide.md#phase-與-slope).
+    See [How to read the plots](../v2/two_qubit/local_z/guide.md#怎麼讀圖).
     Set gate_count as a list of consecutive nonnegative integers. Omission
     keeps the Reset value; explicit null passes to the Form. Use overrides for
     pulses, readout and reset. Ask about the Primary correction pair only if

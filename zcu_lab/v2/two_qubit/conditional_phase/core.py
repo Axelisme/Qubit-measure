@@ -3,10 +3,13 @@
 from __future__ import annotations
 
 import logging
+from collections.abc import Callable
 from dataclasses import dataclass
+from textwrap import fill
 from typing import Annotated, ClassVar, Literal, Self
 
 import numpy as np
+from matplotlib.artist import Artist
 from matplotlib.ticker import MaxNLocator
 from numpy.typing import NDArray
 from pydantic import Field, model_validator
@@ -47,11 +50,17 @@ from .._phase import (
     count_quadratures,
     fit_count_phase_slopes,
     quadrature_phase_sem,
+    reference_frequency_index,
+    update_complete_frequency_phases,
 )
 from .._phase_plot import (
-    ConditionalPhaseScan,
-    plot_conditional_phase,
-    start_conditional_phase_live,
+    BlochSeries,
+    conditional_phase_plot_data,
+    format_conditional_phase_axis,
+    plot_accumulated_phase,
+    plot_bloch_vectors,
+    plot_conditional_phase_scan,
+    reference_phase_series,
     wrapped_phase_plot_data,
 )
 from .._readout import POINT_ALIAS_DESCRIPTION
@@ -354,6 +363,50 @@ def _plot_terminal_quadratures(
     fig.axes[-1].set_xlabel("Common CZ frequency (MHz)")
 
 
+def _start_live_view(
+    plots: Plots,
+    config: ConditionalPhaseCfg,
+    frequencies: NDArray[np.float64],
+    gate_counts: NDArray[np.int64],
+) -> Callable[[NDArray[np.float64]], None]:
+    """Present the conditional phase scan and return its count update callback."""
+    fig, ax = plots.subplots(num="conditional_phase", layout="constrained")
+    fig.suptitle(f"Conditional phase · {config.target.capitalize()}")
+    ax.set(xlabel="Common CZ frequency (MHz)", ylabel="Conditional phase per CZ (deg)")
+    format_conditional_phase_axis(ax, frequencies)
+    (curve,) = ax.plot([], [], ".-", color="C0", label="Spectator e minus g")
+    status = ax.set_title("Waiting for shots")
+    ax.legend(loc="upper center", bbox_to_anchor=(0.5, -0.16), ncols=2)
+    fig.show()
+
+    expected_shots = config.reps * config.rounds
+    processed = np.zeros(len(frequencies), dtype=bool)
+    phase_deg = np.full_like(frequencies, np.nan)
+
+    @plots.on_plot_thread
+    def render(payload: tuple[NDArray[np.float64], str]) -> tuple[Artist, ...]:
+        angles_deg, progress = payload
+        curve.set_data(*conditional_phase_plot_data(frequencies, angles_deg))
+        status.set_text(progress)
+        return curve, status
+
+    def update_view(sums: NDArray[np.float64]) -> None:
+        complete = update_complete_frequency_phases(
+            sums,
+            expected_shots,
+            processed,
+            phase_deg,
+            lambda sums: fit_count_phase_slopes(gate_counts, _fit_group(sums, config)),
+        )
+        progress = (
+            f"{np.count_nonzero(processed)}/{len(frequencies)} frequencies acquired\n"
+            f"{np.count_nonzero(complete)}/{complete.size} projections at {expected_shots} shots"
+        )
+        render((phase_deg, progress))
+
+    return update_view
+
+
 class ConditionalPhaseExp(Experiment[ConditionalPhaseResult, ConditionalPhaseCfg]):
     """Independent classified conditional phase experiment."""
 
@@ -420,15 +473,7 @@ class ConditionalPhaseExp(Experiment[ConditionalPhaseResult, ConditionalPhaseCfg
         frequencies = sweep2array(config.frequency)
         # 2. Show a conditional phase for each frequency with complete gate trains.
         gate_counts = np.array(config.gate_count, dtype=np.int64)
-        update_view = start_conditional_phase_live(
-            context.plots,
-            frequencies,
-            f"Conditional phase · {config.target.capitalize()}",
-            expected_shots=config.reps * config.rounds,
-            fit=lambda sums: fit_count_phase_slopes(
-                gate_counts, _fit_group(sums, config)
-            ),
-        )
+        update_view = _start_live_view(context.plots, config, frequencies, gate_counts)
 
         # 3. Rebuild each host gate train; sweep spectator, quadrature and frequency in hardware.
         buffer = SignalBuffer(
@@ -540,17 +585,58 @@ class ConditionalPhaseExp(Experiment[ConditionalPhaseResult, ConditionalPhaseCfg
         phase_sem = quadrature_phase_sem(observed)
         # 2. Fit count-weighted slopes and apply the existing crossing rule.
         fitted = fit_count_phase_slopes(data.gate_counts, observed)
-        crossings = fitted_crossings(
-            data.frequencies, conditional_phase_deg(fitted), fitted
-        )
+        conditional_deg = conditional_phase_deg(fitted)
+        crossings = fitted_crossings(data.frequencies, conditional_deg, fitted)
 
         # 3. Derive phase in the main figure; retain count and fit diagnostics separately.
-        plot_conditional_phase(
-            plots,
-            ConditionalPhaseScan(frequencies, data.gate_counts, fitted, crossings),
-            observed,
-            title=f"Conditional phase · {cfg.target.capitalize()}",
+        fig, _ = plots.subplots(
+            num="conditional_phase",
+            ncols=3,
+            gridspec_kw={"width_ratios": (1, 1.14, 1.25)},
+            figsize=(12, 9),
+            layout="constrained",
         )
+        bloch_ax, phase_ax, scan_ax = fig.axes
+        idx = reference_frequency_index(frequencies, conditional_deg, crossings)
+        sample = float(frequencies[idx])
+        fig.suptitle(
+            f"Conditional phase · {cfg.target.capitalize()}\n"
+            f"Measured sample: {sample:.3f} MHz for panels 1–2"
+        )
+        xy = observed.values[..., idx]
+        bloch_ax.set(
+            title="1 · Bloch vectors", xlabel="Target Bloch X", ylabel="Target Bloch Y"
+        )
+        plot_bloch_vectors(
+            bloch_ax,
+            data.gate_counts,
+            [BlochSeries("Spectator g", *xy[0]), BlochSeries("Spectator e", *xy[1])],
+        )
+        phase_ax.set(
+            title="2 · Accumulated phase",
+            xlabel="CZ gates, n (count)",
+            ylabel="Accumulated phase (deg)",
+        )
+        phase_series = reference_phase_series(
+            data.gate_counts, fitted, xy, phase_sem[..., idx], idx
+        )
+        plot_accumulated_phase(phase_ax, data.gate_counts, phase_series)
+        roots = crossings.frequencies_mhz
+        status = (
+            f"π crossing = {roots[0]:.3f} MHz\nWriteback proposal available"
+            if crossings.reason is None
+            else f"No writeback proposal\n{fill(crossings.reason, width=35)}"
+        )
+        scan_ax.set(
+            title=f"3 · Conditional phase per CZ\n{status}",
+            xlabel="Common CZ frequency (MHz)",
+            ylabel="Conditional phase per CZ (deg)",
+        )
+        plot_conditional_phase_scan(
+            scan_ax, frequencies, conditional_deg, sample, roots
+        )
+        for ax in fig.axes:
+            ax.legend(loc="upper center", bbox_to_anchor=(0.5, -0.13))
         _plot_train_projections(plots, data, cfg)
         _plot_slopes(plots, frequencies, cfg.target.capitalize(), fitted)
         # Compare wrapped phase and contrast for each train, without pooling spectator preparations.

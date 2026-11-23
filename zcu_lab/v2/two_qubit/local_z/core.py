@@ -265,6 +265,7 @@ def _start_live_view(
     n = np.asarray(config.gate_count, dtype=np.int64)
     fig.suptitle("Local Z · Accumulated phase")
     status = ax.set_title("Waiting for shots")
+    ax.set(xlabel="CZ gates, n (count)", ylabel="Accumulated phase (deg)")
     format_accumulated_phase_axis(ax)
     ax.set_xlim(n[0] - 0.25, n[-1] + 0.25)
     viewers = [live_errorbar(ax), live_errorbar(ax)]
@@ -513,6 +514,7 @@ class LocalZExp(Experiment[LocalZResult, LocalZCfg]):
             )
         summaries = tuple(map(summarize_fit, fits))
 
+        # 3. Show the Bloch vectors and accumulated-phase fits; put residuals and contrast in diagnostics.
         ns = data.gate_counts
         grid = np.linspace(ns[0], ns[-1], 401)
         phase_series = []
@@ -627,6 +629,7 @@ def _plot_local_z(
     labels: tuple[str, str],
     phase_series: list[AccumulatedPhaseSeries],
 ) -> None:
+    """Show measured Bloch vectors and accumulated phase for both labeled targets."""
     fig, _ = plots.subplots(
         num="local_z",
         ncols=2,
@@ -636,13 +639,19 @@ def _plot_local_z(
     )
     bloch_ax, phase_ax = fig.axes
     fig.suptitle("Local Z · Bloch rotation and phase per CZ")
-    bloch_ax.set_title("1 · Bloch vectors")
+    bloch_ax.set(
+        title="1 · Bloch vectors", xlabel="Target Bloch X", ylabel="Target Bloch Y"
+    )
     plot_bloch_vectors(
         bloch_ax,
         ns,
         [BlochSeries(label, *pair) for label, pair in zip(labels, xy, strict=True)],
     )
-    phase_ax.set_title("2 · Accumulated phase")
+    phase_ax.set(
+        title="2 · Accumulated phase",
+        xlabel="CZ gates, n (count)",
+        ylabel="Accumulated phase (deg)",
+    )
     plot_accumulated_phase(phase_ax, ns, phase_series)
     bloch_ax.legend(loc="upper center", bbox_to_anchor=(0.5, -0.13), ncols=2)
     phase_ax.legend(loc="upper center", bbox_to_anchor=(0.5, -0.13))
@@ -655,7 +664,10 @@ def _plot_diagnostics(
     sem: NDArray[np.float64],
     fitted: list[tuple[str, PhaseLineFit]],
 ) -> None:
-    """Compare each projection, target contrast and signed deviations from the fit."""
+    """Draw per-target X/Y with shot SEM, contrast, and signed phase residuals.
+
+    Label available residual curves with each fit's R² and normalized RMS.
+    """
     fig, _ = plots.subplots(
         num="local_z_diagnostics",
         nrows=2,

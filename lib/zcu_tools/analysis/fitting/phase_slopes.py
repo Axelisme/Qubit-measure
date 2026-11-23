@@ -119,11 +119,14 @@ def fit_phase_slopes(
 ) -> PhaseSlopeFit:
     """Fit X=A_h cos(n*slope+φ_h), Y=A_h sin(n*slope+φ_h), without DC.
 
-    n is int64 (N,), an integer step axis. The three float64 inputs have
-    shape (G,2,2,N,F): group, channel, X/Y quadrature, step, coordinate slice.
-    quadratures are dimensionless; variances have squared quadrature units;
-    acquired_shots are totals for each independent projection. Each group's
-    amplitude/phase is independent; slope is shared within a channel/slice.
+    Supply n as an int64 (N,) integer step axis and three float64 arrays of
+    matching shape (G, 2, 2, N, F): group × spectator × X/Y × n × frequency
+    for conditional phase. Put spectator g before e and X before Y. For
+    other uses, the spectator and frequency axes represent two channels
+    and their coordinate slices. Quadratures are dimensionless, variances
+    have squared quadrature units, and acquired_shots are per-projection
+    shot totals. Each group has its own amplitude and offset; groups share
+    a slope within a spectator/frequency pair.
     Phases and slopes use degrees. Nonfinite acquired counts block that fit.
     Zero shots, nonfinite quadratures or nonpositive/nonfinite variance remove
     a step; every group must retain >=2 steps with difference gcd=1.
