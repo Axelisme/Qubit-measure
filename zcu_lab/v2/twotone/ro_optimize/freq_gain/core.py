@@ -189,10 +189,7 @@ class FreqGainExp(Experiment[FreqGainResult, FreqGainCfg]):
         @context.plots.on_plot_thread
         def update(data: NDArray[np.float64]) -> tuple[Artist, ...]:
             """Refresh the measurement artists from the current acquired data."""
-            progress = ax.set_title(
-                f"{np.isfinite(data).sum()}/{data.size} settings scored"
-            )
-            return (*heatmap.set(freqs, gains, np.abs(data)), progress)
+            return heatmap.set(freqs, gains, np.abs(data))
 
         fig.show()
         signals_buffer = SignalBuffer(

@@ -223,11 +223,7 @@ class DispersiveExp(Experiment[DispersiveResult, DispersiveCfg]):
             Return the changed artists without modifying the input array.
             """
             # Display absolute IQ amplitude for both preparations.
-            points = np.count_nonzero(np.isfinite(data))
-            progress = ax.set_title(
-                f"{title}\nPreparation / RF pairs with data: {points}/{data.size}"
-            )
-            return (*viewer.set(freqs, np.abs(data)), progress)
+            return viewer.set(freqs, np.abs(data))
 
         fig.show()
         signals_buffer = SignalBuffer(

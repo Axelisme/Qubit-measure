@@ -233,10 +233,7 @@ class _PowerMap:
         for artist in line_ax.lines[:-1]:
             artist.set(marker="None", alpha=0.3, color="red")
         line_ax.lines[-1].set(marker=".", color="C0")
-        self.map_title = heat_ax.set_title(
-            f"Gain settings measured: 0 / {len(gains)}" if live else "Gain map",
-            fontsize=11,
-        )
+        heat_ax.set_title("Gain map", fontsize=11)
         self.slice_label = line_ax.set_title("Latest gain spectrum", fontsize=11)
 
     def set(
@@ -259,14 +256,9 @@ class _PowerMap:
             if self.live and snr is not None and current == measured[-1]:
                 latest += f" · SNR {snr:.1f}"
         self.slice_label.set_text(latest)
-        if self.live:
-            self.map_title.set_text(
-                f"Gain settings measured: {measured.size} / {len(self.gains)}"
-            )
         return (
             *self.heatmap.set(self.gains, self.freqs, real),
             *self.lines.set(self.freqs, history),
-            self.map_title,
             self.slice_label,
         )
 

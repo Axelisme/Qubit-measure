@@ -13,7 +13,7 @@ See [`zcu_lab/v2/operator-workflow.md`](../../operator-workflow.md) for the shar
 
 ## Read the results
 
-Live shows mean projected IQ (a.u.) per depth for each arm and counts complete seeds in the title. Stop keeps completed rounds; empty cells stay blank. Run uses finite seeds per depth and arm; Analyze needs at least two seeds finite at every depth in all arms. Each bar is one sample SD across contributing seeds in the same projection, not shot SEM, fit error or round spread. There is no bar with fewer than two seeds. Increasing spread alone does not identify coherent error.
+Live shows mean projected IQ (a.u.) per depth for each arm. Stop keeps completed rounds; empty cells stay blank. Run uses finite seeds per depth and arm; Analyze needs at least two seeds finite at every depth in all arms. Each bar is one sample SD across contributing seeds in the same projection, not shot SEM, fit error or round spread. There is no bar with fewer than two seeds. Increasing spread alone does not identify coherent error.
 
 Analyze fits `A × p^depth + B`. Reference error per Clifford = `(1 − p_ref)/2`. Target error estimate = `(1 − p_interleaved/p_ref)/2`; target fidelity is one minus that error. The 95% intervals resample seeds, paired where applicable. They do not account for gate-dependent/coherent noise or model bias. Negative target errors or fidelities above one are not clipped.
 

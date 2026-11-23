@@ -172,9 +172,6 @@ class FluxDepExp(Experiment[FluxDepResult, FluxDepCfg]):
         heatmap = live_heatmap(heat_ax, uniform=False)
         fig.colorbar(heat_ax.images[0], ax=heat_ax, label="Magnitude of mean IQ (a.u.)")
         line = live_line(line_ax)
-        progress = heat_ax.set_title(
-            f"Bias settings measured: 0 / {len(dev_values)}", fontsize=11
-        )
         slice_label = line_ax.set_title("Latest bias spectrum", fontsize=11)
 
         @context.plots.on_plot_thread
@@ -185,14 +182,10 @@ class FluxDepExp(Experiment[FluxDepResult, FluxDepCfg]):
             if not valid.size:
                 return ()
             current = valid[-1]
-            progress.set_text(
-                f"Bias settings measured: {valid.size} / {len(dev_values)}"
-            )
             slice_label.set_text(f"Latest bias: {dev_values[current]:.4g} {unit}")
             return (
                 *heatmap.set(dev_values, freqs, real),
                 *line.set(freqs, real[current]),
-                progress,
                 slice_label,
             )
 

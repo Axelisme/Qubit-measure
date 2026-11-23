@@ -8,6 +8,6 @@ See [`zcu_lab/v2/operator-workflow.md`](../../operator-workflow.md) for the shar
 
 ## Read the plot and decide what to tune
 
-The trace shows the principal-axis mean IQ projection (a.u.), not population, against repetition count. Gaps mark unmeasured counts. The title uses the selected pulse if source cfg is available, and counts the largest retained-shot total per point when statistics are available. One error bar is one shot SEM: retained-shot sample SD along the plotted axis divided by √(retained shot count). It is not shot spread, round-to-round scatter or fit error. Mean-only files plot without bars.
+The trace shows the principal-axis mean IQ projection (a.u.), not population, against repetition count. Gaps mark unmeasured counts. The title identifies the selected pulse when source cfg is available. One error bar is one shot SEM: retained-shot sample SD along the plotted axis divided by √(retained shot count). It is not shot spread, round-to-round scatter or fit error. Mean-only files plot without bars.
 
 Analyze redraws the trace from Run or Load, without fitting or writeback. Load alone does not open a plot. Look for alternating contrast that grows with repetition count. Preparation and drive history can also change the trace. Compare controls before changing pulses, then use the zig-zag gain or frequency sweep to locate a tuning minimum.

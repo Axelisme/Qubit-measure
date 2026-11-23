@@ -187,17 +187,12 @@ class ZigZagExp(Experiment[ZigZagResult, ZigZagCfg]):
 
         @context.plots.on_plot_thread
         def update(moments: NDArray[np.float64]) -> tuple[Artist, ...]:
-            """Update the projected IQ, shot SEM and acquisition count."""
-            counts, mean = split_sums(moments)
+            """Update the projected IQ and shot SEM."""
+            _, mean = split_sums(moments)
             i, q = _direction(mean)
             sem = iq_shot_sem(moments, direction=(i, q))
-            retained = np.nanmax(counts, initial=0)
-            title = ax.set_title(f"{experiment} · {retained:.0f} retained shots/point")
-            return (
-                *viewer.set(
-                    times.astype(np.float64), mean.real * i + mean.imag * q, sem
-                ),
-                title,
+            return viewer.set(
+                times.astype(np.float64), mean.real * i + mean.imag * q, sem
             )
 
         fig.show()

@@ -12,7 +12,7 @@ See [`zcu_lab/v2/operator-workflow.md`](../../../operator-workflow.md) for the s
 
 ## Read the plots
 
-Both plots show mean IQ projected along the trace's principal direction (a.u.; I if undefined), not population, versus gain. The live title counts retained shots per point. One bar is one shot SEM: retained-shot sample SD along that axis divided by √(retained shot count). It is not shot spread, round-to-round scatter or fit error, and does not weight the fit. Mean-only files still load and fit without bars.
+Both plots show mean IQ projected along the trace's principal direction (a.u.; I if undefined), not population, versus gain. One bar is one shot SEM: retained-shot sample SD along that axis divided by √(retained shot count). It is not shot spread, round-to-round scatter or fit error, and does not weight the fit. Mean-only files still load and fit without bars.
 
 Analyze overlays a cosine. π and π/2 are the gains for half and quarter of a Rabi cycle; their ± values are fit standard errors. R² compares residuals with the variation of included points. It is neither a selection threshold nor gate fidelity. Check the curve across a full period before using the markers.
 

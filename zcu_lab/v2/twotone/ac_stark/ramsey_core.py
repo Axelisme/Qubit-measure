@@ -273,15 +273,11 @@ class AcStarkRamseyExp(Experiment[AcStarkRamseyResult, AcStarkRamseyCfg]):
             history = np.full((2, len(lengths)), np.nan)
             for offset in range(min(2, current + 1)):
                 history[-offset - 1] = real[current - offset]
-            progress = heat_ax.set_title(
-                f"Gain rows with data: {len(valid)}/{len(gains)}"
-            )
             if current >= 0:
                 line_ax.set_title(f"Latest gain: {gains[current]:.4g} a.u.")
             return (
                 *heatmap.set(gains, lengths, real),
                 *lines.set(lengths, history),
-                progress,
             )
 
         fig.show()

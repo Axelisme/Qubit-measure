@@ -160,7 +160,6 @@ class PhaseExp(Experiment[PhaseResult, PhaseCfg]):
         fig, ax = context.plots.subplots(num="measurement", layout="constrained")
         fig.suptitle("Fast-flux transient · Qubit · Local phase")
         ax.set(xlabel="π/2 pair midpoint (µs)", ylabel="Projection phase (deg)")
-        ax.set_title(f"0/{centers.size * phases.size} scan points with IQ")
         ax.grid(False)
         viewer = live_heatmap(ax)
         (image,) = viewer.set(
@@ -171,9 +170,7 @@ class PhaseExp(Experiment[PhaseResult, PhaseCfg]):
         @context.plots.on_plot_thread
         def update(data: NDArray[np.complex128]) -> Iterable[Artist]:
             """Display available IQ on the scan grid without changing the buffer."""
-            count = np.count_nonzero(np.isfinite(data))
-            title = ax.set_title(f"{count}/{data.size} scan points with IQ")
-            return (*viewer.set(centers, phases, phase_signal2real(data)), title)
+            return viewer.set(centers, phases, phase_signal2real(data))
 
         fig.show()
         signals_buffer = SignalBuffer(

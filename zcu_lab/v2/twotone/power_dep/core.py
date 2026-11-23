@@ -210,13 +210,10 @@ class PowerExp(Experiment[PowerResult, PowerCfg]):
             history = np.full((2, len(freqs)), np.nan)
             for offset in range(min(2, current + 1)):
                 history[-offset - 1] = real[current - offset]
-            progress = heat_ax.set_title(
-                f"Gain rows with data: {len(valid)}/{len(gains)}"
-            )
             if current >= 0:
                 line_ax.set_title(f"Latest gain: {gains[current]:.4g} a.u.")
             _set_contrast_map(image, gains, freqs, real)
-            return (image, *lines.set(freqs, history), progress)
+            return (image, *lines.set(freqs, history))
 
         fig.show()
         signals_buffer = SignalBuffer(

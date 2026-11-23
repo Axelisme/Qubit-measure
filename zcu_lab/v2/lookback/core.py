@@ -111,7 +111,7 @@ class LookbackExp(Experiment[LookbackResult, LookbackCfg]):
         title = f"Lookback · ADC {run_cfg.readout.ro_ch} · Readout magnitude"
         fig, ax = context.plots.subplots(num="measurement", layout="tight")
         ax.set(
-            title=f"{title}\nWaiting for first shot",
+            title=f"{title}\nFull ADC window per shot",
             xlabel=_TIME_LABEL,
             ylabel=_MAGNITUDE_LABEL,
         )
@@ -139,14 +139,7 @@ class LookbackExp(Experiment[LookbackResult, LookbackCfg]):
             Read the scan-shaped data without changing it. Update the live
             artists over the prepared coordinates; plot errors propagate.
             """
-            title_artist = ax.set_title(
-                f"{title}\nRunning average · full window per shot"
-            )
-            return (*line.set(times, lookback_signal2real(data)), title_artist)
-
-        @context.plots.on_plot_thread
-        def show_acquired_average(_: None) -> Iterable[Artist]:
-            return (ax.set_title(f"{title}\nAcquired average"),)
+            return line.set(times, lookback_signal2real(data))
 
         # 3. Acquire the time-resolved trace for arrival-time analysis.
         signals_buffer = SignalBuffer(
@@ -156,8 +149,6 @@ class LookbackExp(Experiment[LookbackResult, LookbackCfg]):
         with Schedule(signals_buffer, scope=context.scope) as sched:
             sched.run_acquire_decimated(program, context.soc, rounds=run_cfg.rounds)
 
-        if np.any(np.isfinite(signals_buffer.array)):
-            show_acquired_average(None)
         return LookbackResult(times=times, signals=signals_buffer.array)
 
     def analyze(

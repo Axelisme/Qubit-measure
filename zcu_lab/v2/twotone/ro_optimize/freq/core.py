@@ -183,10 +183,7 @@ class FreqExp(Experiment[FreqResult, FreqCfg]):
         @context.plots.on_plot_thread
         def update(data: NDArray[np.float64]) -> tuple[Artist, ...]:
             """Refresh the measurement artists from the current acquired data."""
-            progress = ax.set_title(
-                f"{np.isfinite(data).sum()}/{len(freqs)} settings scored"
-            )
-            return (*line.set(freqs, np.abs(data)), progress)
+            return line.set(freqs, np.abs(data))
 
         fig.show()
         signals_buffer = SignalBuffer(

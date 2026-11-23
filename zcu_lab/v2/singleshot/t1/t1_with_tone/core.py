@@ -189,7 +189,7 @@ class T1WithToneExp(Experiment[T1WithToneResult, T1WithToneCfg]):
             figsize=(10, 6),
             layout="constrained",
         )
-        progress = figure.suptitle("T1 with tone · qubit · classified populations")
+        figure.suptitle("T1 with tone · qubit · classified populations")
         viewers = [live_errorbar(ax) for ax in figure.axes]
         for ax, (branch, state, color) in zip(figure.axes, _PANELS, strict=True):
             ax.set(
@@ -200,26 +200,19 @@ class T1WithToneExp(Experiment[T1WithToneResult, T1WithToneCfg]):
 
         @plots.on_plot_thread
         def update(counts: NDArray[np.float64]):
-            """Show acquired class fractions and the number of populated cells."""
+            """Show class fractions and their shot SEM."""
             totals = counts.sum(axis=-1)
             populations = counts / totals[..., None]
             covariance = class_probability_covariance(counts)
             sem = np.sqrt(np.diagonal(covariance, axis1=-2, axis2=-1))
-            progress.set_text(
-                f"T1 with tone · qubit · classified populations\n"
-                f"{np.count_nonzero(totals > 0)}/{totals.size} preparation–time points acquired"
-            )
-            return (
-                progress,
-                *(
-                    artist
-                    for index, viewer in enumerate(viewers)
-                    for artist in viewer.set(
-                        lengths,
-                        populations[:, index // 3, index % 3],
-                        sem[:, index // 3, index % 3],
-                    )
-                ),
+            return tuple(
+                artist
+                for index, viewer in enumerate(viewers)
+                for artist in viewer.set(
+                    lengths,
+                    populations[:, index // 3, index % 3],
+                    sem[:, index // 3, index % 3],
+                )
             )
 
         figure.show()

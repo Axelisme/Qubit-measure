@@ -286,8 +286,7 @@ class StirapDetuningExp(Experiment[StirapDetuningResult, StirapDetuningCfg]):
         figure, _ = plots.subplots(
             num="measurement", ncols=3, figsize=(12, 4), layout="constrained"
         )
-        title = "STIRAP detuning · g → f · measured fractions"
-        headline = figure.suptitle(title)
+        figure.suptitle("STIRAP detuning · g → f · measured fractions")
         maps = []
         for ax, state in zip(figure.axes, STATE_LABELS, strict=True):
             ax.grid(False)
@@ -316,10 +315,7 @@ class StirapDetuningExp(Experiment[StirapDetuningResult, StirapDetuningCfg]):
                 image.set_array(panel)
                 if np.isfinite(panel).any():
                     image.autoscale()
-            headline.set_text(
-                f"{title}\nRetained shots: {int(np.nansum(totals)):,} count"
-            )
-            return (*maps, headline)
+            return tuple(maps)
 
         figure.show()
         return SignalBuffer(
