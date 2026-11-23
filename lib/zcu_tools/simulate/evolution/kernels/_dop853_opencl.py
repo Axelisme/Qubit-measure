@@ -57,6 +57,8 @@ class _Model(NamedTuple):
 
 
 def _pack_model(models: Models, key: int, ports: NDArray[np.int64]) -> _Model:
+    if models.jump_offsets[key + 1] > models.jump_offsets[key]:
+        raise ValueError("OpenCL DOP853 does not support explicit collapse operators")
     return _Model(
         models.energies[key],
         np.stack((models.x[key, ports], models.y[key, ports]), axis=1).astype(

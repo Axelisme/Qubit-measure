@@ -87,7 +87,7 @@ status: accepted
 
 **邊界。** 此 opt-in 只接受單一可見 ADC、每發一次積分讀出、單一二階 IQ 軸，涵蓋 Pulse 與單 tone Mux。不支援 edge counting、多 tone、多 read、遮罩或額外矩軸。未 opt-in 的 IQ、分類、遮罩與原生取數預設不變。模擬在同一輪使用原有 raw source，只物化一次，不重跑 backend，不改普通 compact 路徑。只存平均而無矩的舊資料仍可讀，保存規則由 [[0069]] 擁有。
 
-**依據。** 2026-11-22，designer 代裁，使用者未覆核。比較、非零 offset 驗證及前例見 [Amp Rabi 的 shot moments](../discussions/2026-11-22-amp-rabi-shot-moments.md)。
+**依據。** 2026-11-22，designer 代裁，使用者 2026-11-23 追認（「都採用建議」）。比較、非零 offset 驗證及前例見 [Amp Rabi 的 shot moments](../discussions/2026-11-22-amp-rabi-shot-moments.md)。
 
 #### Herald reset 與逐 shot 遮罩
 

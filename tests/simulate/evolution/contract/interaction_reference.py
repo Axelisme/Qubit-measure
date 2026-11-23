@@ -8,7 +8,7 @@ from numpy.typing import NDArray
 from scipy.integrate import solve_ivp
 from zcu_tools.simulate.evolution import ModelSource, SecularModel, TimelineBatch
 
-from .reference import ReferenceResult, SolverTolerances
+from .reference import ReferenceResult, SolverTolerances, require_secular_bath
 
 _COARSE = SolverTolerances(2e-10, 2e-12)
 _FINE = SolverTolerances(2e-12, 2e-14)
@@ -45,6 +45,7 @@ def interaction_reference(
     Raise ValueError for any continuous flux waveform (even constant), multiple
     schedule levels within a shot, or segment shifts. Waveforms need a separate
     Hamiltonian/bath-basis treatment, outside this static-schedule oracle.
+    Explicit collapse operators in a selected bath raise UnsupportedCollapseOperators.
     Raise AssertionError when the two densities differ by more than 2e-6;
     tolerances never override this threshold. Raise RuntimeError on solver
     failure. ModelSource model-building and missing-port errors propagate.
@@ -93,11 +94,14 @@ def interaction_density(
         if np.any(levels != levels[0]):
             raise ValueError("DC flux changes within shot")
     dc = source.model((0,) * batch.flux.level.shape[1])
+    models = [
+        source.model(tuple(int(value) for value in batch.flux.level[first]))
+        for first in batch.flux.offsets[:-1]
+    ]
+    for model in models:
+        require_secular_bath(model)
     results = []
-    for point in range(len(batch.points)):
-        first = batch.flux.offsets[point]
-        level = tuple(int(value) for value in batch.flux.level[first])
-        model = source.model(level)
+    for point, model in enumerate(models):
         overlap = dc.eigenvectors.conj().T @ model.eigenvectors
         initial = (
             source.initial_density

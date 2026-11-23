@@ -89,6 +89,39 @@ def test_scenario_solves_only_selected_row_with_its_explicit_solver(
         )
 
 
+@pytest.mark.parametrize("solver", ["--converged", "--interaction"])
+def test_secular_producer_does_not_publish_full_loss_miss(
+    tmp_path: Path, solver: str
+) -> None:
+    case = accuracy_case("idle_coherence")
+    with closing(case.source):
+        model = case.source.model((0,))
+        jump = np.zeros_like(model.eigenvectors)
+        jump[0, 1] = 0.2j
+        full = replace(model, collapse_operators=(jump,))
+        with closing(
+            ModelSource(
+                case.source.initial_density, lambda level: replace(full, level=level)
+            )
+        ) as source:
+            record = FrozenRecord("full-loss", physical_input(source, case.batch))
+
+    scenes, cache, index = (
+        tmp_path / "scenes",
+        tmp_path / "references",
+        tmp_path / "scene.index.json",
+    )
+    write_frozen_index(index, (write_scene_record(scenes, record),))
+    with pytest.raises(
+        ValueError,
+        match="full-loss.*reference solvers do not support explicit collapse operators",
+    ):
+        producer.main(
+            [solver, str(index), "--scene-cache", str(scenes), "--cache", str(cache)]
+        )
+    assert not cache.exists()
+
+
 @pytest.mark.parametrize("duplicate", [False, True])
 def test_scenario_rejects_zero_or_multiple_index_matches_before_payloads_and_solver(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, duplicate: bool

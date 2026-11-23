@@ -5,6 +5,7 @@ from collections.abc import Sequence
 from pathlib import Path
 
 from zcu_tools.simulate.evolution import (
+    FROZEN_PHYSICAL_VERSION,
     SCENE_CACHE_VERSION,
     FrozenIndexEntry,
     read_frozen_index,
@@ -43,7 +44,9 @@ def scene_cache_directory(override: Path | None = None) -> Path:
             raise ValueError("--scene-cache must be an absolute path")
         return override
     return (
-        _shared_directory(Path(__file__).parent) / "scenes" / f"v{SCENE_CACHE_VERSION}"
+        _shared_directory(Path(__file__).parent)
+        / "scenes"
+        / f"v{SCENE_CACHE_VERSION}-physical-v{FROZEN_PHYSICAL_VERSION}"
     )
 
 
