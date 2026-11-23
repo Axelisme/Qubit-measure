@@ -13,7 +13,7 @@ from zcu_tools.plotting.plots import Plots
 
 from .._sums import joint_probabilities
 from ._result import PARAMETERS, CZOptimizeResult
-from ._shape import GAIN_SCALE, PLATEAU, RAMP_SCALE, Z1, Z2, render_candidate
+from ._shape import GAIN_SCALE, Z1, Z2, render_candidate
 
 
 @dataclass(frozen=True)
@@ -23,7 +23,6 @@ class CZParameterValue:
     name: str
     value: float
     unit: str
-    fixed: bool
 
 
 @dataclass(frozen=True)
@@ -33,7 +32,7 @@ class CZOptimizeAnalysis:
     best_target/start_target are mean retained-seed P(g,g); start_target is
     None when the baseline was not measured. best_params follows Result's SI
     column order. For evaluation zero it describes the CMA initial mean, not
-    the original pulse. parameters uses display units and marks fixed settings.
+    the original pulse. parameters uses display units.
     best_raw_gains is None for evaluation zero; otherwise it holds Qubit1 and
     Qubit2 arb gains. The remaining fields describe the saved rendering grid.
     """
@@ -44,7 +43,7 @@ class CZOptimizeAnalysis:
     best_params: tuple[float, ...]
     parameters: tuple[CZParameterValue, ...]
     best_raw_gains: tuple[float, float] | None
-    ramp_duration_s: float
+    start_duration_s: float
     cycle_period_s: float
     samples_per_cycle: int
 
@@ -54,7 +53,7 @@ class CZOptimizeAnalysis:
             raise ValueError("Evaluation 0 plays the original pulse, not a CMA arb")
         return render_candidate(
             np.asarray(self.best_params, dtype=np.float64),
-            ramp_us=self.ramp_duration_s * 1e6,
+            duration_us=self.start_duration_s * 1e6,
             cycle_us=self.cycle_period_s * 1e6,
             samples_per_cycle=self.samples_per_cycle,
         )
@@ -89,21 +88,16 @@ def _targets(result: CZOptimizeResult) -> NDArray[np.float64]:
 
 
 def _display_value(index: int, value: float) -> tuple[float, str]:
-    if index == PLATEAU:
-        return value * 1e9, "ns"
     if index in (Z1, Z2):
         return degrees(value), "deg"
     return value, ""
 
 
-def _selected_parameters(
-    vector: NDArray[np.float64], *, fixed_duration: bool
-) -> tuple[CZParameterValue, ...]:
+def _selected_parameters(vector: NDArray[np.float64]) -> tuple[CZParameterValue, ...]:
     rows = []
     for index, param in enumerate(PARAMETERS):
         value, unit = _display_value(index, float(vector[index]))
-        fixed = fixed_duration and index in (RAMP_SCALE, PLATEAU)
-        rows.append(CZParameterValue(param.name, value, unit, fixed))
+        rows.append(CZParameterValue(param.name, value, unit))
     return tuple(rows)
 
 
@@ -152,8 +146,7 @@ def _plot_selection(
     lines = []
     for param, value in zip(PARAMETERS, best.parameters, strict=True):
         unit = f" {value.unit}" if value.unit else ""
-        fixed = " (fixed)" if value.fixed else ""
-        lines.append(f"{param.label}: {value.value:.5g}{unit}{fixed}")
+        lines.append(f"{param.label}: {value.value:.5g}{unit}")
     params_ax.text(
         0.08, 0.92, "\n".join(lines), transform=params_ax.transAxes, va="top"
     )
@@ -252,14 +245,13 @@ def analyze_results(
     result: CZOptimizeResult,
     *,
     avoid_mhz: list[float],
-    fixed_duration: bool,
     plots: Plots,
 ) -> CZOptimizeAnalysis | CZOptimizeUnavailable:
     """Plot selected objectives, approximate physical envelopes and their spectra.
 
     The supplied result owns the starting shape and board grid. No cfg or
     waveform file is read. avoid_mhz contains absolute lab frequencies to mark
-    as bands. fixed_duration labels s and the plateau as fixed in the summary.
+    as bands.
     """
     targets = _targets(result)
     if not np.any(np.isfinite(targets)):
@@ -274,9 +266,9 @@ def analyze_results(
         best_target=float(targets[index]),
         start_target=float(targets[0]) if np.isfinite(targets[0]) else None,
         best_params=tuple(float(v) for v in vector),
-        parameters=_selected_parameters(vector, fixed_duration=fixed_duration),
+        parameters=_selected_parameters(vector),
         best_raw_gains=(float(gains[0]), float(gains[1])) if index else None,
-        ramp_duration_s=result.ramp_duration_s,
+        start_duration_s=result.start_duration_s,
         cycle_period_s=result.cycle_period_s,
         samples_per_cycle=result.samples_per_cycle,
     )

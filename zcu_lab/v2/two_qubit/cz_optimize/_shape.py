@@ -1,7 +1,8 @@
-"""CZ start display, symmetric ramp fit, and single-arb candidate rendering."""
+"""CZ start display, symmetric arb fit, and fixed-duration rendering."""
 
 from dataclasses import dataclass
 from enum import IntEnum
+from math import lcm
 from typing import Literal, override
 
 import numpy as np
@@ -9,7 +10,6 @@ from numpy.typing import NDArray
 from qick import QickConfig
 from qick.asm_v2 import QickProgramV2
 from scipy.interpolate import CubicSpline
-from scipy.optimize import lsq_linear
 from zcu_tools.core.waveform_format import WaveformSamples
 from zcu_tools.program.v2 import pulse_output_scale
 from zcu_tools.program.v2.modules.waveform import (
@@ -22,9 +22,7 @@ from zcu_tools.program.v2.modules.waveform import (
 from .._drive import QubitDriveCfg
 
 KNOTS = 3
-RAMP_SCALE = 2 * KNOTS
-PLATEAU = RAMP_SCALE + 1
-GAIN_SCALE = PLATEAU + 1
+GAIN_SCALE = 2 * KNOTS
 Z1 = GAIN_SCALE + 1
 Z2 = Z1 + 1
 PARAM_COUNT = Z2 + 1
@@ -62,11 +60,7 @@ class _StartingEnvelope:
     iq: NDArray[
         np.complex128
     ]  # Display shape; one is full-scale in the starting style.
-    ramp: NDArray[np.complex128]
-    midpoint: complex
-    plateau_us: float
-    ramp_us: float
-    native_duration_us: float
+    duration_us: float
 
 
 @dataclass(frozen=True)
@@ -75,19 +69,15 @@ class StartShape:
 
     iq is the Qubit1 field sampled uniformly in units of DDS const at gain 1.
     style is the original shape identity. duration_us is its quantized support.
-    ramp_us is the reference ramp duration used for the fit; plateau_us is the
-    starting fit plateau. cycle_us and samples_per_cycle are Qubit1's grid.
-    carrier_mhz is the shared programmed carrier. knots hold I then Q values,
-    normalized to one at the real midpoint. arb_gains are each line's raw gain
-    at physical g=1 for a normalized arb. field_at_one is Qubit1's equivalent
-    DDS gain at g=1 for the fit and candidates.
+    cycle_us and samples_per_cycle are Qubit1's grid. carrier_mhz is the
+    shared programmed carrier. knots hold the free I then Q values.
+    arb_gains are each line's raw gain at physical g=1. field_at_one is
+    Qubit1's equivalent DDS gain at g=1 for the fit and candidates.
     """
 
     iq: NDArray[np.complex128]
     style: StartStyle
     duration_us: float
-    ramp_us: float
-    plateau_us: float
     cycle_us: float
     samples_per_cycle: int
     carrier_mhz: float
@@ -115,10 +105,7 @@ def _starting_envelope(
     waveform: WaveformCfg, board: QickConfig, ch: int
 ) -> _StartingEnvelope:
     """Evaluate the configured shape for display and fit, not for playback."""
-    if isinstance(waveform, InMemoryArbWaveformCfg) or (
-        isinstance(waveform, FlatTopWaveformCfg)
-        and isinstance(waveform.raise_waveform, InMemoryArbWaveformCfg)
-    ):
+    if isinstance(waveform, InMemoryArbWaveformCfg):
         raise ValueError("Two-line CZ drive requires a serializable starting waveform")
     spc = int(board["gens"][ch]["samps_per_clk"])
     cycle_us = float(board.cycles2us(1, gen_ch=ch))
@@ -126,38 +113,16 @@ def _starting_envelope(
     length = _length(waveform)
     if isinstance(waveform, ConstWaveformCfg):
         cycles = int(board.us2cycles(length, gen_ch=ch))
-        ramp = np.sin(np.pi * (np.arange(6 * spc) + 0.5) / (6 * spc)) ** 2
         return _StartingEnvelope(
-            style,
-            np.ones(cycles * spc, dtype=np.complex128),
-            ramp.astype(np.complex128),
-            1.0 + 0.0j,
-            max(0.0, (cycles - 3) * cycle_us),
-            6 * cycle_us,
-            cycles * cycle_us,
+            style, np.ones(cycles * spc, dtype=np.complex128), cycles * cycle_us
         )
 
     prog = _EnvelopeEvaluator(board)
     waveform.build("cz_start").create(prog, ch)
     ramp = prog.iq / board.get_maxv(ch)
-    # QICK built-ins use a midpoint between the two central samples. Arb
-    # interpolates at t=0, T/N, ..., so its midpoint is at N/2.
-    center = len(ramp) // 2
-    if center == 0:
-        raise ValueError("Two-line CZ drive ramp must contain at least two samples")
-    ramp_cfg = (
-        waveform.raise_waveform
-        if isinstance(waveform, FlatTopWaveformCfg)
-        else waveform
-    )
-    midpoint = complex(
-        ramp[center]
-        if ramp_cfg.style == "arb"
-        else (ramp[center - 1] + ramp[center]) / 2
-    )
     ramp_us = len(ramp) / spc * cycle_us
     if not isinstance(waveform, FlatTopWaveformCfg):
-        return _StartingEnvelope(style, ramp, ramp, midpoint, 0.0, ramp_us, ramp_us)
+        return _StartingEnvelope(style, ramp, ramp_us)
 
     plateau_cycles = int(
         board.us2cycles(length - _length(waveform.raise_waveform), gen_ch=ch)
@@ -172,6 +137,7 @@ def _starting_envelope(
     ramp_ratio = pulse_output_scale(board, ch, "arb") / pulse_output_scale(
         board, ch, "flat_top"
     )
+    center = len(ramp) // 2
     iq = np.concatenate(
         (
             ramp[:center] * ramp_ratio,
@@ -179,45 +145,41 @@ def _starting_envelope(
             ramp[center:] * ramp_ratio,
         )
     )
-    return _StartingEnvelope(
-        style, iq, ramp, midpoint, plateau_us, ramp_us, ramp_us + plateau_us
-    )
+    return _StartingEnvelope(style, iq, ramp_us + plateau_us)
 
 
 def _same_start(first: _StartingEnvelope, second: _StartingEnvelope) -> bool:
     return (
         first.style == second.style
-        and first.plateau_us == second.plateau_us
-        and first.ramp_us == second.ramp_us
+        and first.duration_us == second.duration_us
         and np.array_equal(first.iq, second.iq)
     )
 
 
 def _spline(knots: NDArray[np.float64], *, in_phase: bool) -> CubicSpline:
-    # Reflection clamps I's midpoint slope to zero. Antireflection leaves
-    # Q's midpoint slope free while keeping its midpoint at zero.
-    reflection = knots[-2::-1] if in_phase else -knots[-2::-1]
-    symmetric_knots = np.concatenate((knots, reflection), axis=0)
-    return CubicSpline(
-        np.linspace(0.0, 2.0, len(symmetric_knots)), symmetric_knots, bc_type="natural"
+    # Start I and Q at zero; only Q must also vanish at the center.
+    zero = np.zeros_like(knots[:1])
+    half = np.concatenate((zero, knots) if in_phase else (zero, knots, zero))
+    reflection = half[-2::-1] if in_phase else -half[-2::-1]
+    full = np.concatenate((half, reflection))
+    return CubicSpline(np.linspace(0.0, 1.0, len(full)), full, bc_type="natural")
+
+
+def _fit_knots(iq: NDArray[np.complex128]) -> NDArray[np.float64]:
+    # Reflect the centers of the DAC sample intervals. Odd I and even Q
+    # disappear from the mean but remain in the measured start.
+    domain = (np.arange(len(iq)) + 0.5) / len(iq)
+    even_i = (iq.real + iq.real[::-1]) / 2
+    odd_q = (iq.imag - iq.imag[::-1]) / 2
+    basis = np.eye(KNOTS)
+    return np.concatenate(
+        [
+            np.linalg.lstsq(
+                _spline(basis, in_phase=in_phase)(domain), values, rcond=None
+            )[0]
+            for in_phase, values in ((True, even_i), (False, odd_q))
+        ]
     )
-
-
-def _fit_knots(start: _StartingEnvelope) -> NDArray[np.float64]:
-    # Fit the ascending half only. The renderer constructs the other half by
-    # reflecting I and negating Q; the measured start never uses this fit.
-    half = len(start.ramp) // 2
-    offset = 0.5
-    domain = (np.arange(half) + offset) / half
-    normalized = start.ramp[:half] / start.midpoint.real
-    result = []
-    for in_phase, samples in ((True, normalized.real), (False, normalized.imag)):
-        basis = np.eye(KNOTS + 2, dtype=np.float64)[:, 1:]
-        interpolated = _spline(basis, in_phase=in_phase)(domain)
-        target = samples - interpolated[:, -1] if in_phase else samples
-        fit = lsq_linear(interpolated[:, :-1], target, bounds=(-1.0, 1.0))
-        result.append(fit.x)
-    return np.concatenate(result)
 
 
 def prepare_start(
@@ -225,10 +187,8 @@ def prepare_start(
 ) -> StartShape:
     """Evaluate and fit aligned scalar pulses before acquiring any counts.
 
-    Compare both declared shapes on a common display grid, then fit the first
-    half of the ramp on Qubit1's generator grid. Reject mismatched shapes,
-    midpoints off the positive real axis and candidate raw gain above one.
-    Only arb is a reachable CMA representation in this experiment revision.
+    Compare both declared shapes on a common display grid, then fit the
+    symmetric and antisymmetric components on Qubit1's generator grid.
     """
     first, second = drive.qubit1, drive.qubit2
     start = _starting_envelope(first.waveform, board, first.ch)
@@ -238,27 +198,15 @@ def prepare_start(
         raise ValueError(
             "drive.qubit1.waveform and drive.qubit2.waveform must have the same CZ shape and duration"
         )
-    if start.midpoint.real <= 0.0 or abs(start.midpoint.imag) > 1.0 / board.get_maxv(
-        first.ch
-    ):
-        raise ValueError(
-            f"Two-line CZ drive ramp midpoint must have positive I and zero Q; got I={start.midpoint.real:.6g}, Q={start.midpoint.imag:.6g}"
-        )
+    if len(start.iq) < 2:
+        raise ValueError("Two-line CZ drive must contain at least two samples")
 
     original = _native_style(start.style)
     arb_gains = []
     for name, pulse in (("qubit1", first), ("qubit2", second)):
-        # An existing flat-top plateau is a separate DDS segment, so its
-        # physical reference does not shrink with an underfilled ramp.
-        if start.style in (StartStyle.CONST, StartStyle.FLAT_TOP):
-            scale_at_one = pulse_output_scale(board, pulse.ch, original)
-        else:
-            scale_at_one = start.midpoint.real * pulse_output_scale(
-                board, pulse.ch, original
-            )
         gain = (
             float(pulse.gain)
-            * scale_at_one
+            * pulse_output_scale(board, pulse.ch, original)
             / pulse_output_scale(board, pulse.ch, "arb")
         )
         if abs(gain) * g_max > 1.0:
@@ -270,13 +218,11 @@ def prepare_start(
     return StartShape(
         iq=start.iq * float(first.gain) * pulse_output_scale(board, ch, original),
         style=start.style,
-        duration_us=start.native_duration_us,
-        ramp_us=start.ramp_us,
-        plateau_us=start.plateau_us,
+        duration_us=start.duration_us,
         cycle_us=float(board.cycles2us(1, gen_ch=ch)),
         samples_per_cycle=int(board["gens"][ch]["samps_per_clk"]),
         carrier_mhz=float(first.freq),
-        knots=_fit_knots(start),
+        knots=_fit_knots(start.iq),
         arb_gains=np.array(arb_gains, dtype=np.float64),
         field_at_one=arb_gains[0] * pulse_output_scale(board, ch, "arb"),
     )
@@ -285,32 +231,20 @@ def prepare_start(
 def render_candidate(
     params: NDArray[np.float64],
     *,
-    ramp_us: float,
+    duration_us: float,
     cycle_us: float,
     samples_per_cycle: int,
 ) -> WaveformSamples:
-    """Sample the physical candidate coordinates into a normalized arb envelope.
-
-    The shape depends on knots, ramp scale, and plateau duration (s), not g
-    or local Z. Quantize the plateau to a fabric cycle and zero-pad the end to
-    a whole cycle. The last time point is the support boundary, not a DAC sample.
-    The caller rejects peaks above one before constructing an arb cfg.
-    """
-    ramp = float(params[RAMP_SCALE]) * ramp_us
-    plateau = round(float(params[PLATEAU]) * 1e6 / cycle_us) * cycle_us
-    cycles = max(3, int(np.ceil((ramp + plateau) / cycle_us - 1e-12)))
+    """Sample a fixed-duration arb, appending zero samples on the DAC grid."""
+    samples = round(duration_us / cycle_us) * samples_per_cycle
+    block = lcm(16, samples_per_cycle)
+    padded = ((samples + block - 1) // block) * block
     step_us = cycle_us / samples_per_cycle
-    time = np.arange(cycles * samples_per_cycle + 1, dtype=np.float64) * step_us
-    half = ramp / 2
-    rising = time < half
-    flat = (time >= half) & (time < half + plateau)
-    falling = (time >= half + plateau) & (time < ramp + plateau)
-    i_spline = _spline(np.r_[0.0, params[:KNOTS], 1.0], in_phase=True)
-    q_spline = _spline(np.r_[0.0, params[KNOTS:RAMP_SCALE], 0.0], in_phase=False)
-    up = time[rising] / half
-    down = (ramp + plateau - time[falling]) / half
+    domain = np.arange(samples, dtype=np.float64) / samples
+    time = np.arange(padded + 1, dtype=np.float64) * step_us
     i = np.zeros_like(time)
     q = np.zeros_like(time)
-    i[rising], i[flat], i[falling] = i_spline(up), 1.0, i_spline(down)
-    q[rising], q[falling] = q_spline(up), -q_spline(down)
+    i[:samples] = _spline(params[:KNOTS], in_phase=True)(domain)
+    q[:samples] = _spline(params[KNOTS:GAIN_SCALE], in_phase=False)(domain)
+    # The last time point is the support boundary, not a DAC sample.
     return WaveformSamples(time, i, q if np.any(q) else None)

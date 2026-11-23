@@ -59,8 +59,6 @@ from ._result import axes_spec
 from ._shape import (
     GAIN_SCALE,
     PARAM_COUNT,
-    PLATEAU,
-    RAMP_SCALE,
     Z1,
     Z2,
     StartShape,
@@ -224,28 +222,6 @@ class CZOptimizeCfg(ConfigBase):
         ),
     ]
 
-    s_min: Annotated[
-        float,
-        FieldMeta(
-            label="Minimum ramp scale s",
-            description="Lower bound for the ramp duration multiplier.",
-        ),
-    ] = Field(default=0.5, gt=0, allow_inf_nan=False)
-    s_max: Annotated[
-        float,
-        FieldMeta(
-            label="Maximum ramp scale s",
-            description="Upper bound for the ramp duration multiplier.",
-        ),
-    ] = Field(default=2.0, gt=0, allow_inf_nan=False)
-    tau_p_max_ns: Annotated[
-        float,
-        FieldMeta(
-            label="Maximum plateau duration",
-            unit="ns",
-            description="Upper bound for the plateau; the lower bound is zero.",
-        ),
-    ] = Field(default=1000.0, ge=0, allow_inf_nan=False)
     g_min: Annotated[
         float,
         FieldMeta(
@@ -260,35 +236,13 @@ class CZOptimizeCfg(ConfigBase):
             description="Upper bound for the common physical field multiplier.",
         ),
     ] = Field(default=1.2, gt=0, allow_inf_nan=False)
-    sigma_ln_s: Annotated[
-        float,
-        FieldMeta(
-            label="Initial ramp scale spread",
-            description="Starting standard deviation in natural-log ramp scale.",
-        ),
-    ] = Field(default=0.1, gt=0, allow_inf_nan=False)
-    sigma_plateau_ns: Annotated[
-        float,
-        FieldMeta(
-            label="Initial plateau duration spread",
-            unit="ns",
-            description="Starting standard deviation of the plateau duration.",
-        ),
-    ] = Field(default=2.0, gt=0, allow_inf_nan=False)
     sigma_gain: Annotated[
         float,
         FieldMeta(
             label="Initial gain spread",
-            description="Starting standard deviation of the optimizer's gain coordinate.",
+            description="Starting standard deviation in the natural log of g.",
         ),
     ] = Field(default=0.05, gt=0, allow_inf_nan=False)
-    fix_gate_duration: Annotated[
-        bool,
-        FieldMeta(
-            label="Fix gate duration",
-            description="Keep timing settings fixed at their starting values.",
-        ),
-    ] = False
     avoid_frequencies_mhz: Annotated[
         list[FiniteFloat],
         FieldMeta(
@@ -300,8 +254,6 @@ class CZOptimizeCfg(ConfigBase):
     @model_validator(mode="after")
     def validate_sequence_inputs(self) -> Self:
         """Reject invalid starting ranges, tones, classifiers, seeds or generators."""
-        if not self.s_min <= 1.0 <= self.s_max:
-            raise ValueError("s_min and s_max must include the starting ramp scale s=1")
         if not self.g_min <= 1.0 <= self.g_max:
             raise ValueError(
                 "g_min and g_max must include the starting physical multiplier g=1"
@@ -320,49 +272,33 @@ class CZOptimizeCfg(ConfigBase):
 
 
 def _gain_coordinate(value: float, *, physical: bool) -> float:
-    """Translate between physical g and the provisional log-g search coordinate."""
+    """Translate between physical g and its log search coordinate."""
     return math.exp(value) if physical else math.log(value)
-
-
-def _active_coordinates(
-    cfg: CZOptimizeCfg, lower: NDArray[np.float64], upper: NDArray[np.float64]
-) -> NDArray[np.bool_]:
-    """Select variable CMA coordinates; the baseline fixes both duration axes."""
-    active = lower != upper
-    if cfg.fix_gate_duration:
-        active[[RAMP_SCALE, PLATEAU]] = False
-    return active
 
 
 def _make_strategy(
     cfg: CZOptimizeCfg, mean: NDArray[np.float64]
 ) -> tuple[cma.CMAEvolutionStrategy, NDArray[np.bool_]]:
-    """Set bounded knot/timing/gain coordinates and unconstrained local Z."""
+    """Set bounded knot/gain coordinates and unconstrained local Z."""
     lower = np.r_[
-        [-1.0] * RAMP_SCALE,
-        math.log(cfg.s_min),
-        0.0,
+        [-1.0] * GAIN_SCALE,
         _gain_coordinate(cfg.g_min, physical=False),
         -np.inf,
         -np.inf,
     ]
     upper = np.r_[
-        [1.0] * RAMP_SCALE,
-        math.log(cfg.s_max),
-        cfg.tau_p_max_ns,
+        [1.0] * GAIN_SCALE,
         _gain_coordinate(cfg.g_max, physical=False),
         np.inf,
         np.inf,
     ]
     spread = np.r_[
-        [cfg.sigma_knot] * RAMP_SCALE,
-        cfg.sigma_ln_s,
-        cfg.sigma_plateau_ns,
+        [cfg.sigma_knot] * GAIN_SCALE,
         cfg.sigma_gain,
         cfg.sigma_z_deg,
         cfg.sigma_z_deg,
     ]
-    active = _active_coordinates(cfg, lower, upper)
+    active = lower != upper
     rng = np.random.default_rng(cfg.cma_seed)
     strategy = cma.CMAEvolutionStrategy(
         mean[active],
@@ -380,16 +316,9 @@ def _make_strategy(
 
 
 def _initial_coordinates(cfg: CZOptimizeCfg, start: StartShape) -> NDArray[np.float64]:
-    plateau_ns = start.plateau_us * 1e3
-    if plateau_ns > cfg.tau_p_max_ns:
-        raise ValueError(
-            f"tau_p_max_ns={cfg.tau_p_max_ns:g} ns excludes the starting plateau ({plateau_ns:g} ns)"
-        )
     return np.r_[
         start.knots,
         0.0,
-        plateau_ns,
-        _gain_coordinate(1.0, physical=False),
         cfg.phase_pair.correction_qubit1_deg,
         cfg.phase_pair.correction_qubit2_deg,
     ]
@@ -399,8 +328,6 @@ def _physical_params(
     coordinates: NDArray[np.float64], *, wrap_angles: bool
 ) -> NDArray[np.float64]:
     params = coordinates.copy()
-    params[RAMP_SCALE] = math.exp(coordinates[RAMP_SCALE])
-    params[PLATEAU] = coordinates[PLATEAU] * 1e-9
     params[GAIN_SCALE] = _gain_coordinate(coordinates[GAIN_SCALE], physical=True)
     angles = coordinates[Z1:]
     if wrap_angles:
@@ -559,7 +486,6 @@ class CZOptimizeExp(Experiment[CZOptimizeResult, CZOptimizeCfg]):
             start_iq=start.iq,
             start_style=start.style,
             start_duration_s=start.duration_us * 1e-6,
-            ramp_duration_s=start.ramp_us * 1e-6,
             cycle_period_s=start.cycle_us * 1e-6,
             samples_per_cycle=start.samples_per_cycle,
             carrier_hz=start.carrier_mhz * 1e6,
@@ -635,12 +561,11 @@ class CZOptimizeExp(Experiment[CZOptimizeResult, CZOptimizeCfg]):
         """Select the best complete evaluation and compare saved envelopes.
 
         Pass None for options. Missing cfg keeps the analysis available but
-        omits avoid bands and fixed-setting labels. No asset is read.
+        omits avoid bands. No asset is read.
         """
         cfg = source.cfg
         return analyze_results(
             source.result,
             avoid_mhz=cfg.avoid_frequencies_mhz if cfg is not None else [],
-            fixed_duration=cfg.fix_gate_duration if cfg is not None else False,
             plots=plots,
         )

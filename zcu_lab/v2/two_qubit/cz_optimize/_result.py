@@ -26,10 +26,8 @@ class _Parameter(NamedTuple):
 
 
 PARAMETERS = (
-    *(_Parameter(f"ramp_i_{i}", f"Ramp I{i}", "") for i in range(1, KNOTS + 1)),
-    *(_Parameter(f"ramp_q_{i}", f"Ramp Q{i}", "") for i in range(1, KNOTS + 1)),
-    _Parameter("ramp_scale", "Ramp scale s", ""),
-    _Parameter("plateau_duration", "Plateau duration", "s"),
+    *(_Parameter(f"i_knot_{i}", f"I knot {i}", "") for i in range(1, KNOTS + 1)),
+    *(_Parameter(f"q_knot_{i}", f"Q knot {i}", "") for i in range(1, KNOTS + 1)),
     _Parameter("gain_scale", "Field multiplier g", ""),
     _Parameter("local_z_qubit1", "Qubit1 local Z", "rad"),
     _Parameter("local_z_qubit2", "Qubit2 local Z", "rad"),
@@ -42,14 +40,14 @@ class CZOptimizeResult:
 
     seeds is int64 (seed,). sums is float64 (evaluation, seed, 3, 3), in
     Qubit1/Qubit2 order with classes g, e, other. params is float64 (evaluation,
-    parameter) in PARAMETER order (I, Q, scale s, seconds, physical gain g,
+    parameter) in PARAMETERS order (I knots, Q knots, physical gain g,
     radians for Qubit1 and Qubit2). Row zero holds the CMA initial mean; the
     measured evaluation zero plays the original pulse instead. peak is float64
     (evaluation,), the envelope magnitude which gates only CMA evaluations.
     Unevaluated fields and unmeasured count tables are NaN.
 
     start_iq is the complex128 display envelope of evaluation zero in Qubit1
-    DDS gain units. start_style identifies the original waveform. Durations
+    DDS gain units. start_style identifies the original waveform. Duration
     and cycle period are seconds; samples_per_cycle describes the display
     and CMA grid. carrier_hz is the shared carrier. arb_gains holds raw gains
     at physical g=1 for both lines; field_at_one gives Qubit1 DDS gain at g=1.
@@ -64,7 +62,6 @@ class CZOptimizeResult:
     start_iq: NDArray[np.complex128]
     start_style: StartStyle
     start_duration_s: float
-    ramp_duration_s: float
     cycle_period_s: float
     samples_per_cycle: int
     carrier_hz: float
@@ -84,7 +81,7 @@ class CZOptimizeResult:
             raise ValueError(f"Evaluation {index} has no complete parameter row")
         return render_candidate(
             params,
-            ramp_us=self.ramp_duration_s * 1e6,
+            duration_us=self.start_duration_s * 1e6,
             cycle_us=self.cycle_period_s * 1e6,
             samples_per_cycle=self.samples_per_cycle,
         )
@@ -108,9 +105,10 @@ def _scalar(
 def _restore[CfgT: ConfigBase](data: GroupedLoadData[CfgT]) -> CZOptimizeResult:
     # ADR-0069: reject the old result layout instead of guessing parameter
     # units or manufacturing display samples from an earlier parameterization.
-    if "ramp_scale" not in data.variables:
+    if PARAMETERS[0].name not in data.variables:
         raise ValueError(
-            "CZ optimization result format has changed; this file lacks /vars/ramp_scale. Open an older run with the version that saved it."
+            "CZ optimization result format has changed to fixed-duration arb. "
+            "Open an older run with the version that saved it."
         )
     sums = data.variable("sums")
     fingerprints = data.variables.get(_START_ASSETS)
@@ -122,7 +120,6 @@ def _restore[CfgT: ConfigBase](data: GroupedLoadData[CfgT]) -> CZOptimizeResult:
         start_iq=data.variable("start_iq").z,
         start_style=StartStyle(data.variable("start_style").z.item()),
         start_duration_s=float(data.variable("start_duration_s").z.item()),
-        ramp_duration_s=float(data.variable("ramp_duration_s").z.item()),
         cycle_period_s=float(data.variable("cycle_period_s").z.item()),
         samples_per_cycle=int(data.variable("samples_per_cycle").z.item()),
         carrier_hz=float(data.variable("carrier_hz").z.item()),
@@ -191,7 +188,6 @@ def axes_spec[CfgT: ConfigBase](
             ),
             _scalar("start_style", "Start style ID", "", dtype=np.int64),
             _scalar("start_duration_s", "Start duration", "s"),
-            _scalar("ramp_duration_s", "Reference ramp duration", "s"),
             _scalar("cycle_period_s", "Generator fabric period", "s"),
             _scalar(
                 "samples_per_cycle", "DAC samples per fabric cycle", "", dtype=np.int64

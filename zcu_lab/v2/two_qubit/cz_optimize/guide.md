@@ -11,19 +11,17 @@
 3. **Interleaved Clifford depth** 選在已量的 IRB 衰減中段。**Clifford sequence seeds** 填 3–5 個不同整數。**Optimizer random seed** 控制候選，不改 Clifford 序列。
 4. **Avoid frequencies (MHz)** 可填絕對實驗室頻率，例如量到但不想驅動的躍遷。留空時頻譜不畫頻帶。這個欄位不加入最優化目標。
 
-評估 0 直接播放原 pulse。即使原 `arb` 不對稱，評估 0 也不改形狀。CMA 的初始均值另外取上升 ramp 做擬合，之後的候選都使用 I 鏡像、Q 反號鏡像和實數平台。Ramp 中點必須是正 I 且 Q 為零。`flat_top` 的 raise waveform 提供 ramp，剩餘長度是平台；其他包絡以整段作 ramp。`const` 的候選從短 cosine ramp 及等面積平台出發，評估 0 仍是原方波。
+評估 0 直接播放原 pulse 並套用原 local Z。原 `arb` 不對稱時也照原樣播放。CMA 另外把整段起點的 I 取對稱分量，Q 取反對稱分量，再擬合半段樣條節點。候選的 I 鏡像，Q 反號鏡像。中心 I 斜率為零，振幅可調。中心 Q 為零。
 
 | 欄位 | 控制的物理量 |
 | --- | --- |
-| Initial I/Q control-point spread | 上升 ramp 的 I、Q 各三個控制點，歸一振幅範圍 −1 到 1。 |
-| Minimum / Maximum ramp scale s；Initial ramp scale spread | `s` 乘上起點的參考 ramp 長。範圍須包含 1；spread 用自然對數尺度。 |
-| Maximum plateau duration；Initial plateau duration spread | 平台長從 0 到所填上限，單位 ns。上限須涵蓋起點平台。 |
-| Minimum / Maximum field multiplier g；Initial gain spread | `g` 同時乘上兩線物理場，不改兩線相對倍率。範圍須包含 1。切換表示時 raw gain 隨輸出尺度換算；若任一線的最大可達 raw gain 超出 ±1，Run 在取數前報錯。 |
+| Initial I/Q control-point spread | 半段各三個 I、Q 節點，每個節點的範圍為 −1 到 1。 |
+| Minimum / Maximum field multiplier g；Initial gain spread | `g` 同時乘上兩線物理場，不改兩線相對倍率。範圍須包含 1，spread 用 ln g。切換表示時按輸出尺度換算 raw gain。任一線的最大可達 raw gain 超出 ±1 時，Run 在取數前報錯。 |
 | Initial local Z spread | 每個 CZ 後套用的兩個 virtual Z 角，單位 deg。 |
 
-**Fix gate duration** 預設關閉。此欄控制 CMA 是否調整時長。
+候選時長固定在起點總長。每個候選都用單一完整的記憶體 arb 包絡，尾端補零到 16 samples 的倍數。記憶體用量約等於整段樣本數。若超過容量，QICK 在上傳時報錯。
 
-總評估數為 `1 + Optimizer generations × Candidates per generation`。每個實測候選以相同的 seed 數與 Reps 取數。包絡 `|I+iQ|` 超過 1 的 CMA 候選記零，不取數也不列入最佳。每個 seed 以保留 shots 為分母，包含 other；無保留 shots 時 Run 報該 seed。候選使用單一 arb 包絡，所需樣本隨 ramp 與平台總長增加。
+總評估數為 `1 + Optimizer generations × Candidates per generation`。每個實測候選以相同的 seed 數與 Reps 取數。每個 seed 以保留 shots 為分母，包含 other。某個 seed 沒有保留 shots 時，Run 報出該 seed。
 
 ## 比較圖與重載
 
@@ -35,7 +33,7 @@
 
 ## 審閱寫回並驗收
 
-CMA 候選勝出時，提案包含一筆共用 arb 資產、兩筆 CZ pulse、兩筆 slot 和一筆 `$coupler.ext.cz_phase`。Pulse 的 gain 已按最佳 `g` 和新舊表示的輸出換算；載波、phase 和延遲不變。評估 0 勝出時不新增資產，pulse 與 local Z 維持原設定。如果原資產缺檔或內容已變更，拒絕寫回並指出路徑和原因。CMA 勝出的提案使用新資產，有效 cfg 下不依賴原資產。只有最佳分數高於評估 0 才預選提案。審閱後一起套用相依項目，再核對收據。
+CMA 候選勝出時，提案包含一筆兩線共用的整段 arb 資產、兩筆 CZ pulse、兩筆 slot 和一筆 `$coupler.ext.cz_phase`。Pulse 的 gain 已按最佳 `g` 和新舊表示的輸出換算；載波、phase 和延遲不變。評估 0 勝出時不新增資產，pulse 與 local Z 維持原設定。如果原資產缺檔或內容已變更，拒絕寫回並指出路徑和原因。CMA 勝出的提案使用新資產，有效 cfg 下不依賴原資產。只有最佳分數高於評估 0 才預選提案。審閱後一起套用相依項目，再核對收據。
 
 用[普通 paired RB／IRB](../rb/guide.md)驗收。核對 pulse、slot 和 phase pair，換一組未參與搜尋的 seeds，再比較 gate error 與 CI。不要用搜尋期間最高的 P(g,g) 當作改善證據。
 
