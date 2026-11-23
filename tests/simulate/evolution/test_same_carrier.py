@@ -280,8 +280,8 @@ def test_expanded_pair_history_follows_fold_recipe_not_encounter_order() -> None
             SecularDrive("a", positive + positive.T, 1j * (positive - positive.T)),
             *(SecularDrive(name, zero, zero) for name in ("b", "c", "probe")),
         ),
-        zero.real,
-        zero.real,
+        np.zeros((2, 2)),
+        np.zeros((2, 2)),
     )
     pulse = replace(
         track(1, EnvelopeSpec("constant"), duration=75.0),
@@ -300,10 +300,9 @@ def test_expanded_pair_history_follows_fold_recipe_not_encounter_order() -> None
     )
     # Both folds produce identical quadratures but use different physical lines.
     history = UsageHistory()
+    initial = np.diag(np.full(2, 0.5, dtype=np.complex128))
     with (
-        closing(
-            ModelSource(np.eye(2) / 2, lambda level: model, history=history)
-        ) as src,
+        closing(ModelSource(initial, lambda level: model, history=history)) as src,
         closing(
             Engine(
                 1,
@@ -374,8 +373,10 @@ def test_model_only_prepare_shares_dop853_without_aliasing_fold_recipes(channel_
     # Identical interpolation does not imply an identical sample clock.
     times = np.array([0.0, 1.5, 3.0])
     redundant_clock = np.array([0.0, 0.75, 1.5, 3.0])
-    envelope = EnvelopeSpec("sampled", np.ones(len(times)), times)
-    resampled = EnvelopeSpec("sampled", np.ones(len(redundant_clock)), redundant_clock)
+    envelope = EnvelopeSpec("sampled", np.ones(len(times), dtype=complex), times)
+    resampled = EnvelopeSpec(
+        "sampled", np.ones(len(redundant_clock), dtype=complex), redundant_clock
+    )
     folded = tuple(
         replace(
             item, tracks=tuple(replace(t, envelopes=(envelope,)) for t in item.tracks)

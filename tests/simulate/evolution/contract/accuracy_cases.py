@@ -177,10 +177,13 @@ COMPLEX_SINGLE_GATE_CASES = (
     "single_gate_drag",
     "single_gate_fast_drag",
     "single_gate_imaginary_slope_edge",
+    "single_gate_diagonal_inside",
 )
 
 
 def _complex_single_gate_case(name: str) -> AccuracyCase:
+    if name == "single_gate_diagonal_inside":
+        return single_gate_diagonal_case(inside=True)
     if name == "single_gate_imaginary_slope_edge":
         # Just inside the normalized .025/ns limit, with zero in-phase peak.
         slope = 0.025 * (1 - 1e-6)
@@ -200,7 +203,7 @@ def _complex_single_gate_case(name: str) -> AccuracyCase:
             in_phase = 0.5 * (1 - np.cos(angle)) + 0.1 * (1 - np.cos(2 * angle))
             derivative = angular * (0.5 * np.sin(angle) + 0.2 * np.sin(2 * angle))
         samples = in_phase + 12j * derivative
-    envelope = EnvelopeSpec("sampled", samples, times)
+    envelope = EnvelopeSpec("sampled", np.asarray(samples, dtype=np.complex128), times)
     batch = timeline(2, float(times[-1]))
     return AccuracyCase(
         name,
@@ -210,19 +213,22 @@ def _complex_single_gate_case(name: str) -> AccuracyCase:
     )
 
 
-def single_gate_diagonal_case(*, complex_envelope: bool) -> AccuracyCase:
+def single_gate_diagonal_case(*, inside: bool) -> AccuracyCase:
     """Return a 64 ns coherent phase test with an off-window diagonal drive."""
     a = np.exp(-0.5)
-    q = a / 32 if complex_envelope else 0.0
+    q = a / 32
     envelope = EnvelopeSpec(
         "sampled", np.array([a + 1j * q, 1.0, a - 1j * q]), np.array([0.0, 32.0, 64.0])
     )
+    # With unit peak and gain, π*64*4.97e-6 is just below 1e-3. The
+    # common-mode offset is larger than this spread but cannot change density.
+    diagonal = [0.0001, 0.00010497] if inside else [0.0, 0.00028]
     model = SecularModel(
         (0,),
         "single-gate-diagonal",
         np.array([0.0, 0.6]),
         np.eye(2, dtype=complex),
-        (SecularDrive("drive", np.diag([0.0, 0.00028]), np.zeros((2, 2))),),
+        (SecularDrive("drive", np.diag(diagonal), np.zeros((2, 2), dtype=complex)),),
         np.zeros((2, 2)),
         np.zeros((2, 2)),
     )
@@ -232,12 +238,10 @@ def single_gate_diagonal_case(*, complex_envelope: bool) -> AccuracyCase:
         phase_rad=np.array([-np.pi / 2]),
     )
     return AccuracyCase(
-        "single_gate_diagonal_complex"
-        if complex_envelope
-        else "single_gate_diagonal_real",
+        "single_gate_diagonal_inside" if inside else "single_gate_diagonal_complex",
         coherent_source(model),
         replace(batch, tracks=(pulse,)),
-        ("single_tone_gate",),
+        ("single_tone_gate",) if inside else (),
     )
 
 

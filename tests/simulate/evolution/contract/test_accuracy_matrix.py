@@ -153,7 +153,8 @@ def test_pinned_family_density(
     case = accuracy_case(name)
     reference = matrix_reference(case)
     families = (case.idle_family, family) if case.idle_family is not None else (family,)
-    budget = 2e-3 if name in COMPLEX_SINGLE_GATE_CASES else 1e-3
+    diagonal_edge = name == "single_gate_diagonal_inside"
+    budget = 2e-3 if name in COMPLEX_SINGLE_GATE_CASES and not diagonal_edge else 1e-3
     with closing(Engine(1, families=families, backend="cpu")) as engine:
         result = engine.evolve(case.source, (case.batch,), budget=budget)
     require_families(result.paths, families)
@@ -172,29 +173,33 @@ def test_pinned_family_density(
             )
         )
     )
-    assert error <= 2e-3, f"{name}/{family}: density error {error:.9g} > 2e-3"
+    limit = budget if diagonal_edge else 2e-3
+    assert error <= limit, f"{name}/{family}: density error {error:.9g} > {limit}"
 
 
-@pytest.mark.parametrize("complex_envelope", [False, True], ids=["real", "complex"])
 def test_single_gate_diagonal_density(
-    complex_envelope: bool,
     request: pytest.FixtureRequest,
     matrix_reference: Callable[[AccuracyCase], ReferenceResult],
 ) -> None:
     budget = 1e-3
     family = "single_tone_gate"
-    case = single_gate_diagonal_case(complex_envelope=complex_envelope)
+    case = single_gate_diagonal_case(inside=False)
     with (
         closing(case.source),
-        closing(Engine(1, families=(family,), backend="cpu")) as engine,
+        closing(Engine(1, families=(family,), backend="cpu")) as gate,
+        closing(Engine(1, backend="cpu")) as default,
     ):
-        actual = engine.evolve(case.source, (case.batch,), budget=budget)
+        with pytest.raises(NoValidKernel) as refusal:
+            gate.evolve(case.source, (case.batch,), budget=budget)
+        assert refusal.value.attempted == (family,)
+        actual = default.evolve(case.source, (case.batch,), budget=budget)
         reference = matrix_reference(case)
-    require_families(actual.paths, (family,))
+    (fallback,) = actual.paths.segments_by_kernel
+    assert fallback != family
     error = density_error(actual.densities, reference.density)
     request.node.user_properties.append(
         measurement_property(
-            AccuracyMeasurement(case.name, family, error, reference.convergence_error)
+            AccuracyMeasurement(case.name, fallback, error, reference.convergence_error)
         )
     )
     assert error <= budget, f"{case.name}: density error {error:.9g} > {budget}"

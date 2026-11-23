@@ -205,16 +205,15 @@ def populate_multitone_inventory(
             elif cheap_rwa_graph(table, int(row), context):
                 cheap.append(int(row))
         rows = np.array(expanded, dtype=np.int64)
-        physics = kernel.prepare_keys(table, rows, context) if len(rows) else ()
+        physics = kernel.history_keys(table, rows, context)
         keys = []
         inventory: dict[bytes, int] = {}
         for row, key in zip(rows, physics, strict=True):
             model = table.model(source, row)
+            # The augmented model keeps the physical namespace (and shift);
+            # its evolve-local virtual bank is not part of that identity.
             identity = sha256(
-                b"multitone-cold"
-                + model.identity.encode()
-                + key.tobytes()
-                + table.folded_channel_key(int(row))
+                b"multitone-cold" + model.identity.encode() + key.tobytes()
             ).digest()
             keys.append(identity)
             inventory[identity] = inventory.get(identity, 0) + 1

@@ -50,7 +50,11 @@ SINGLE_GATE_POLICY = (
     GATE_POLICY,
     MULTITONE_RETENTION_POLICY,
 )
-COMPLEX_SINGLE_GATE_POLICY = (SINGLE_GATE_POLICY, COMPLEX_ENVELOPE_RWA_POLICY)
+COMPLEX_SINGLE_GATE_POLICY = (
+    SINGLE_GATE_POLICY,
+    COMPLEX_ENVELOPE_RWA_POLICY,
+    "carrier-diagonal-spread-v1",
+)
 
 
 @dataclass(frozen=True)
@@ -254,7 +258,7 @@ def _admit_physics(
 ) -> NDArray[np.bool_]:
     """Evaluate RWA and phase-graph validity once per physics key."""
     accepted = (admit_single_rows if single_tone else admit_rows)(table, rows, context)
-    peaks = envelope_bounds(table, context.work_plan).peaks
+    bounds = envelope_bounds(table, context.work_plan)
     for index in np.flatnonzero(accepted):
         row = int(rows[index])
         # SegmentTable owns finite playback support. As for single-tone gates,
@@ -263,13 +267,26 @@ def _admit_physics(
         # interpolation as direct integration; no waveform rewrite is needed.
         graph = _row_graph(table, row, context)
         count = table.tones[row]
-        amplitudes = (
-            np.abs(table.tone_amplitude[row, :count])
-            * peaks[table.tone_envelope[row, :count]]
-        )
-        accepted[index] = pruning_admitted(
-            graph, amplitudes, float(table.duration_ns[row]), context.budget
-        )
+        envelopes = table.tone_envelope[row, :count]
+        amplitudes = np.abs(table.tone_amplitude[row, :count]) * bounds.peaks[envelopes]
+        duration = float(table.duration_ns[row])
+        accepted[index] = pruning_admitted(graph, amplitudes, duration, context.budget)
+        if accepted[index] and single_tone and not bounds.real[envelopes[0]]:
+            drive = table.model(context.source, row).drives[table.tone_port[row, 0]]
+            # A carrier diagonal cannot satisfy q[i]-q[i]=1, even if the
+            # RWA retention window restores it. Bound its omission without
+            # assuming cancellation or relying on the incoming carrier phase.
+            spread_ghz = np.hypot(
+                np.ptp(drive.in_phase_ghz.diagonal().real),
+                np.ptp(drive.quadrature_ghz.diagonal().real),
+            )
+            # Re(z)X + Im(z)Y has diagonal spectral spread <= |z| times
+            # spread_ghz. Scalar identity terms cancel in a commutator.
+            # Duhamel bounds the trace distance from this term alone by
+            # π * GHz * ns (dimensionless), not the total gate/RWA error.
+            accepted[index] = (
+                np.pi * duration * amplitudes[0] * spread_ghz <= context.budget
+            )
     return accepted
 
 
