@@ -217,3 +217,11 @@ e→g mist 在沒有 relax 的鏈裡等於一次不完全的 reset。鏈的穩�
   - `zcu_lab/v2/twotone/freq/core.py`：`FreqCfg` 有 `reps` 和 `relax_delay` 欄位。
 - **模擬：** 都是一次性的 numpy 程式，程式與原始輸出沒有入庫。共同設定：2 態隱馬可夫鏈、Bloch 驅動、T1 = 20 µs、T2 = 15 µs。
 - **文獻：** 列在 frontmatter 的 `basis`。Benaych-Georges & Nadakuditi、Stone、Hsu–Kakade–Zhang、Anandkumar 等、Juang & Pappa 這幾篇沒有逐篇查證。
+
+## 後記
+
+2026-11-23，使用者更正：「我可能要修正一下關於讀出鏈的裁決，我說過平均snr可能到0.1是錯的，是由於熱分佈導致的singleshot錯覺，實際平均應該可以到2，考慮讀出鏈策略時可以從1.5開始考慮，而不用從0.1」
+
+原先的 0.1 是熱布居讓 single-shot IQ 的兩團看似重疊所造成的錯覺。此後評估讀出鏈策略時，平均 SNR 從 1.5 起考慮，不再以 0.1 為下限。
+
+2026-11-04〈自校準的比較〉表只比較 SNR 0.1、0.3、1。SNR 1 欄的讀出鏈相對標準差全部較小（〈結論〉第 7 點：「SNR 1 時全部勝出」）。SNR 0.1 與 0.3 都有讀出鏈相對標準差較大的情況，這兩個 SNR 都低於新前提。SNR 1.5–2 未模擬，表中結果不涵蓋這個範圍。第 7 點「採用自校準策略」的方向不受這次更正影響。
