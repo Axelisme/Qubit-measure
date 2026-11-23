@@ -240,6 +240,7 @@ def _draw_pooled_survival(
         params = fit.fit.values
         for arm, label in enumerate(("Reference", "CZ interleaved")):
             measured = pooled_trials[arm] > 0
+            # Match point weights to show the joint-fit residual without refitting.
             gg_fraction = pooled_gg[arm, measured] / pooled_trials[arm, measured]
             weight = np.interp(xs, depths[measured], gg_fraction)
             decay = params[f"p_{arm}"] ** xs

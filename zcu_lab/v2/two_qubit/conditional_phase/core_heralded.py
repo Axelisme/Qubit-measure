@@ -673,6 +673,7 @@ def _pooled_phase_series(
             )
             gg_xy = amplitudes[0] * np.stack((np.cos(phases[0]), np.sin(phases[0])))
             ee_xy = amplitudes[1] * np.stack((np.cos(phases[1]), np.sin(phases[1])))
+            # Match point weights to show the joint-fit residual without refitting.
             predicted_xy = weights * gg_xy + (1 - weights) * ee_xy
             prediction = _unwrap_about_slope(_wrapped_phase(*predicted_xy), slope_deg)
             at_sample = prediction[np.searchsorted(grid, ns)]
