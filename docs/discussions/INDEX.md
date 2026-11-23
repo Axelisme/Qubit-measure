@@ -171,6 +171,8 @@
 - 2026-11-23 [Single-shot T1 的兩個衰減時間與 tone Stop 初值](2026-11-23-singleshot-t1-relaxation-times.md)：讀圖語意。圖由短到長列出兩個模型衰減時間，寫回仍提議較短值供 tone Stop 取五倍。
 - 2026-11-23 [一維反演量的誤差棒與圖上事實](2026-11-23-inverted-error-bars-and-figure-facts.md)：圖形呈現。可傳遞 shot 共變異的一維反演量也畫棒；圖呈現品質值，寫回建議留在 Writeback。
 - 2026-11-23 [已存統計量的第一層誤差棒](2026-11-23-errorbars-tier1-saved-stats.md)：範圍分層。只畫已存矩可推的棒（reset、chain joint residual、readout power），不改取數與存檔；合併矩不扣 round 間漂移。
+- 2026-11-23 [MIST 距離的一階誤差棒](2026-11-23-mist-trace-propagated-sem.md)：圖形呈現。同批六矩傳遞平均 IQ 距離的 shot SEM，Live 與 Analyze 同式。
+- 2026-11-23 [IQ 六矩共用原始矩捨入界](2026-11-23-shared-iq-rounding.md)：數值判準。矩陣與線性投影共用原始矩門檻；不可估的點留中心、只略依賴它的棒。
 - 2026-11-23 [一維讀出校正無解時保留分類比例](2026-11-23-singular-readout-analysis.md)：Analyze 失敗語意。六個 circle 入口保留同次分類圖，不交付校正數值、擬合或寫回提議。
 - 2026-11-23 [圖磚沿用存檔幾何](2026-11-23-figure-fixed-geometry.md)：圖形呈現。各面以 12×9 in 排版後等比嵌入。R7 只在固定幾何的 PNG 驗版面，Data 保留縮圖選圖與 `View figure`。
 - 2026-11-22 [在 Measure Data 頁讀原圖](2026-11-22-data-figure-reading.md)：圖形呈現。記錄當時用縮圖選圖、在同頁捲動閱讀的做法。現行圖磚與閱讀面見 [Figure presentation](../../lib/zcu_tools/gui/app/measure/README.md#figure-presentation)。
@@ -237,6 +239,7 @@
 - 2026-11-23 [CZ 最佳化的 Labber 選集](2026-11-23-cz-optimize-labber-selection.md)：資料格式。Native 保留 `duration`；Labber 只匯出 `params` 與 `peak`，不替無軸變數加軸。
 - 2026-11-23 [Coherence 的 shot SEM 只隨當次 Run 交接](2026-11-23-coherence-run-only-shot-sem.md)：資料入庫（superseded）。只在記憶體交接矩的保存決策已由 [Native 保存六矩](2026-11-23-coherence-native-shot-moments.md) 取代。
 - 2026-11-23 [Coherence 的 shot 矩寫入 Native 檔](2026-11-23-coherence-native-shot-moments.md)：資料入庫。三個 leaf 可選保存同次六矩，重載後重算 SEM；Labber 匯出與三個歷史輸入契約不變。
+- 2026-11-23 [舊 MIST gain Labber 的同版轉換](2026-11-23-mist-legacy-labber-equivalence.md)：歷史格式。固定原單 log 宣告，兩種 profile 證明等價才保留版號。
 
 ## 量測策略
 
@@ -262,4 +265,4 @@
 - 2026-11-21 [Chain length 掃描固定 pulse 與 ADC window 的長度差](2026-11-21-chain-length-fixed-margin.md)：讀出時序。每點 pulse 長度為當點 ADC window 加上可編輯的長度差，不在 cfg 另填飛行時間。
 - 2026-11-21 [Rπ length 沿用讀出模組的長度差](2026-11-21-rpi-length-fixed-margin.md)：讀出時序。Rπ 的 ADC window 掃描沿用可編輯的模組長度差，保留交替脈衝序列與結果形狀。
 - 2026-11-21 [讀出範本在 ADC 窗口前後各留 0.015 µs](2026-11-21-readout-template-window-margin.md)：預設時序。範本、DPM 寫回與普通 onetone 表單共用 0.03 µs 的長度差。
-- 2026-11-23 [MIST single trace 保留平均 IQ 的位移大小](2026-11-23-mist-single-trace-observable.md)：讀圖語意。Live 與預設 Analyze 用同一掃描前段複數參考，畫幅值而不套用 shot SEM。
+- 2026-11-23 [MIST single trace 保留平均 IQ 的位移大小](2026-11-23-mist-single-trace-observable.md)：讀圖語意。Live 與預設 Analyze 用同一掃描前段複數參考，畫幅值而不套用 shot SEM（不畫棒已由[新紀錄](2026-11-23-mist-trace-propagated-sem.md)取代）。
