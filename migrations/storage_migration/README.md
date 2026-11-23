@@ -175,7 +175,13 @@ T1 的 fit 欄位包括 `params`、`stderr`、`bounds`、`fixed`、`free`、`cos
 
 RunMetadata、RunSnapshot 與 SoftwareProvenance 由 [experiment](../../lib/zcu_tools/experiment/README.md) 擁有。遷移先建 typed metadata，再以 `model_dump(mode="json")` 編碼，完成後才發布 native。通用容器格式由 [datafile](../../lib/zcu_tools/datafile/README.md) 擁有。遷移不手造 ledger 事件，Load 由 native metadata 取得身分，不解析目錄名補歷史事實。
 
-- Native schema 與兩個 callbacks 以 `(source tag, cfg_type)` 的明確歷史身分配對。缺 cfg identity、無對應 schema 或 typed-invalid cfg 時只 pending，不回退 tag-only。`native_tags` 只轉換新 RunMetadata 的 tag，不改歷史 raw 或正常 loader。
+- **歷史輸入。** `LegacyRunEvidence` 提供 run 事實；`MigrationMapping.data_schemas` 提供 `load_legacy_labber_payload` 使用的 disk schema。Disk schema 與兩個 callbacks 以 `(source tag, cfg_type)` 的明確歷史身分配對。缺 cfg identity、無對應 schema 或 typed-invalid cfg 時只 pending，不回退 tag-only。`native_tags` 只轉換新 RunMetadata 的 tag，不改歷史 raw 或正常 loader。
+
+  [`declare_migration_experiment`](../experiment_declaration.py) 未收到 `schemas` 時，由 `_legacy_schemas` 按 Native spec 的全部變數建立 disk schema；歷史 log 與現行 Native 變數不同時，明列 `schemas`。MIST gain 在 [`migration_experiments.py`](../migration_experiments.py) 以 `_MIST_GAIN_SCHEMA` 固定 `mist/gain / PowerDepCfg` 的歷史單 log。Profile 版號查 [`storage_mapping.py`](../storage_mapping.py) 的 `_KIND_REVISIONS`；[兩種 profile 的等價驗收](../README.md#legacy-resultdatabase--native-storage)只支持 MIST gain 這次保留版號。
+
+- **現行 Native 驗證。** `declare_migration_experiment` 以目前的 Native spec 驗 cfg，並以 `load_run` 做 typed Native Load。Native 的必填與可選變數規則見 [ADR-0069〈Native 可選變數與 Labber 投影〉](../../docs/adr/0069-experiment-core-and-frontends.md#native-可選變數與-labber-投影)。
+
+- **現行 Labber 輸出。** `GroupedAxesSpec.labber_variables` 只選新匯出的變數，不決定 Native 必填欄位，也不供離線 reader 推導歷史輸入。
 
 - Legacy evidence 1.x 的 params 與來源稽核使用本 package 的 `LegacyParameterSnapshot`、
   `LegacyParameterSource`、`LegacyCloneOrigin`。Wire shape 不變，完整 raw evidence 留在 manifest。
@@ -215,7 +221,11 @@ RunMetadata、RunSnapshot 與 SoftwareProvenance 由 [experiment](../../lib/zcu_
 
 - 清理前重驗備份與完整來源清單。來源新增、變更或非工具搬移造成的缺檔會拒絕清理。先持久化 `cleaning`，再逐檔核對 hash、刪檔並移除空目錄。中斷後 resume 只收尾清理，允許已核實刪除的來源檔缺席，不重跑轉換。不承諾並行 writer 或掉電交易；來源有其他 writer 時不得執行。Dry-run 只規劃，連備份目錄與清單都不建立。
 
-文件 baseline 保存 owner normalized 值、unknown raw、來源／目的與 prepared 狀態。Report 與 manifest 的 forward-minor unknown 欄位仍保留，內容值不從舊 raw 合併回已移除的 keys。完成重跑只回傳新的 skipped 快照，不重寫原 manifest／報告。
+文件 baseline 保存 owner normalized 值、unknown raw、來源／目的與 prepared 狀態。Report 與 manifest 的 forward-minor unknown 欄位仍保留，內容值不從舊 raw 合併回已移除的 keys。完成重跑只從既有報告產生新的 skipped 快照，不重寫原 manifest／報告。
+
+`bootstrap.py` 的 `prepare_session` 比對固定身分與 `mapping_version`、重驗備份與文件 baseline，並經 `recovery.py` 的 `validate_owned_state` 核對受管目的的 publication 狀態和 hash。這些核對與 run evidence 驗證都在 `cleanup_phase == "complete"` 提早回傳之前。`converter.py` 的 `migrate_storage` 在同一條件下直接回傳報告，不進 Labber parser 或 typed Native Load。
+
+首次 Native 發布後，`runs.py` 驗目的 hash、讀容器並呼叫 typed Load；成功後再核 hash 並記 `native_validated`。完成重跑核對的是已發布的檔案，不重新產生這筆驗證證據。
 
 `state.py` 集中 report／manifest encoding 與 copy、native、samples、processed spectrums、move 的 publication recovery。`documents.py` 用 owner 在 sibling temp 完成 global／point／library／分析 JSON，固定 typed expected 與 previous 後才發布。參數 handle 共用 `ParameterView`，manifest 格式 1.0 的 `"setup"`／`"point"` DocumentKind 依來源文件路徑分類，不依 view 型別。重跑只接受 expected，或 prepared 階段的 previous，不接受第三值。`points.py` 在 manifest 指名暫存 label，以公開 new_point 建完整 point，固定 baseline 與完整 inventory 後 rename，再以 `parameters(point=label)` 取得正式 bound `ParameterView`。未 prepared 只清工具指名的暫存，prepared 後不重生 created_at。本 package 不提供掉電保證、硬體操作或多程序 writer 協調。
 
