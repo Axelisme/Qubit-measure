@@ -240,6 +240,43 @@ def propagated_iq_shot_sem(
     return np.where(unavailable, np.nan, sem)
 
 
+def contrast_shot_sem(
+    xy: NDArray[np.float64],
+    *,
+    variances: NDArray[np.float64],
+    shots: NDArray[np.float64],
+) -> NDArray[np.float64]:
+    """Estimate the shot SEM of hypot(X, Y) for independent projections.
+
+    Supply aligned float64 arrays of shape (..., 2) in X/Y order:
+    dimensionless means, plug-in variances of those means (population
+    variances divided by retained shot count), and retained shot counts.
+    Correct the variances for sample degrees of freedom, then propagate them
+    along the radial direction. At exactly zero contrast use the larger
+    projection SEM (the direction of maximum variance).
+
+    Return one SEM per point, NaN if either projection has fewer than two
+    shots or a nonfinite mean or variance. Mismatched shapes, invalid counts
+    (other than NaN for missing), or negative variances raise ValueError.
+    """
+    if xy.shape[-1:] != (2,) or xy.shape != variances.shape or xy.shape != shots.shape:
+        raise ValueError("X/Y means, variances and shot counts must match (..., 2)")
+    _validate_counts(shots)
+    if np.any(variances < 0):
+        raise ValueError("X/Y mean variances must be nonnegative")
+
+    defined = (shots >= 2) & np.isfinite(xy) & np.isfinite(variances)
+    n = np.where(defined, shots, np.nan)
+    projection_sem = np.sqrt(variances) * np.sqrt(n / (n - 1))
+    contrast = np.hypot(xy[..., 0], xy[..., 1])
+    direction = np.divide(
+        xy, contrast[..., None], out=np.zeros_like(xy), where=contrast[..., None] > 0
+    )
+    radial_sem = np.hypot.reduce(direction * projection_sem, axis=-1)
+    sem = np.where(contrast == 0, projection_sem.max(axis=-1), radial_sem)
+    return np.where(defined.all(axis=-1), sem, np.nan)
+
+
 def class_probability_covariance(
     counts: NDArray[np.float64] | NDArray[np.int64],
 ) -> NDArray[np.float64]:

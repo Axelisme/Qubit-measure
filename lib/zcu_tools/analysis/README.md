@@ -1,6 +1,6 @@
 # `zcu_tools.analysis` 模塊重點文檔
 
-**Last updated:** 2026-11-23，共用 IQ 六矩捨入界
+**Last updated:** 2026-11-23，逐點 contrast SEM 與 IQ 六矩
 
 **讀者：** framework-dev。分析核心、純數值工具與前端 adapter 的分工速查。
 
@@ -52,6 +52,7 @@ I/Q 投影權重可固定或逐點給定。`propagated_iq_shot_sem` 用逐點梯
 無窮矩等不合法輸入不屬於這類估計失敗。
 `readout_metrics.first_read_contrast` 保留 R1 均值距離，只省略該點不可估的 SEM 並記錄原因。
 MIST Live／Analyze 也保留有限距離，只省略依賴不可估共變異的棒，不替換參考。
+`contrast_shot_sem` 將獨立 X／Y 投影的平均值抽樣誤差傳遞到向量長度。恰零時取兩個投影 SEM 的較大者。
 
 ## 雙讀出矩的自校準
 

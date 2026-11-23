@@ -9,7 +9,7 @@ from typing import ClassVar
 import numpy as np
 from matplotlib.artist import Artist
 from matplotlib.cm import ScalarMappable
-from matplotlib.colors import Normalize
+from matplotlib.colors import Normalize, to_rgba
 from matplotlib.ticker import MaxNLocator
 from numpy.typing import NDArray
 from zcu_tools.analysis.fitting.phase_slopes import PhaseSlopeFit
@@ -37,6 +37,8 @@ from zcu_tools.program.v2 import (
 )
 from zcu_tools.program.v2.modules import MuxReadout
 
+from zcu_lab.v2.support import live_errorbar
+
 from .._phase import (
     CountQuadratures,
     QuadraturePhase,
@@ -44,6 +46,7 @@ from .._phase import (
     conditional_phase_deg,
     count_quadratures,
     fit_count_phase_slopes,
+    quadrature_contrast_sem,
     quadrature_phase_sem,
     reference_frequency_index,
     update_complete_frequency_phases,
@@ -209,6 +212,52 @@ def _start_live_view(
     ax.legend(loc="upper center", bbox_to_anchor=(0.5, -0.16), ncols=2)
     fig.show()
 
+    contrast_fig, contrast_ax = plots.subplots(
+        num="conditional_phase_contrast", layout="constrained"
+    )
+    contrast_fig.suptitle(
+        f"Heralded conditional phase · {config.target.capitalize()} · X/Y contrast"
+    )
+    contrast_ax.set(xlabel="Common CZ frequency (MHz)", ylabel="Classified contrast")
+    low, high = float(frequencies[0]), float(frequencies[-1])
+    padding = 0.03 * (high - low) if high > low else 0.05
+    contrast_ax.set_xlim(low - padding, high + padding)
+    contrast_ax.xaxis.set_major_locator(MaxNLocator(nbins=5))
+    contrast_ax.ticklabel_format(useOffset=False)
+    contrast_status = contrast_ax.set_title("Waiting for shots")
+    contrast_ax.set_prop_cycle(color=[to_rgba("C0"), to_rgba("C1")] * 2)
+    contrast = live_errorbar(contrast_ax, num_lines=4)
+    for k, (line, (herald, state)) in enumerate(
+        zip(
+            contrast_ax.lines,
+            (("(g,g)", "g"), ("(g,g)", "e"), ("(e,e)", "g"), ("(e,e)", "e")),
+            strict=True,
+        )
+    ):
+        line.set(label=f"{herald} spectator {state}", marker="." if k < 2 else "x")
+    contrast_ax.legend(loc="upper center", bbox_to_anchor=(0.5, -0.12), ncols=2)
+    contrast_fig.show()
+
+    @plots.on_plot_thread
+    def render_contrast(
+        payload: tuple[int, tuple[CountQuadratures, CountQuadratures]],
+    ) -> tuple[Artist, ...]:
+        n, groups = payload
+        contrast_status.set_text(f"{n} CZ gates")
+        return (
+            contrast_status,
+            *contrast.set(
+                frequencies,
+                np.concatenate(
+                    [
+                        np.hypot(group.values[:, 0], group.values[:, 1])
+                        for group in groups
+                    ]
+                ),
+                np.concatenate([quadrature_contrast_sem(group) for group in groups]),
+            ),
+        )
+
     expected_shots = config.reps * config.rounds
     processed = np.zeros(len(frequencies), dtype=bool)
     phase_deg = np.full_like(frequencies, np.nan)
@@ -235,6 +284,11 @@ def _start_live_view(
             f"{np.count_nonzero(complete)}/{complete.size} projections at {expected_shots} shots"
         )
         render((phase_deg, progress))
+        # Show the latest train with a complete X/Y pair, without another slope fit.
+        trains = np.flatnonzero(np.any(np.all(complete, axis=2), axis=(1, 2)))
+        if trains.size:
+            j = trains[-1]
+            render_contrast((int(gate_counts[j]), _fit_groups(sums[j], config)))
 
     return update_view
 
@@ -432,6 +486,7 @@ class ConditionalPhaseHeraldedExp(
         groups = (gg_group, ee_group)
         phases = tuple(phase_points(group.values) for group in groups)
         phase_sem = np.stack([quadrature_phase_sem(group) for group in groups])
+        contrast_sem = np.stack([quadrature_contrast_sem(group) for group in groups])
         # 2. Share the two groups' slopes and find the joint π crossing; keep the gg-only diagnostic.
         fitted = fit_count_phase_slopes(data.gate_counts, *groups)
         gg_fitted = fit_count_phase_slopes(data.gate_counts, gg_group)
@@ -518,11 +573,11 @@ class ConditionalPhaseHeraldedExp(
         for j, n in enumerate(data.gate_counts):
             _plot_phase_diagnostics(
                 plots,
-                frequencies,
+                cfg,
                 int(n),
-                cfg.target.capitalize(),
                 tuple(tuple(row[j] for row in group) for group in phases),
                 phase_sem[:, :, j],
+                contrast_sem[:, :, j],
             )
 
         _plot_herald_map(
@@ -671,13 +726,15 @@ def _plot_slopes(
 
 def _plot_phase_diagnostics(
     plots: Plots,
-    xs: NDArray[np.float64],
+    cfg: ConditionalPhaseHeraldedCfg,
     n: int,
-    target: str,
     phases: tuple[tuple[tuple[QuadraturePhase, ...], ...], ...],
     phase_sem: NDArray[np.float64],
+    contrast_sem: NDArray[np.float64],
 ) -> None:
     """Show contrast and phase before gate-count slope fitting, by spectator."""
+    xs = sweep2array(cfg.frequency)
+    target = cfg.target.capitalize()
     fig, _ = plots.subplots(
         num=f"phase_points_n_{n}",
         nrows=2,
@@ -689,10 +746,11 @@ def _plot_phase_diagnostics(
     for b, state in enumerate(("g", "e")):
         for h, (herald, marker) in enumerate((("(g,g)", ".-"), ("(e,e)", "x-"))):
             points = phases[h][b]
-            contrast_ax.plot(
+            contrast_ax.errorbar(
                 xs,
                 [p.contrast for p in points],
-                marker,
+                yerr=contrast_sem[h, b],
+                fmt=marker,
                 color=f"C{b}",
                 label=f"{herald} spectator {state}",
             )

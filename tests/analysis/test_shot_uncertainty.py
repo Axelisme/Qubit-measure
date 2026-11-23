@@ -3,6 +3,31 @@ import pytest
 from zcu_tools.analysis import shot_uncertainty
 
 
+def test_contrast_sem_propagates_independent_projection_moments() -> None:
+    # X shots (-1, 1, 1, 1, 1) and Y shots (0, 1, 1, 1, 1)
+    # have sample SEMs 0.4 and 0.2, with radial weights 0.6 and 0.8.
+    xy = np.array(
+        [[0.6, 0.8], [0, 0], [0.6, 1], [0.6, np.nan], [0, 1e-200], [0.6, 0.8]]
+    )
+    variances = np.array(
+        [
+            [0.128, 0.032],
+            [0.25, 0],
+            [0.128, 0],
+            [0.128, 0],
+            [0.25, 0.032],
+            [0.128, np.nan],
+        ]
+    )
+    shots = np.array([[5.0, 5], [4, 4], [5, 1], [5, np.nan], [4, 5], [5, 5]])
+
+    sem = shot_uncertainty.contrast_shot_sem(xy, variances=variances, shots=shots)
+
+    np.testing.assert_allclose(
+        sem, [0.2884441020371191, 0.5773502691896257, np.nan, np.nan, 0.2, np.nan]
+    )
+
+
 def test_iq_mean_covariance_keeps_cross_term_and_uses_retained_counts() -> None:
     # Paired shots (0, 0) and (3, 4), then the same two shots retained twice.
     moments = np.array(
