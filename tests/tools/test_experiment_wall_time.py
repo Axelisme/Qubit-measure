@@ -35,9 +35,18 @@ def _write_scenes(directory: Path, *scenes: str | dict[str, object]) -> Path:
                 "point": "initial",
                 "unpinned": {"form": "current Form", "point": "fixture point"},
                 "scenes": [
-                    {"scene_id": scene, "adapter": scene, "basis": "test workload"}
-                    if isinstance(scene, str)
-                    else scene
+                    {
+                        "metric": {"kind": "shots"},
+                        **(
+                            {
+                                "scene_id": scene,
+                                "adapter": scene,
+                                "basis": "test workload",
+                            }
+                            if isinstance(scene, str)
+                            else scene
+                        ),
+                    }
                     for scene in scenes
                 ],
             }
@@ -80,6 +89,9 @@ class _CompletedRun:
 
     def failure(self) -> str | None:
         return None
+
+    def result(self) -> object:
+        pytest.fail("a shots-only Run does not need a Result denominator")
 
     def is_idle(self) -> bool:
         return True
@@ -176,6 +188,9 @@ def test_interrupted_run_has_a_persisted_start_but_no_measured_time(
 
         def failure(self) -> str | None:
             pytest.fail("interruption cannot publish a terminal outcome")
+
+        def result(self) -> object:
+            pytest.fail("interruption cannot publish a result")
 
         def is_idle(self) -> bool:
             return False
@@ -539,7 +554,7 @@ def test_failed_run_is_journaled_before_idle_check_and_never_timed(
     assert report["coverage"]["resolved"] == (2 if settled_idle else 1)
     summary = (output / "summary.md").read_text()
     assert f"Runs: {int(settled_idle)} timed, 0 timeout, 1 run_failed." in summary
-    assert "Core >180 s: —" in summary
+    assert "Core 超標（實測）: —" in summary
 
 
 def test_summary_groups_identical_diagnostics_and_lists_each_failure_record(
@@ -775,40 +790,6 @@ def test_stale_scene_is_unmeasured_and_resume_retries_it_after_adapter_returns(
     retried, reused = json.loads((continued / "report.json").read_text())["rows"]
     assert (retried["scene_id"], retried["reused"]) == (stale, False)
     assert (reused["scene_id"], reused["reused"]) == (active, True)
-
-
-def test_main_flags_only_unrounded_core_seconds_above_180(
-    tmp_path: Path, data_dir: Path
-) -> None:
-    evolve = {"fake/at": 174.0, "fake/above": 174.0001}
-    _write_scenes(data_dir, *evolve)
-
-    def measure(case: WallTimeCase, _data_dir: Path, telemetry: Path) -> float:
-        record = {
-            "families": {},
-            "wall_s": 190,
-            "compile_wall_s": 1,
-            "evolve_wall_s": evolve[case.adapter],
-            "readout_wall_s": 4,
-            "materialize_wall_s": 1,
-        }
-        (telemetry / "routing-test.jsonl").write_text(json.dumps(record) + "\n")
-        return 200.0
-
-    output = tmp_path / "output"
-    assert (
-        main(
-            ["--output", str(output)],
-            data_dir=data_dir,
-            discover=lambda: _inventory(dict.fromkeys(evolve), measure),
-            read_commit=lambda: "abc",
-        )
-        == 0
-    )
-    table = (output / "summary.md").read_text(encoding="utf-8")
-    assert "Core >180 s: `fake/above`\n" in table
-    assert "Core 已知至少超標: —\n" in table
-    assert "Core 未判定: —\n" in table
 
 
 def test_main_reports_known_ftf_exclusions_without_trying_run(

@@ -62,7 +62,7 @@ def make_form(ctx: FormContext) -> Form[ChevronCfg]:
             "x180_qubit2": Slot("$qubit2.module.x180", copy=True),
             "readout": readout,
             "drive": drive,
-            "frequency": Range(None, None, expts=25),
+            "frequency": Range(None, None, expts=31),
             "duration": Range(None, None, expts=101),
         },
     )
