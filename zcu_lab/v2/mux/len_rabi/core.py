@@ -156,7 +156,7 @@ from zcu_lab.v2.support.mux_sweep_cfg import (
 )
 
 _SWEEP_LABEL = "Drive pulse length (µs)"
-_IQ_LABEL = "Principal-axis mean IQ (a.u.)"
+_IQ_LABEL = "IQ projection (a.u.)"
 
 
 @validated_dataclass(frozen=True)
