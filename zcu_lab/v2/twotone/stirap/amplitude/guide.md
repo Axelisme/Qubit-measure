@@ -21,7 +21,7 @@ See [`zcu_lab/v2/operator-workflow.md`](../../../operator-workflow.md) for the s
 
 Run shows raw g/e/f label fractions. Pump gain is x and Stokes gain is y, both requested coordinates in a.u. A line through the origin is a fixed gain ratio. An incomplete round leaves blanks.
 
-Analyze shows measured fractions above corrected fractions, using the Run's saved calibration. The title's condition number and minimum singular value warn about noise amplification when respectively large and small. Corrected fractions are not clipped. These 2D maps do not show pointwise shot SEM. Preparation labels cannot establish pure state populations, transfer fidelity or the intermediate state.
+Analyze shows measured fractions above corrected fractions, using the Run's saved calibration. The title's condition number and minimum singular value warn about noise amplification when respectively large and small. Corrected fractions are not clipped. Read the fraction from each panel’s own colorbar in Run and Analyze. These 2D maps do not show pointwise shot SEM. Preparation labels cannot establish pure state populations, transfer fidelity or the intermediate state.
 
 The corrected f cross marks the largest finite sampled estimate; ties go to the first acquired point, and no finite value gives no peak. Select a broad region of high f and low e, then refine the grid. If it reaches an edge, extend within the approved range before adopting the gains. No writeback is proposed.
 

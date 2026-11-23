@@ -376,11 +376,10 @@ class JointReadoutExp(Experiment[JointReadoutResult, JointReadoutCfg]):
         fig, ax = plots.subplots(num="matrix", figsize=(12, 5), layout="constrained")
         image = ax.imshow(
             np.ma.masked_invalid(answer.matrix),
-            vmin=0,
-            vmax=1,
             cmap="Blues",
             aspect="auto",
         )
+        shades = np.asarray(image.norm(answer.matrix), dtype=np.float64)
         for row, col in np.ndindex(answer.matrix.shape):
             value = answer.matrix[row, col]
             if np.isfinite(value):
@@ -390,7 +389,7 @@ class JointReadoutExp(Experiment[JointReadoutResult, JointReadoutCfg]):
                     f"{value:.3f}\n{answer.counts[row, col]:,.0f} count",
                     ha="center",
                     va="center",
-                    color="white" if value >= 0.6 else "black",
+                    color="white" if shades[row, col] >= 0.6 else "black",
                 )
             elif col == OUTCOME_COUNT // 2:
                 ax.text(col, row, "No retained shots", ha="center", va="center")
@@ -404,8 +403,6 @@ class JointReadoutExp(Experiment[JointReadoutResult, JointReadoutCfg]):
             title="Joint readout · Qubit1 / Qubit2 · Probability and count matrix",
         )
         ax.grid(False)
-        fig.colorbar(
-            image, ax=ax, label="Terminal class probability", ticks=np.linspace(0, 1, 6)
-        )
+        fig.colorbar(image, ax=ax, label="Terminal class probability")
         # 3. Return count and probability matrices for the saved analysis.
         return answer

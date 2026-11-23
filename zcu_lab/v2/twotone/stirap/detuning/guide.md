@@ -19,7 +19,7 @@ See [`zcu_lab/v2/operator-workflow.md`](../../../operator-workflow.md) for the s
 
 ## Read the maps and choose new carriers
 
-Run shows measured g/e/f fractions, with requested Pump detuning on x and Stokes detuning on y. The title counts retained shots. Unfinished points remain blank. Analyze shows measured fractions above corrected fractions using the saved Run classifier. A large condition number or small minimum singular value means amplified count noise. Corrected fractions are not clipped. These 2D maps have no pointwise shot SEM and do not measure transfer fidelity or intermediate-state population.
+Run shows measured g/e/f fractions, with requested Pump detuning on x and Stokes detuning on y. The title counts retained shots. Unfinished points remain blank. Analyze shows measured fractions above corrected fractions using the saved Run classifier. A large condition number or small minimum singular value means amplified count noise. Corrected fractions are not clipped. Read the fraction from each panel’s own colorbar in Run and Analyze. These 2D maps have no pointwise shot SEM and do not measure transfer fidelity or intermediate-state population.
 
 The cross marks the largest finite corrected f sampled on the grid; ties use the first acquired point. Look for a stable high-f, low-e region. If it centers on Pump +0.5 MHz and Stokes −0.4 MHz, refine around those offsets, or add them to the respective carriers and center the next detuning scan at zero. No writeback is proposed.
 

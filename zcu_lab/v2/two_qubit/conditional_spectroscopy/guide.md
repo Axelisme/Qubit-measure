@@ -14,7 +14,7 @@
 ## 讀 Run 與 Analyze 圖
 
 - **Terminal P(e)**：各 bias 的四個準備 panel 各有兩顆 qubit 的終端 P(e) 對 RF 曲線。分母含保留 shots 的 g/e/other，不回推雙 Xπ 之前的布居。用峰谷位置選窗。Run 與 Analyze 的一維頻譜以折線連接實測點，誤差棒用同頻點保留 shots 算出 P(e) 的 shot SEM，表示該點機率估計的抽樣不確定度，不是 fit 誤差或輪間散布。少於兩發不畫棒。Run 顯示已取樣的準備／頻率點及保留數。
-- 多 bias 的 **Terminal P(e) map**：每顆 qubit 各有 RF × DC map，四個分支共用 0–1 色階，用亮暗帶追蹤頻線；不畫逐格誤差棒。
+- 多 bias 的 **Terminal P(e) map**：每顆 qubit 各有 RF × DC map，四個分支共用該圖的實測機率範圍，用亮暗帶追蹤頻線；不畫逐格誤差棒。
 - **Retained shots**：比較各準備的保留計數與 RF；0 代表取得資料但沒有 shot 通過，缺點代表未取數。不要把空白當成零激發。
 
 ## 選下一次掃描
