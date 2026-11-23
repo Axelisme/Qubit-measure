@@ -49,6 +49,7 @@ status: accepted
 - 2026-10-29，使用者提議「將center/radius/confusion matrix等資訊直接放到readout cfg裡的可選欄位中」，並說「module本身不利用，但可以自然綁定到對應的readout module上」。對 library 所有權與不搬舊值答「2A 3A 4同意」，對比對校準設定答「QC3我認為分類參數比對需求還不確定，先A」。見 [Singleshot 分類參數放進 readout cfg](../discussions/2026-10-29-readout-classifier.md)；其中早期取數與兩次 Apply 的說法不代表現行契約。
 - 2026-10-29，使用者對三態校準交接答「3A」；對沿用 QICK 的 float64 I/Q 分量答「我想推進Program設計一致性，選A」。Reducer 收 I/Q 分量，需要複數時自己轉換，`acquire_decimated` 不因這項選擇變更。原始討論未入庫，見 Git `9005d4ede`。同日提出的每 ADC processor、單一 payload 軸及框架取平均，在 2026-10-30 由 [shot-sums 裁決](#shot-sums-與-heralding) 取代。
 - 使用者 2026-11-18 過目分類軸等 agent 選擇時說「我大概看了一遍，基本上是没问题」，並說「并不算是裁决，而算是建议」。引用這些選擇時只作參考。原始討論未入庫，見 Git `1f4b16aa0`。
+- 2026-11-23，使用者對保存矩陣奇異答「0423矩陣奇異就不校正我接受，但還是可以提writeback，還有recipe接口本來就可以改，他是連動修改的」、「2矩陣奇異就跟沒矩陣一樣處理」；對 Raman／STIRAP 無校正的 Analyze 答「M1、邊界對，D」。Run 仍要求 centroid3；Analyze 只讀已分類 counts。見[讀出矩陣奇異就當作沒有矩陣](../discussions/2026-11-23-singular-matrix-as-absent.md)與[無校正的 Raman／STIRAP 分類圖與摘要](../discussions/2026-11-23-classified-raman-stirap-analysis.md)。
 
 ### 原生 QICK projection 的 readout 與 caller 分工
 

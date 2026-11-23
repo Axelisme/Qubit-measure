@@ -88,6 +88,8 @@ ADR 宣告 package 之間的依賴方向時，同時在 `.importlinter` 建立�
 
 原則：懂物理的操作員不讀程式碼就能判讀實驗。圖只放判讀所需的事實，預選理由留在 Writeback；adapter 提供 GUI 與 MCP 共用摘要。見 [ADR-0069〈呈現規範〉](0069-experiment-core-and-frontends.md#呈現規範)。可從同批統計量推導的棒都畫，含一階傳遞；Live 也畫，見[能推導的誤差棒都畫](0069-experiment-core-and-frontends.md#能推導的誤差棒都畫)。
 
+原則：報告只寫本次做了什麼；沒做的步驟留 null、原因記 log，程式讀者需要區分原因時才加狀態欄，見 [ADR-0069](0069-experiment-core-and-frontends.md#報告只寫本次做了什麼)。
+
 原則：Measure 圖磚以 12×9 in 排版，只等比縮放整張圖；R7 在存檔 PNG 檢查版面，見 [ADR-0069](0069-experiment-core-and-frontends.md#圖以固定存檔幾何排版)。
 原則：平均 IQ 的一維圖預設用主軸投影，二維 flux／頻率圖用逐 bias 扣背景後的幅值，改用其他量須寫明理由，見 [ADR-0069](0069-experiment-core-and-frontends.md#平均-iq-的投影慣例)。
 

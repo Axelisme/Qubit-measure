@@ -168,12 +168,15 @@
 
 ## Measure UI
 
-- 2026-11-23 [Single-shot T1 的兩個衰減時間與 tone Stop 初值](2026-11-23-singleshot-t1-relaxation-times.md)：讀圖語意。圖由短到長列出兩個模型衰減時間，寫回仍提議較短值供 tone Stop 取五倍。
+- 2026-11-23 [Singleshot T1 以振幅分 T1／T1b](2026-11-23-singleshot-t1-amplitude-naming.md)：讀圖語意。e→e 曲線振幅大的模是 T1、小的是 T1b；兩版都提議寫回主模。
+- 2026-11-23 [Single-shot T1 的兩個衰減時間與 tone Stop 初值](2026-11-23-singleshot-t1-relaxation-times.md)：讀圖語意。Superseded，由[振幅命名](2026-11-23-singleshot-t1-amplitude-naming.md)取代；Stop 初值仍取五倍。
 - 2026-11-23 [一維反演量的誤差棒與圖上事實](2026-11-23-inverted-error-bars-and-figure-facts.md)：圖形呈現。可傳遞 shot 共變異的一維反演量也畫棒；圖呈現品質值，寫回建議留在 Writeback。
 - 2026-11-23 [已存統計量的第一層誤差棒](2026-11-23-errorbars-tier1-saved-stats.md)：範圍分層。只畫已存矩可推的棒（reset、chain joint residual、readout power），不改取數與存檔；合併矩不扣 round 間漂移。
 - 2026-11-23 [MIST 距離的一階誤差棒](2026-11-23-mist-trace-propagated-sem.md)：圖形呈現。同批六矩傳遞平均 IQ 距離的 shot SEM，Live 與 Analyze 同式。
 - 2026-11-23 [IQ 六矩共用原始矩捨入界](2026-11-23-shared-iq-rounding.md)：數值判準。矩陣與線性投影共用原始矩門檻；不可估的點留中心、只略依賴它的棒。
-- 2026-11-23 [一維讀出校正無解時保留分類比例](2026-11-23-singular-readout-analysis.md)：Analyze 失敗語意。六個 circle 入口保留同次分類圖，不交付校正數值、擬合或寫回提議。
+- 2026-11-23 [讀出矩陣奇異就當作沒有矩陣](2026-11-23-singular-matrix-as-absent.md)：Analyze 失敗語意。奇異或溢位的保存矩陣等同缺席，未校正照常 fit、摘要與 Writeback，原因記 log。
+- 2026-11-23 [無校正的 Raman／STIRAP 分類圖與摘要](2026-11-23-classified-raman-stirap-analysis.md)：Analyze 失敗語意。缺校正時畫保存的分類比例、診斷留 null，STIRAP 另報分類 f 峰。
+- 2026-11-23 [一維讀出校正無解時保留分類比例](2026-11-23-singular-readout-analysis.md)：Analyze 失敗語意。Superseded，由[無矩陣等價](2026-11-23-singular-matrix-as-absent.md)取代。
 - 2026-11-23 [圖磚沿用存檔幾何](2026-11-23-figure-fixed-geometry.md)：圖形呈現。各面以 12×9 in 排版後等比嵌入。R7 只在固定幾何的 PNG 驗版面，Data 保留縮圖選圖與 `View figure`。
 - 2026-11-22 [在 Measure Data 頁讀原圖](2026-11-22-data-figure-reading.md)：圖形呈現。記錄當時用縮圖選圖、在同頁捲動閱讀的做法。現行圖磚與閱讀面見 [Figure presentation](../../lib/zcu_tools/gui/app/measure/README.md#figure-presentation)。
 - 2026-11-22 [Live-only 實驗的 figures-only Analyze](2026-11-22-figures-only-analyze.md)：Analyze 能力。四個 leaf 只從明確來源重畫具名圖，不增加數值結果或寫回。
