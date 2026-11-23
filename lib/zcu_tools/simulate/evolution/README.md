@@ -1,6 +1,6 @@
 # Segment evolution
 
-**Last updated:** 2026-11-23, sampled RWA probe lifetime
+**Last updated:** 2026-11-23, simulator optimization index
 
 **讀者：** framework-dev、agent。Segment evolution 的公開輸入、路由與數值邊界。
 
@@ -1639,16 +1639,7 @@ densities or offline tables across processes or Engine lifetimes.
 
 ## Research records
 
-Experiments, rejected alternatives and historical measurements live in the
-tracked discussion snapshots, not in the runtime contract above:
-
-- [Constant-pair guard and diagnostic](../../../../docs/discussions/2026-11-16-constant-multitone-guard-diagnostic.md).
-- [Dyson input reuse](../../../../docs/discussions/2026-10-18-dyson-input-reuse.md).
-- [Constant-period builders](../../../../docs/discussions/2026-10-18-constant-period-builders.md).
-- [Shaped periods and gates](../../../../docs/discussions/2026-10-18-shaped-period-and-gates.md).
-- [Two-tone Floquet](../../../../docs/discussions/2026-10-18-two-tone-floquet.md).
-- [Direct integration](../../../../docs/discussions/2026-10-18-direct-integration.md).
-- [Planner evidence and overhead](../../../../docs/discussions/2026-10-18-planner-evidence-and-overhead.md).
+See the [simulator optimization index](../../../../docs/simulator-attempts/INDEX.md) for attempts, rejected alternatives and historical measurements.
 
 The shared numerical contract suite is
 [tests/simulate/evolution/contract/kernel_suite.py](../../../../tests/simulate/evolution/contract/kernel_suite.py).
