@@ -20,7 +20,7 @@ In `mux_t2ramsey`, omission retains settings. Null `participants` leaves a missi
 
 ## Measurement and analysis
 
-Live `measurement_i` uses the original tone index `i`, not the participant-list row. Read its progress in acquired delay points and accumulated shots per point. The connected markers show the signed principal-axis projection of mean IQ versus requested free-evolution delay. The projection is in a.u., not a population. With fewer than two finite points, the plot uses the I axis.
+Live `measurement_i` uses the original tone index `i`, not the participant-list row. Read its progress in acquired delay points and accumulated shots per point. Live and Analyze plot **IQ projection (a.u.)** versus requested free-evolution delay. This is the signed projection of mean IQ onto its principal axis, not a population. With fewer than two finite points, both plots use the I axis.
 
 Analyze `fit_i` keeps the same points and overlays the fitted model as a solid line. The dotted line marks T2* when it falls within the fitted window. If the fit fails, the plot connects the points and reports why no model is available.
 

@@ -20,7 +20,7 @@ In `mux_len_rabi`, omitted inputs retain settings. Null `participants`, `sweeps`
 
 ## Read the plots and use the result
 
-Live `measurement_i` and Analyze `fit_i` use the original tone index `i`, not the participant-list row. Live shows acquired length points. Analyze adds the fit and marks π length if in range. Check that the points support that inversion; projected mean IQ is not population.
+Live `measurement_i` and Analyze `fit_i` use the original tone index `i`, not the participant-list row. Live shows acquired length points. Analyze adds the fit and marks π length if in range. Check that the points support that inversion. Both plots label the signed projection of mean IQ **IQ projection (a.u.)**. It is not a population. They use the principal axis, or I if fewer than two finite points are available.
 
 Bars in Live and Analyze are shot SEM: the projected shot sample standard deviation divided by √(shot count). They describe uncertainty of the point mean, not fit error, shot spread or round-to-round spread. Mean-only files still fit without bars, and fewer than two shots give no bar. R² measures explained variation, normalized residual RMS measures mismatch relative to signal range, and the reported ± is fit uncertainty.
 

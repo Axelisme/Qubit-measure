@@ -14,6 +14,7 @@ import numpy as np
 import pytest
 from qtpy import QtCore
 from qtpy.QtCore import QCoreApplication, QTimer
+from qtpy.QtWidgets import QApplication
 from zcu_tools import program
 from zcu_tools.gui.app.measure import Registry, controller
 from zcu_tools.gui.app.measure.events.run import RunFinishedPayload
@@ -141,10 +142,31 @@ def _use_virtual_deadline(monkeypatch: pytest.MonkeyPatch, clock: _Clock) -> Non
     monkeypatch.setattr(QtCore, "QTimer", DeadlineTimer)
 
 
-@pytest.fixture
-def core_app() -> Iterator[QCoreApplication]:
-    """Keep the owner loop alive without opening windows or a Measure session."""
-    yield QCoreApplication.instance() or QCoreApplication([])
+@pytest.fixture(scope="session")
+def core_app() -> Iterator[QApplication]:
+    """Keep one headless Qt owner loop alive without opening windows.
+
+    Creates a QApplication rather than a bare QCoreApplication because Qt allows
+    only one application instance per process: leaving a QCoreApplication alive
+    in a shared xdist worker aborts any later GUI test that creates a QWidget.
+    """
+    with pytest.MonkeyPatch.context() as patch:
+        patch.setenv("QT_QPA_PLATFORM", "offscreen")
+        patch.setenv("QT_QPA_PLATFORMTHEME", "generic")
+        app = QApplication.instance()
+        if app is None:
+            app = QApplication([])
+    if not isinstance(app, QApplication):
+        raise RuntimeError(f"Qt tests require a QApplication, got {type(app).__name__}")
+    yield app
+
+
+def test_core_app_provides_a_widget_compatible_qapplication(
+    core_app: QApplication,
+) -> None:
+    """Running wall-time controller tests must leave a QApplication for GUI tests."""
+    assert isinstance(core_app, QApplication)
+    assert QCoreApplication.instance() is core_app
 
 
 def _headless_inputs(
