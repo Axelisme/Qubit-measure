@@ -1,16 +1,10 @@
-"""Optimize a dual-line CZ envelope and local Z with fixed-depth interleaved RB.
-
-I and Q use natural cubic splines on eight equally spaced knots. The six
-interior knots of each channel are free; both endpoints are zero. The render
-grid has 113 time samples in us, with a knot every 16 intervals.
-"""
+"""Optimize a dual-line CZ using fixed-depth interleaved RB."""
 
 from __future__ import annotations
 
 import math
 from collections.abc import Callable
 from dataclasses import dataclass
-from pathlib import Path
 from typing import Annotated, ClassVar, Self, override
 
 import cma
@@ -18,19 +12,12 @@ import numpy as np
 from matplotlib.artist import Artist
 from matplotlib.ticker import MaxNLocator
 from numpy.typing import NDArray
-from pydantic import Field, model_validator
-from scipy.interpolate import CubicSpline
-from zcu_tools.analysis.shot_uncertainty import class_probability_covariance
+from pydantic import Field, FiniteFloat, model_validator
+from scipy.fft import fft, fftfreq, fftshift, next_fast_len
 from zcu_tools.cfg_model import ConfigBase, FieldMeta
-from zcu_tools.core.waveform_format import WaveformSamples, decode_npz
+from zcu_tools.core.waveform_format import WaveformSamples
 from zcu_tools.experiment import Experiment, RunRecord
-from zcu_tools.experiment.axes_spec import (
-    GroupedAxesSpec,
-    GroupedLoadData,
-    VariableAxisSpec,
-    VariableSpec,
-    VariableZSpec,
-)
+from zcu_tools.experiment.axes_spec import GroupedAxesSpec
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.v2.runtime.schedule import (
     Schedule,
@@ -47,7 +34,7 @@ from zcu_tools.program.v2 import (
     TimelineBuilder,
     shot_sums,
 )
-from zcu_tools.program.v2.modules import ArbWaveformCfg, MuxReadout
+from zcu_tools.program.v2.modules import MuxReadout
 
 from zcu_lab.v2.support import live_errorbar
 
@@ -57,92 +44,32 @@ from .._rb_scheduling import emit_sequence, validate_x_pulses
 from .._rb_sequence import RBArm, make_rb_arms
 from .._readout import POINT_ALIAS_DESCRIPTION
 from .._sums import joint_probabilities, validate_qubit_tones
-
-_KNOTS_PER_CHANNEL = 6
-_KNOT_STRIDE = 16
-_SAMPLE_COUNT = (_KNOTS_PER_CHANNEL + 1) * _KNOT_STRIDE + 1
-_SHAPE_PARAM_COUNT = 2 * _KNOTS_PER_CHANNEL
-_PARAM_COUNT = _SHAPE_PARAM_COUNT + 2
-
-
-@dataclass(frozen=True)
-class CZOptimizeResult:
-    """Native evaluation log, with evaluation 0 reserved for the starting CZ.
-
-    seeds is int64 (seed,), in measurement order. params is float64 (evaluation,
-    14), ordered [I1..I6, Q1..Q6, Z_Qubit1 (deg), Z_Qubit2 (deg)]. peak is float64
-    (evaluation,), the largest normalized |I+iQ| on the render grid. sums is
-    float64 (evaluation, seed, 3, 3), with Qubit1/Qubit2 axes each ordered g, e, other.
-    duration is the baseline arb duration in us, measured at Run start.
-    Unmeasured entries and counts for skipped shapes stay NaN.
-    """
-
-    seeds: NDArray[np.int64]
-    params: NDArray[np.float64]
-    peak: NDArray[np.float64]
-    sums: NDArray[np.float64]
-    duration: float
-
-
-@dataclass(frozen=True)
-class CZOptimizeAnalysis:
-    """Best measured evaluation index, its target, evaluation 0's target if
-    available, the best vector in Result parameter order, and the saved
-    baseline envelope duration in us.
-    """
-
-    best_evaluation: int
-    best_target: float
-    start_target: float | None
-    best_params: tuple[float, ...]
-    duration: float
-
-    def render_best(self) -> WaveformSamples:
-        """Render the best I/Q spline at the saved duration without asset I/O.
-
-        Reuse the candidate playback grid and preserve all 12 knot values.
-        """
-        return _render_samples(
-            np.asarray(self.best_params, dtype=np.float64), self.duration
-        )
-
-
-@dataclass(frozen=True)
-class CZOptimizeUnavailable:
-    """Reason why the record cannot supply a best evaluation."""
-
-    reason: str
-
-
-def _render_samples(params: NDArray[np.float64], duration: float) -> WaveformSamples:
-    """Render the unscaled candidate at its baseline duration (us), before the peak check."""
-    time = np.linspace(0.0, duration, _SAMPLE_COUNT)
-    knots = np.zeros((_KNOTS_PER_CHANNEL + 2, 2), dtype=np.float64)
-    knots[1:-1] = params[:_SHAPE_PARAM_COUNT].reshape(2, _KNOTS_PER_CHANNEL).T
-    iq = CubicSpline(time[::_KNOT_STRIDE], knots, bc_type="natural")(time)
-    # Copy knots back exactly so a published arb reproduces all 12 shape parameters.
-    iq[::_KNOT_STRIDE] = knots
-    return WaveformSamples(time, iq[:, 0], iq[:, 1] if np.any(knots[:, 1]) else None)
-
-
-def _targets(result: CZOptimizeResult) -> NDArray[np.float64]:
-    """Average seed survival for feasible complete evaluations; others are NaN."""
-    finite = np.all(np.isfinite(result.sums), axis=(1, 2, 3)) & np.all(
-        np.isfinite(result.params), axis=1
-    )
-    targets = joint_probabilities(result.sums)[..., 0, 0].mean(axis=1)
-    return np.where((result.peak <= 1.0) & finite, targets, np.nan)
-
-
-def _objective_sem(counts: NDArray[np.float64]) -> NDArray[np.float64]:
-    """Propagate independent retained-shot P(g,g) SEMs through an equal seed mean."""
-    seed_count = counts.shape[-3]
-    covariance = class_probability_covariance(counts.reshape(*counts.shape[:-2], 9))
-    return np.sqrt(covariance[..., 0, 0].sum(axis=-1)) / seed_count
+from ._analysis import (
+    CZOptimizeAnalysis as CZOptimizeAnalysis,
+)
+from ._analysis import (
+    CZOptimizeUnavailable as CZOptimizeUnavailable,
+)
+from ._analysis import (
+    CZParameterValue,
+    objective_sem,
+)
+from ._assets import capture_start_assets
+from ._result import PARAMETERS, axes_spec
+from ._result import CZOptimizeResult as CZOptimizeResult
+from ._shape import (
+    GAIN_INDEX,
+    KNOT_COLUMNS,
+    PARAM_COUNT,
+    Z1,
+    Z2,
+    StartShape,
+    prepare_start,
+)
 
 
 class CZOptimizeCfg(ConfigBase):
-    """Calibrated X90/X180, shared-arb two-line CZ, local Z and full mux readout.
+    """Calibrated X90/X180, shared-shape dual-line CZ, local Z and full mux readout.
 
     Tone indices refer to the full mux group. Logical Z corrections are degrees. Each evaluation repeats the same 3–5
     seeds, with one fixed Clifford depth and reps shots per seed. A mux herald
@@ -188,7 +115,7 @@ class CZOptimizeCfg(ConfigBase):
         QubitDriveCfg,
         FieldMeta(
             label="Two-line CZ drive",
-            description="Use a common arbitrary waveform asset on both CZ drives. Its initial I/Q shape is candidate 0.",
+            description="Use the same shape and duration on both lines. Evaluation 0 plays the original pulses.",
         ),
     ]
     readout: Annotated[
@@ -250,7 +177,7 @@ class CZOptimizeCfg(ConfigBase):
             unit="count",
             description="How many CZ shapes to compare in each complete CMA-ES batch.",
         ),
-    ] = Field(default=4 + math.floor(3 * math.log(_PARAM_COUNT)), strict=True, ge=2)
+    ] = Field(default=4 + math.floor(3 * math.log(PARAM_COUNT)), strict=True, ge=2)
     sigma_knot: Annotated[
         float,
         FieldMeta(
@@ -297,18 +224,41 @@ class CZOptimizeCfg(ConfigBase):
         ),
     ]
 
+    g_min: Annotated[
+        float,
+        FieldMeta(
+            label="Minimum field multiplier g",
+            description="Lower bound for the common physical field multiplier.",
+        ),
+    ] = Field(default=0.8, gt=0, allow_inf_nan=False)
+    g_max: Annotated[
+        float,
+        FieldMeta(
+            label="Maximum field multiplier g",
+            description="Upper bound for the common physical field multiplier.",
+        ),
+    ] = Field(default=1.2, gt=0, allow_inf_nan=False)
+    sigma_gain: Annotated[
+        float,
+        FieldMeta(
+            label="Initial gain spread",
+            description="Starting standard deviation in the natural log of g.",
+        ),
+    ] = Field(default=0.05, gt=0, allow_inf_nan=False)
+    avoid_frequencies_mhz: Annotated[
+        list[FiniteFloat],
+        FieldMeta(
+            label="Avoid frequencies (MHz)",
+            description="Absolute lab frequencies to mark as bands in Analyze; leave empty for no bands.",
+        ),
+    ] = Field(default_factory=list)
+
     @model_validator(mode="after")
     def validate_sequence_inputs(self) -> Self:
-        """Reject mismatched arb paths, tone indices, classifiers, seeds or generators."""
-        qubit1, qubit2 = self.drive.qubit1.waveform, self.drive.qubit2.waveform
-        if (
-            not isinstance(qubit1, ArbWaveformCfg)
-            or not isinstance(qubit2, ArbWaveformCfg)
-            or qubit1.path != qubit2.path
-        ):
+        """Reject invalid starting ranges, tones, classifiers, seeds or generators."""
+        if not self.g_min <= 1.0 <= self.g_max:
             raise ValueError(
-                "Both CZ lines must use the same arb asset path; see First-round preparation "
-                "in the two_qubit/cz_optimize guide."
+                "g_min and g_max must include the starting physical multiplier g=1"
             )
         validate_qubit_tones(self.readout, self.qubit1_tone, self.qubit2_tone)
         if len(set(self.seed)) != len(self.seed):
@@ -323,71 +273,102 @@ class CZOptimizeCfg(ConfigBase):
         return self
 
 
-def _read_baseline(cfg: CZOptimizeCfg) -> WaveformSamples:
-    """Read the validated shared arb path once; propagate file and format errors."""
-    waveform = cfg.drive.qubit1.waveform
-    assert isinstance(waveform, ArbWaveformCfg)  # Validated when constructing the cfg.
-    return decode_npz(Path(waveform.path).read_bytes()).samples
-
-
-def _restore_result(data: GroupedLoadData[CZOptimizeCfg]) -> CZOptimizeResult:
-    """Restore the native variables and seed coordinates without needing the cfg."""
-    sums = data.variable("sums")
-    return CZOptimizeResult(
-        seeds=sums.axes[2].astype(np.int64),
-        params=data.variable("params").z.astype(np.float64),
-        peak=data.variable("peak").z.astype(np.float64),
-        sums=sums.z.astype(np.float64),
-        duration=float(data.variable("duration").z.item()),
-    )
+def _gain_coordinate(value: float, *, physical: bool) -> float:
+    """Translate between physical g and its log search coordinate."""
+    return math.exp(value) if physical else math.log(value)
 
 
 def _make_strategy(
-    cfg: CZOptimizeCfg, start: NDArray[np.float64]
-) -> cma.CMAEvolutionStrategy:
-    """Start CMA at the baseline with bounded knots, free degree angles and a local RNG."""
+    cfg: CZOptimizeCfg, mean: NDArray[np.float64]
+) -> tuple[cma.CMAEvolutionStrategy, NDArray[np.bool_]]:
+    """Set bounded knot/gain coordinates and unconstrained local Z."""
+    lower = np.r_[
+        [-1.0] * KNOT_COLUMNS,
+        _gain_coordinate(cfg.g_min, physical=False),
+        -np.inf,
+        -np.inf,
+    ]
+    upper = np.r_[
+        [1.0] * KNOT_COLUMNS,
+        _gain_coordinate(cfg.g_max, physical=False),
+        np.inf,
+        np.inf,
+    ]
+    spread = np.r_[
+        [cfg.sigma_knot] * KNOT_COLUMNS,
+        cfg.sigma_gain,
+        cfg.sigma_z_deg,
+        cfg.sigma_z_deg,
+    ]
+    active = lower != upper
     rng = np.random.default_rng(cfg.cma_seed)
-    return cma.CMAEvolutionStrategy(
-        start,
+    strategy = cma.CMAEvolutionStrategy(
+        mean[active],
         1.0,
         {
-            "bounds": [
-                [-1.0] * _SHAPE_PARAM_COUNT + [-np.inf] * 2,
-                [1.0] * _SHAPE_PARAM_COUNT + [np.inf] * 2,
-            ],
-            "CMA_stds": [cfg.sigma_knot] * _SHAPE_PARAM_COUNT + [cfg.sigma_z_deg] * 2,
+            "bounds": [lower[active], upper[active]],
+            "CMA_stds": spread[active],
             "popsize": cfg.popsize,
             "randn": lambda *shape: rng.standard_normal(shape),
             "seed": np.nan,  # Do not seed CMA's default global RNG.
             "verbose": -9,
         },
     )
+    return strategy, active
+
+
+def _initial_coordinates(cfg: CZOptimizeCfg, start: StartShape) -> NDArray[np.float64]:
+    return np.r_[
+        start.knots,
+        0.0,
+        cfg.phase_pair.correction_qubit1_deg,
+        cfg.phase_pair.correction_qubit2_deg,
+    ]
+
+
+def _physical_params(
+    cfg: CZOptimizeCfg, coordinates: NDArray[np.float64], *, wrap_angles: bool
+) -> NDArray[np.float64]:
+    if not np.all(np.isfinite(coordinates)):
+        raise ValueError("CZ optimizer coordinates must be finite")
+    params = coordinates.copy()
+    gain = _gain_coordinate(coordinates[GAIN_INDEX], physical=True)
+    # Preserve the physical endpoints despite ln/exp roundoff.
+    params[GAIN_INDEX] = min(cfg.g_max, max(cfg.g_min, gain))
+    angles = coordinates[Z1:]
+    if wrap_angles:
+        angles = 180.0 - (180.0 - angles) % 360.0
+    params[Z1:] = np.deg2rad(angles)
+    return params
 
 
 @dataclass(frozen=True)
 class _CandidateCZ:
-    """In-memory physical pulse pair and its matching logical Z corrections."""
-
-    drive: QubitDriveCfg  # Physical CZ lines sharing one in-memory envelope.
-    phases: CZPhasePair  # Logical Z corrections in degrees for those lines.
+    drive: QubitDriveCfg
+    phases: CZPhasePair
 
 
 def _candidate_cfg(
-    baseline: CZOptimizeCfg, samples: WaveformSamples, params: NDArray[np.float64]
+    cfg: CZOptimizeCfg, samples: WaveformSamples, result: CZOptimizeResult, index: int
 ) -> _CandidateCZ:
-    """Replace only the two shapes and local Z angles, without modifying the saved cfg."""
     waveform = InMemoryArbWaveformCfg(samples=samples)
+    params = result.params[index]
+    gains = result.candidate_raw_gains(index)
     drive = QubitDriveCfg(
-        qubit1=baseline.drive.qubit1.model_copy(update={"waveform": waveform}),
-        qubit2=baseline.drive.qubit2.model_copy(update={"waveform": waveform}),
+        qubit1=cfg.drive.qubit1.model_copy(
+            update={"waveform": waveform, "gain": gains[0]}
+        ),
+        qubit2=cfg.drive.qubit2.model_copy(
+            update={"waveform": waveform, "gain": gains[1]}
+        ),
     )
-    phase_pair = baseline.phase_pair.model_copy(
-        update={
-            "correction_qubit1_deg": float(params[-2]),
-            "correction_qubit2_deg": float(params[-1]),
-        }
+    return _CandidateCZ(
+        drive,
+        CZPhasePair(
+            correction_qubit1_deg=math.degrees(params[Z1]),
+            correction_qubit2_deg=math.degrees(params[Z2]),
+        ),
     )
-    return _CandidateCZ(drive, phase_pair)
 
 
 def _measure_candidate(
@@ -450,9 +431,7 @@ def _start_live_view(
     viewer = live_errorbar(ax)
     ax.lines[0].set(label="Measured ± shot SEM")
     (best_line,) = ax.plot([], [], "--", color="C1", label="Best measured so far")
-    (skipped_line,) = ax.plot(
-        [], [], "x", color="0.45", label="Envelope exceeds DAC limit"
-    )
+    (skipped_line,) = ax.plot([], [], "x", color="0.45", label="Zero envelope")
     ax.legend(loc="upper center", bbox_to_anchor=(0.5, -0.22), ncols=2)
     fig.suptitle("CZ optimization · Qubit1 / Qubit2")
     fig.show()
@@ -461,7 +440,7 @@ def _start_live_view(
     def update(data: NDArray[np.float64]) -> tuple[Artist, ...]:
         """Refresh the measured objective and skipped evaluations without assigning skipped points an SEM."""
         values, best, errors, peaks = data
-        skipped = peaks > 1.0
+        skipped = (indices > 0) & (peaks == 0.0)
         best_line.set_data(indices, best)
         skipped_line.set_data(indices[skipped], values[skipped])
         return (
@@ -473,141 +452,252 @@ def _start_live_view(
     return update
 
 
-class CZOptimizeExp(Experiment[CZOptimizeResult, CZOptimizeCfg]):
-    """Acquire fixed-depth interleaved RB, then compare measured CZ proposals."""
+def _targets(result: CZOptimizeResult) -> NDArray[np.float64]:
+    complete = np.all(np.isfinite(result.sums), axis=(1, 2, 3)) & np.all(
+        np.isfinite(result.params), axis=1
+    )
+    return np.where(
+        complete, joint_probabilities(result.sums)[..., 0, 0].mean(axis=1), np.nan
+    )
 
-    _EVALUATION_AXIS = VariableAxisSpec.generated_arange(label="Evaluation", unit="")
-    AXES_SPEC: ClassVar[GroupedAxesSpec[CZOptimizeResult, CZOptimizeCfg]] = (
-        GroupedAxesSpec(
-            variables=(
-                VariableSpec(
-                    variable="sums",
-                    axes=(
-                        VariableAxisSpec(
-                            label="Qubit2 class",
-                            unit="",
-                            values=(0, 1, 2),
-                            dtype=np.int64,
-                        ),
-                        VariableAxisSpec(
-                            label="Qubit1 class",
-                            unit="",
-                            values=(0, 1, 2),
-                            dtype=np.int64,
-                        ),
-                        VariableAxisSpec(
-                            label="Seed", unit="", field_name="seeds", dtype=np.int64
-                        ),
-                        _EVALUATION_AXIS,
-                    ),
-                    z=VariableZSpec(
-                        "sums", label="Joint class counts", unit="", dtype=np.float64
-                    ),
-                ),
-                VariableSpec(
-                    variable="params",
-                    axes=(
-                        VariableAxisSpec(
-                            label="Parameter",
-                            unit="",
-                            values=tuple(range(_PARAM_COUNT)),
-                            dtype=np.int64,
-                        ),
-                        _EVALUATION_AXIS,
-                    ),
-                    z=VariableZSpec(
-                        "params", label="CZ parameters", unit="", dtype=np.float64
-                    ),
-                ),
-                VariableSpec(
-                    variable="peak",
-                    axes=(_EVALUATION_AXIS,),
-                    z=VariableZSpec(
-                        "peak", label="Envelope peak", unit="", dtype=np.float64
-                    ),
-                ),
-                VariableSpec(
-                    variable="duration",
-                    axes=(),
-                    z=VariableZSpec(
-                        "duration",
-                        label="Baseline duration",
-                        unit="s",
-                        scale=1e-6,
-                        dtype=np.float64,
-                    ),
-                ),
-            ),
-            result_type=CZOptimizeResult,
-            cfg_type=CZOptimizeCfg,
-            cfg_schema_version="3.0",
-            tag="two_qubit/cz_optimize",
-            result_builder=_restore_result,
-            labber_layout="independent",
-            labber_variables=("params", "peak"),
+
+def _display_value(index: int, value: float) -> tuple[float, str]:
+    if index in (Z1, Z2):
+        return math.degrees(value), "deg"
+    return value, ""
+
+
+def _selected_parameters(vector: NDArray[np.float64]) -> tuple[CZParameterValue, ...]:
+    rows = []
+    for index, param in enumerate(PARAMETERS):
+        value, unit = _display_value(index, float(vector[index]))
+        rows.append(CZParameterValue(param.name, value, unit))
+    return tuple(rows)
+
+
+def _plot_selection(
+    result: CZOptimizeResult,
+    targets: NDArray[np.float64],
+    best: CZOptimizeAnalysis,
+    plots: Plots,
+) -> None:
+    evaluations = np.arange(len(targets))
+    errors = objective_sem(result.sums)
+    fig, _ = plots.subplots(num="fit", ncols=2, layout="constrained")
+    ax, params_ax = fig.axes
+    fig.suptitle("CZ optimization · candidate selection")
+    ax.set(xlabel="Evaluation (count)", ylabel="Mean terminal P(g,g)")
+    ax.xaxis.set_major_locator(MaxNLocator(integer=True))
+    ax.errorbar(
+        evaluations, targets, yerr=errors, fmt=".-", label="Measured ± shot SEM"
+    )
+    ax.plot(evaluations, np.fmax.accumulate(targets), "--", label="Best so far")
+    skipped = evaluations[1:][result.peak[1:] == 0.0]
+    if skipped.size:
+        ax.plot(
+            skipped,
+            np.zeros_like(skipped),
+            "x",
+            color="0.45",
+            label="Zero envelope",
         )
+    ax.plot(
+        best.best_evaluation,
+        best.best_target,
+        "*",
+        color="C3",
+        markersize=12,
+        label="Selected",
+    )
+    ax.legend(loc="upper center", bbox_to_anchor=(0.5, -0.15), ncols=2)
+    heading = (
+        "CMA initial mean (original pulse won)"
+        if best.best_evaluation == 0
+        else "Selected settings"
+    )
+    params_ax.set_title(heading)
+    params_ax.set_axis_off()
+    selected_sem = errors[best.best_evaluation]
+    objective = f"Selected P(g,g) = {best.best_target:.4f}"
+    if np.isfinite(selected_sem):
+        objective += f" ± {selected_sem:.4f} (shot SEM)"
+    else:
+        objective += " (shot SEM unavailable)"
+    lines = [objective, ""]
+    for param, value in zip(PARAMETERS, best.parameters, strict=True):
+        unit = f" {value.unit}" if value.unit else ""
+        lines.append(f"{param.label}: {value.value:.5g}{unit}")
+    params_ax.text(
+        0.08, 0.92, "\n".join(lines), transform=params_ax.transAxes, va="top"
+    )
+    fig.show()
+
+
+def _played_fit(result: CZOptimizeResult, index: int) -> NDArray[np.complex128]:
+    samples = result.render_candidate(index)
+    iq = samples.idata.astype(np.complex128)
+    if samples.qdata is not None:
+        iq += 1j * samples.qdata
+    # The right boundary is retained for arb asset serialization, but is not
+    # a played sample and must not contribute to the spectrum.
+    return iq[:-1] * (result.field_at_one * result.params[index, GAIN_INDEX])
+
+
+def _plot_envelopes(
+    start_iq: NDArray[np.complex128],
+    mean_iq: NDArray[np.complex128],
+    best_iq: NDArray[np.complex128],
+    *,
+    step_us: float,
+    plot_best: bool,
+    plots: Plots,
+) -> None:
+    fig, _ = plots.subplots(num="envelopes", nrows=2, sharex=True, layout="constrained")
+    i_ax, q_ax = fig.axes
+    fig.suptitle("CZ optimization · Qubit1 display envelope")
+    i_ax.set_ylabel("I (DDS gain units)")
+    q_ax.set(ylabel="Q (DDS gain units)", xlabel="Time (µs)")
+    traces = [
+        ("Evaluation 0", start_iq, "-", "C0"),
+        ("CMA initial mean", mean_iq, "--", "C1"),
+    ]
+    if plot_best:
+        traces.append(("Selected", best_iq, ":", "C3"))
+    for label, iq, style, color in traces:
+        times = np.arange(len(iq) + 1) * step_us
+        i_ax.stairs(
+            iq.real, times, baseline=None, label=label, linestyle=style, color=color
+        )
+        q_ax.stairs(iq.imag, times, baseline=None, linestyle=style, color=color)
+    i_ax.legend(loc="upper center", bbox_to_anchor=(0.5, 1.18), ncols=3)
+    fig.show()
+
+
+def _plot_spectrum(
+    start_iq: NDArray[np.complex128],
+    best_iq: NDArray[np.complex128],
+    *,
+    step_us: float,
+    carrier_mhz: float,
+    avoid_mhz: list[float],
+    plots: Plots,
+) -> None:
+    fig, ax = plots.subplots(num="spectrum", layout="constrained")
+    fig.suptitle("CZ optimization · Qubit1 envelope spectrum")
+    ax.set(
+        xlabel="Frequency relative to CZ carrier (MHz)",
+        ylabel="Relative to carrier (dB)",
+    )
+    nfft = next_fast_len(8 * max(len(start_iq), len(best_iq)))
+    offsets = fftshift(fftfreq(nfft, step_us))
+    for label, iq, style in (
+        ("Evaluation 0", start_iq, "-"),
+        ("Selected", best_iq, "--"),
+    ):
+        # QICK's product path plays Re[(I+iQ) exp(+iωt)]. The forward FFT
+        # therefore maps a positive envelope rotation to positive detuning.
+        reference = abs(complex(np.sum(iq)))
+        if reference == 0.0:
+            ax.plot([], [], style, label=f"{label} (zero carrier)")
+            continue
+        amplitude = np.abs(fftshift(fft(iq, n=nfft))) / reference
+        ax.plot(offsets, 20 * np.log10(np.maximum(amplitude, 1e-6)), style, label=label)
+    half_width_mhz = 0.5
+    bands = [frequency - carrier_mhz for frequency in avoid_mhz]
+    for index, center in enumerate(bands):
+        ax.axvspan(
+            center - half_width_mhz,
+            center + half_width_mhz,
+            color="C3",
+            alpha=0.2,
+            label="Avoid ±0.5 MHz" if index == 0 else None,
+        )
+    default_span = 8.0 / (min(len(start_iq), len(best_iq)) * step_us)
+    display_span = max(
+        [default_span, *(abs(band) + 2 * half_width_mhz for band in bands)]
+    )
+    ax.set(xlim=(-display_span, display_span), ylim=(-100, None))
+    ax.legend(loc="best")
+    fig.show()
+
+
+class CZOptimizeExp(Experiment[CZOptimizeResult, CZOptimizeCfg]):
+    """Acquire fixed-depth interleaved RB for a calibrated start and candidate CZs."""
+
+    AXES_SPEC: ClassVar[GroupedAxesSpec[CZOptimizeResult, CZOptimizeCfg]] = axes_spec(
+        CZOptimizeCfg
     )
 
     def run(self, cfg: CZOptimizeCfg, *, context: RunContext) -> CZOptimizeResult:
-        """Evaluate the baseline, then fixed CMA generations of candidate CZs.
+        """Measure the original pulse pair, then full generations of CMA candidates.
 
-        Each seed plays reset → interleaved Cliffords and recovery → terminal
-        mux readout. Return the attempted vectors, their envelope peaks and
-        counts; stop leaves unmeasured entries NaN and does not tell CMA a
-        partial generation. A measured seed with zero accepted shots raises.
+        Each seed plays optional reset, interleaved Cliffords and recovery,
+        then terminal mux readout. A measured seed with no retained shots raises.
+        Invalid starts fail before acquiring. Stop leaves unmeasured entries NaN
+        and does not tell CMA a partial generation.
         """
-        # 1. Start from the arb samples and calibrated local Z corrections.
-        baseline = _read_baseline(cfg)
-        duration = float(baseline.time[-1])
-        knot_times = np.linspace(0.0, duration, _SAMPLE_COUNT)[
-            _KNOT_STRIDE:-1:_KNOT_STRIDE
-        ]
-        start = np.r_[
-            np.interp(knot_times, baseline.time, baseline.idata),
-            np.zeros(_KNOTS_PER_CHANNEL)
-            if baseline.qdata is None
-            else np.interp(knot_times, baseline.time, baseline.qdata),
-            cfg.phase_pair.correction_qubit1_deg,
-            cfg.phase_pair.correction_qubit2_deg,
-        ]
-        strategy = _make_strategy(cfg, start)
+        start_assets = capture_start_assets(cfg.drive)
+        start = prepare_start(cfg.drive, context.soccfg, g_max=cfg.g_max)
+        initial = _initial_coordinates(cfg, start)
+        strategy, active = _make_strategy(cfg, initial)
         # ADR-0072: share the sequence, not RB's acquisition or analysis.
         arms = {seed: make_rb_arms(seed, [cfg.depth])[1] for seed in cfg.seed}
         evaluations = 1 + cfg.generations * cfg.popsize
         buffer = SignalBuffer((evaluations, len(cfg.seed), 3, 3), dtype=np.float64)
-        params = np.full((evaluations, _PARAM_COUNT), np.nan)
-        peak = np.full(evaluations, np.nan)
-        targets = np.full(evaluations, np.nan)
-        best = np.full(evaluations, np.nan)
-        indices = np.arange(evaluations, dtype=np.float64)
-
-        update = _start_live_view(context.plots, indices)
+        result = CZOptimizeResult(
+            seeds=np.asarray(cfg.seed, dtype=np.int64),
+            params=np.full((evaluations, PARAM_COUNT), np.nan),
+            peak=np.full(evaluations, np.nan),
+            sums=buffer.array,
+            start_iq=start.iq,
+            start_style=start.style,
+            start_duration_s=start.duration_us * 1e-6,
+            cycle_period_s=start.cycle_us * 1e-6,
+            samples_per_cycle=start.samples_per_cycle,
+            carrier_hz=start.carrier_mhz * 1e6,
+            arb_gains=start.arb_gains,
+            field_at_one=float(start.field_at_one),
+            start_asset_fingerprints=start_assets,
+        )
+        progress = np.full((2, evaluations), np.nan)
+        targets, best = progress
+        update = _start_live_view(
+            context.plots, np.arange(evaluations, dtype=np.float64)
+        )
 
         def update_view() -> None:
-            """Refresh the live objective plot from the current evaluation data.
+            """Plot measured scores with shot SEM, the running best, and zero envelopes."""
+            update(np.vstack((progress, objective_sem(result.sums), result.peak)))
 
-            Use the captured targets, running best, envelope peaks and retained
-            shot counts to plot measured scores with shot SEM, the best trace
-            and markers for candidates exceeding the DAC limit. Return no value.
-            """
-            update(np.stack((targets, best, _objective_sem(buffer.array), peak)))
-
-        # 3. Measure evaluation 0 without a CMA update, then tell only complete populations.
+        # Measure the calibrated pair as provided. The saved row-zero parameters
+        # describe the separate symmetric fit used to seed the optimizer.
+        result.params[0] = _physical_params(cfg, initial, wrap_angles=False)
         population: list[NDArray[np.float64]] = []
         losses: list[float] = []
         best_target = np.nan
         with Schedule(buffer, scope=context.scope) as sched:
             for index, step in sched.repeat("evaluation", evaluations):
-                member = (index - 1) % cfg.popsize
-                if index > 0 and member == 0:
-                    population = strategy.ask()
-                    losses = []
-                params[index] = start if index == 0 else population[member]
-                samples = _render_samples(params[index], duration)
-                peak[index] = samples.peak_abs
+                if index == 0:
+                    candidate = _CandidateCZ(cfg.drive, cfg.phase_pair)
+                else:
+                    member = (index - 1) % cfg.popsize
+                    if member == 0:
+                        population = strategy.ask()
+                        losses = []
+                    coordinates = initial.copy()
+                    coordinates[active] = population[member]
+                    result.params[index] = _physical_params(
+                        cfg, coordinates, wrap_angles=True
+                    )
+                    samples = result.render_candidate(index)
+                    result.peak[index] = samples.peak_abs
+                    candidate = (
+                        _candidate_cfg(cfg, samples, result, index)
+                        if result.peak[index] > 0.0
+                        else None
+                    )
                 target = 0.0
-                if peak[index] <= 1.0:
-                    candidate = _candidate_cfg(cfg, samples, params[index])
+                if candidate is not None:
                     target = _measure_candidate(cfg, context, step, arms, candidate)
                     if not np.isfinite(target):
                         update_view()  # A stopped row can contain shots, but no objective.
@@ -619,10 +709,7 @@ class CZOptimizeExp(Experiment[CZOptimizeResult, CZOptimizeCfg]):
                     losses.append(1.0 - target)
                     if len(losses) == cfg.popsize:
                         strategy.tell(population, losses)
-
-        return CZOptimizeResult(
-            np.array(cfg.seed, dtype=np.int64), params, peak, buffer.array, duration
-        )
+        return result
 
     @override
     def analyze(
@@ -632,111 +719,47 @@ class CZOptimizeExp(Experiment[CZOptimizeResult, CZOptimizeCfg]):
         *,
         plots: Plots,
     ) -> CZOptimizeAnalysis | CZOptimizeUnavailable:
-        """Plot feasible objectives and best/start shapes; return a fixed-size summary.
+        """Select the best complete evaluation and compare saved envelopes.
 
-        Pass None for options: there are no analysis settings. Requires the
-        run's saved cfg and at least one complete, feasible row.
-        Missing cfg or no usable rows returns a reason instead of selecting a CZ.
-        Shape plots use the duration captured in the Result, without asset I/O.
+        Pass None for options. Missing cfg keeps the analysis available but
+        omits avoid bands. No asset is read.
         """
-        # 1. Select the best complete, feasible evaluation, with the earliest row winning ties.
-        if source.cfg is None:
-            return CZOptimizeUnavailable(
-                "Analysis requires the saved CZ optimization cfg."
-            )
-        targets = _targets(source.result)
+        cfg, result = source.cfg, source.result
+        targets = _targets(result)
         if not np.any(np.isfinite(targets)):
             return CZOptimizeUnavailable(
                 "No feasible evaluation has complete, nonempty seed counts."
             )
         index = int(np.nanargmax(targets))
-        best_params = source.result.params[index]
-        start_params = source.result.params[0]
-        duration = source.result.duration
-
-        # 2. Compare measured objectives and overlay the rendered I/Q envelopes.
-        form = source.result
-        evaluations = np.arange(len(targets))
-        errors = _objective_sem(form.sums)
-        fig, target_ax = plots.subplots(
-            num="fit", figsize=(7, 4.8), layout="constrained"
-        )
-        target_ax.set(
-            xlabel="Candidate evaluation (count)", ylabel="Mean terminal P(g,g)"
-        )
-        target_ax.xaxis.set_major_locator(MaxNLocator(integer=True))
-        target_ax.errorbar(
-            evaluations,
-            targets,
-            yerr=errors,
-            fmt=".-",
-            color="C0",
-            label="Measured ± shot SEM",
-        )
-        target_ax.plot(
-            evaluations,
-            np.fmax.accumulate(targets),
-            "--",
-            color="C1",
-            label="Best measured so far",
-        )
-        skipped = evaluations[form.peak > 1.0]
-        if skipped.size:
-            target_ax.plot(
-                skipped,
-                np.zeros_like(skipped),
-                "x",
-                color="0.45",
-                label="Envelope exceeds DAC limit (1 a.u.)",
-            )
-        target_ax.plot(
-            index,
-            targets[index],
-            "*",
-            color="C3",
-            markersize=12,
-            label="Selected evaluation",
-        )
-        error = f" ± {errors[index]:.2g}" if np.isfinite(errors[index]) else ""
-        target_ax.set_title(
-            f"Evaluation {index} · Mean terminal P(g,g) = {targets[index]:.5g}{error}"
-        )
-        target_ax.legend(loc="upper center", bbox_to_anchor=(0.5, -0.22), ncols=2)
-        fig.suptitle("CZ optimization · Qubit1 / Qubit2 · selection")
-
-        fig, envelope_ax = plots.subplots(
-            num="envelopes", figsize=(7, 4.6), layout="constrained"
-        )
-        envelope_ax.set(xlabel="CZ envelope time (µs)", ylabel="Envelope gain (a.u.)")
-        fig.suptitle(
-            "CZ optimization · Qubit1 / Qubit2 · starting and selected envelopes"
-        )
-        for label, params, linestyle in (
-            ("Start", start_params, "--"),
-            ("Best", best_params, "-"),
-        ):
-            if not np.all(np.isfinite(params)):
-                continue
-            samples = _render_samples(params, duration)
-            envelope_ax.plot(
-                samples.time,
-                samples.idata,
-                color="C0",
-                linestyle=linestyle,
-                label=f"{label} I",
-            )
-            qdata = (
-                np.zeros_like(samples.idata) if samples.qdata is None else samples.qdata
-            )
-            envelope_ax.plot(
-                samples.time, qdata, color="C1", linestyle=linestyle, label=f"{label} Q"
-            )
-        envelope_ax.legend(loc="upper center", bbox_to_anchor=(0.5, -0.22), ncols=4)
-        fig.show()
-        return CZOptimizeAnalysis(
+        vector = result.params[index]
+        best = CZOptimizeAnalysis(
             best_evaluation=index,
             best_target=float(targets[index]),
             start_target=float(targets[0]) if np.isfinite(targets[0]) else None,
-            best_params=tuple(float(value) for value in best_params),
-            duration=duration,
+            best_params=tuple(float(v) for v in vector),
+            parameters=_selected_parameters(vector),
+            best_raw_gains=result.candidate_raw_gains(index) if index else None,
+            start_duration_s=result.start_duration_s,
+            cycle_period_s=result.cycle_period_s,
+            samples_per_cycle=result.samples_per_cycle,
         )
+        _plot_selection(result, targets, best, plots)
+        best_iq = _played_fit(result, index) if index else result.start_iq
+        step_us = result.cycle_period_s * 1e6 / result.samples_per_cycle
+        _plot_envelopes(
+            result.start_iq,
+            _played_fit(result, 0),
+            best_iq,
+            step_us=step_us,
+            plot_best=index != 0,
+            plots=plots,
+        )
+        _plot_spectrum(
+            result.start_iq,
+            best_iq,
+            step_us=step_us,
+            carrier_mhz=result.carrier_hz * 1e-6,
+            avoid_mhz=cfg.avoid_frequencies_mhz if cfg is not None else [],
+            plots=plots,
+        )
+        return best

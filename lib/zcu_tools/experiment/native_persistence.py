@@ -385,18 +385,19 @@ def restore_run(
     *,
     spec: AxesSpec[ResultT, CfgT] | GroupedAxesSpec[ResultT, CfgT],
 ) -> RestoredRun[RunRecord[CfgT, ResultT]]:
-    """Restore typed arrays/cfg/metadata from an already-read Container, without I/O.
+    """Restore typed arrays/cfg/metadata from an already-read Container.
 
     Validate the experiment tag, required variables, units/axes/dtypes/shapes and
     cfg envelope. Keep the original metadata JSON detached from the container;
     readers validate requested fields through RunMetadataContent or the complete
     document through RunMetadata.model_validate. Reconstruct and validate Result
-    before concrete cfg validation;
-    grouped builders receive only loaded arrays, without absent optional variables.
-    Extra variables/unknown cfg keys
-    remain in the Container, not the typed record. Malformed docs or data raise
-    ValueError/TypeError. An incompatible cfg type/schema/model yields cfg=None,
-    cfg_issue and one CfgUnavailableWarning, retaining data and record.metadata.
+    before concrete cfg validation; grouped builders receive only loaded arrays,
+    without absent optional variables. The reader performs no container I/O,
+    but the concrete cfg validator may open referenced assets.
+    Extra variables/unknown cfg keys remain in the Container, not the typed record.
+    Malformed docs or data raise ValueError/TypeError. An incompatible cfg
+    type/schema/model or a cfg asset I/O failure yields cfg=None, cfg_issue and
+    one CfgUnavailableWarning, retaining data and record.metadata.
     Inputs are not changed and no current settings substitute historical values.
     """
     metadata = metadata_content_from_container(stored)
@@ -471,7 +472,8 @@ def _restore_cfg(
         )
     try:
         return spec.cfg_type.model_validate(deepcopy(cfg.values), extra="ignore"), None
-    except ValidationError as error:
+    except (ValidationError, OSError) as error:
+        # An unavailable cfg asset must not discard validated acquired data.
         return None, f"/cfg: {cfg.cfg_type} validation failed: {error}"
 
 

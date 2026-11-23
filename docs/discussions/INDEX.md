@@ -249,11 +249,12 @@
 - 2026-11-22 [Amp Rabi 的 shot moments](2026-11-22-amp-rabi-shot-moments.md)：資料格式。同批校正 IQ 保留既有平均，native 可選 moments；驗所有現有變數後，Labber 仍只匯出原單 log。
 - 2026-11-22 [Mux 逐 tone 校正 IQ 矩與 R11](2026-11-22-mux-iq-moments-and-r11.md)：資料格式。Reducer 按參與 tone 順序計算完成輪的同批校正六矩，保留既有平均與舊檔。
 - 2026-11-23 [Labber scalar 匯出的索引軸](2026-11-23-labber-scalar-index-axis.md)：資料格式（已撤回）。原做法是替無軸 scalar 加一點索引軸。
-- 2026-11-23 [CZ 最佳化的 Labber 選集](2026-11-23-cz-optimize-labber-selection.md)：資料格式。Native 保留 `duration`；Labber 只匯出 `params` 與 `peak`，不替無軸變數加軸。
+- 2026-11-23 [CZ 最佳化的 Labber 選集](2026-11-23-cz-optimize-labber-selection.md)：資料格式（superseded）。匯出 `params` 矩陣的做法由 [具名 Native 與 Labber 欄位](2026-11-24-cz-optimize-native-labber-format.md) 取代。
 - 2026-11-23 [Coherence 的 shot SEM 只隨當次 Run 交接](2026-11-23-coherence-run-only-shot-sem.md)：資料入庫（superseded）。只在記憶體交接矩的保存決策已由 [Native 保存六矩](2026-11-23-coherence-native-shot-moments.md) 取代。
 - 2026-11-23 [Coherence 的 shot 矩寫入 Native 檔](2026-11-23-coherence-native-shot-moments.md)：資料入庫。三個 leaf 可選保存同次六矩，重載後重算 SEM；Labber 匯出與三個歷史輸入契約不變。
 - 2026-11-23 [舊 MIST gain Labber 的同版轉換](2026-11-23-mist-legacy-labber-equivalence.md)：歷史格式。固定原單 log 宣告，兩種 profile 證明等價才保留版號。
 - 2026-11-24 [掃頻 drive cfg 的值域擴張升 minor](2026-11-24-swept-drive-cfg-minor.md)：資料格式。五個入口保留完整來源值，舊等頻 cfg 可由新版載入；舊版讀新異頻檔保留結果但不還原 cfg。
+- 2026-11-24 [CZ 最佳化的具名 Native 與 Labber 欄位](2026-11-24-cz-optimize-native-labber-format.md)：資料格式。逐欄保存參數及單位；cfg 無法還原時保留量測和分析，舊格式用原版本開啟。
 
 ## 量測策略
 
@@ -281,3 +282,4 @@
 - 2026-11-21 [Rπ length 沿用讀出模組的長度差](2026-11-21-rpi-length-fixed-margin.md)：讀出時序。Rπ 的 ADC window 掃描沿用可編輯的模組長度差，保留交替脈衝序列與結果形狀。
 - 2026-11-21 [讀出範本在 ADC 窗口前後各留 0.015 µs](2026-11-21-readout-template-window-margin.md)：預設時序。範本、DPM 寫回與普通 onetone 表單共用 0.03 µs 的長度差。
 - 2026-11-23 [MIST single trace 保留平均 IQ 的位移大小](2026-11-23-mist-single-trace-observable.md)：讀圖語意。Live 與預設 Analyze 用同一掃描前段複數參考，畫幅值而不套用 shot SEM（不畫棒已由[新紀錄](2026-11-23-mist-trace-propagated-sem.md)取代）。
+- 2026-11-24 [CZ 最佳化只搜尋等長的 arb 脈衝](2026-11-24-cz-optimize-search-space.md)：搜尋空間。起點照原樣播放；後續只搜尋等長 arb，複數峰歸一，共同倍率與兩個 local Z 一起調。

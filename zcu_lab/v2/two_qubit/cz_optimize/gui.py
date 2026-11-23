@@ -3,6 +3,7 @@
 from collections.abc import Sequence
 from pathlib import Path
 
+from zcu_tools.cfg_model import ArbWaveformCfg as ArbWaveformSpec
 from zcu_tools.cfg_model import PulseSpec
 from zcu_tools.core.waveform_format import hash_samples
 from zcu_tools.experiment import RunRecord
@@ -18,7 +19,9 @@ from zcu_tools.gui.app.measure.adapter import (
     WritebackRequest,
 )
 from zcu_tools.plotting.plots import Plots
+from zcu_tools.program.v2 import ModuleCfgFactory
 
+from ._assets import start_asset_issues, start_asset_paths
 from .core import (
     CZOptimizeAnalysis,
     CZOptimizeCfg,
@@ -41,15 +44,23 @@ def _analyze(
 def _get_writeback_items(
     req: WritebackRequest[_Run, CZOptimizeAnalysis | CZOptimizeUnavailable],
 ) -> Sequence[WritebackItem]:
+    cfg, best = req.run_result.cfg, req.analyze_result
+    # These records support analysis but cannot supply safe writeback items.
+    if cfg is None or isinstance(best, CZOptimizeUnavailable):
+        return []
+    if best.best_evaluation == 0:
+        issues = start_asset_issues(
+            req.run_result.result.start_asset_fingerprints,
+            paths=start_asset_paths(cfg.drive),
+        )
+        if issues:
+            return []
     parameters = req.ctx.parameters
     if parameters is None:
         raise ValueError("CZ optimization writeback requires a Run/Load capture")
-    cfg, best = req.run_result.cfg, req.analyze_result
-    if cfg is None or isinstance(best, CZOptimizeUnavailable):
-        return []
 
-    samples = best.render_best()
-    key = f"cz_opt_{hash_samples(samples)[:12]}"
+    samples = best.render_best() if best.best_evaluation else None
+    key = f"cz_opt_{hash_samples(samples)[:12]}" if samples is not None else None
     selected = best.start_target is not None and best.best_target > best.start_target
     note = None
     if best.start_target is None:
@@ -60,27 +71,42 @@ def _get_writeback_items(
         note = "The best measured survival does not exceed the starting survival."
 
     # ADR-0008: one draft can publish the asset and apply the pulses that use it.
-    items: list[WritebackItem] = [
-        ArbAssetWriteback(
-            target_name=key,
-            description="Best CZ envelope for both drive lines",
-            samples=samples,
-            selected=selected,
-            note=note,
+    items: list[WritebackItem] = []
+    if samples is not None and key is not None:
+        items.append(
+            ArbAssetWriteback(
+                target_name=key,
+                description="Best CZ envelope for both drive lines",
+                samples=samples,
+                selected=selected,
+                note=note,
+            )
         )
-    ]
-    for position, pulse in (("qubit1", cfg.drive.qubit1), ("qubit2", cfg.drive.qubit2)):
+    for index, (position, pulse) in enumerate(
+        (("qubit1", cfg.drive.qubit1), ("qubit2", cfg.drive.qubit2))
+    ):
         label = position.capitalize()
+        proposal = ModuleCfgFactory.to_spec(pulse)
+        if not isinstance(proposal, PulseSpec):
+            raise TypeError("A CZ drive must project to a pulse Spec")
+        if key is not None:
+            if best.best_raw_gains is None:
+                raise ValueError("The selected CMA candidate has no raw gains")
+            proposal = PulseSpec.model_validate(
+                {
+                    **proposal.model_dump(),
+                    "gain": best.best_raw_gains[index],
+                    "waveform": ArbWaveformSpec(data=key),
+                }
+            )
         # Pulse library keys: $coupler.pulses.cz_qubit1 and $coupler.pulses.cz_qubit2.
         target = f"$coupler.pulses.cz_{position}"
         items.extend(
             (
                 ModuleWriteback(
                     target_name=target,
-                    description=f"CZ {label} pulse with the best envelope",
-                    proposal=PulseSpec.model_validate(
-                        {**pulse.to_dict(), "waveform": {"style": "arb", "data": key}}
-                    ),
+                    description=f"Selected CZ {label} pulse",
+                    proposal=proposal,
                     selected=selected,
                     note=note,
                 ),
@@ -94,6 +120,14 @@ def _get_writeback_items(
                 ),
             )
         )
+    angle1, angle2 = (
+        best.corrections_deg
+        if best.best_evaluation
+        else (
+            cfg.phase_pair.correction_qubit1_deg,
+            cfg.phase_pair.correction_qubit2_deg,
+        )
+    )
     items.append(
         ParameterWriteback(
             # Keys: $coupler.ext.cz_phase.qubit1, $coupler.ext.cz_phase.qubit2,
@@ -104,8 +138,8 @@ def _get_writeback_items(
             proposed_value={
                 "qubit1": parameters.resolve_path("$qubit1"),
                 "qubit2": parameters.resolve_path("$qubit2"),
-                "correction_qubit1_deg": best.best_params[-2],
-                "correction_qubit2_deg": best.best_params[-1],
+                "correction_qubit1_deg": angle1,
+                "correction_qubit2_deg": angle2,
             },
             selected=selected,
             note=note,
@@ -121,11 +155,13 @@ def run(cfg: CZOptimizeCfg, *, context: RunContext) -> _Run:
 
 def _summary_lines(source: _Run) -> tuple[str, ...]:
     cfg = source.cfg
-    if cfg is None:
-        return ()
+    duration = f"Starting CZ duration {source.result.start_duration_s * 1e9:.6g} ns"
+    acquisition = () if cfg is None else (f"Reps×Rounds {cfg.reps}×1",)
+    paths = start_asset_paths(cfg.drive) if cfg is not None else None
     return (
-        f"Reps×Rounds {cfg.reps}×1",
-        f"Applied CZ envelope duration {source.result.duration:.6g} µs",
+        *acquisition,
+        duration,
+        *start_asset_issues(source.result.start_asset_fingerprints, paths=paths),
     )
 
 
