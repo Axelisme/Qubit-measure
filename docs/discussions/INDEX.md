@@ -233,7 +233,8 @@
 - 2026-11-22 [Mux 逐 tone 校正 IQ 矩與 R11](2026-11-22-mux-iq-moments-and-r11.md)：資料格式。Reducer 按參與 tone 順序計算完成輪的同批校正六矩，保留既有平均與舊檔。
 - 2026-11-23 [Labber scalar 匯出的索引軸](2026-11-23-labber-scalar-index-axis.md)：資料格式（已撤回）。原做法是替無軸 scalar 加一點索引軸。
 - 2026-11-23 [CZ 最佳化的 Labber 選集](2026-11-23-cz-optimize-labber-selection.md)：資料格式。Native 保留 `duration`；Labber 只匯出 `params` 與 `peak`，不替無軸變數加軸。
-- 2026-11-23 [Coherence 的 shot SEM 只隨當次 Run 交接](2026-11-23-coherence-run-only-shot-sem.md)：資料入庫。Mux Ramsey／Echo 與單 qubit Echo 不把矩寫入 Native 或 Labber，重載後重算不畫棒。
+- 2026-11-23 [Coherence 的 shot SEM 只隨當次 Run 交接](2026-11-23-coherence-run-only-shot-sem.md)：資料入庫（superseded）。只在記憶體交接矩的保存決策已由 [Native 保存六矩](2026-11-23-coherence-native-shot-moments.md) 取代。
+- 2026-11-23 [Coherence 的 shot 矩寫入 Native 檔](2026-11-23-coherence-native-shot-moments.md)：資料入庫。三個 leaf 可選保存同次六矩，重載後重算 SEM；Labber 匯出與三個歷史輸入契約不變。
 
 ## 量測策略
 

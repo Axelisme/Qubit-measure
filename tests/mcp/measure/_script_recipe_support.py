@@ -1,10 +1,14 @@
 """Synthetic GUI wire collaborator and declaration startup for recipe contracts."""
 
 from threading import Event
+from time import monotonic
 
 from pydantic import BaseModel, Field
 from zcu_tools.gui.form import FormModel
-from zcu_tools.mcp.measure.script_recipe_execution import ScriptRecipeExecution
+from zcu_tools.mcp.measure.script_recipe_execution import (
+    ScriptRecipeExecution,
+    ScriptRecipeSnapshot,
+)
 
 from ._support import MeasureClient
 
@@ -199,8 +203,30 @@ class MappingWritebackGui(SyntheticGui):
         return reply
 
 
+def wait_for_terminal(execution: ScriptRecipeExecution) -> ScriptRecipeSnapshot:
+    """Return the submitted recipe's terminal snapshot, even on failure.
+
+    Release any external blockers before calling. Fail on another handoff or if
+    no terminal state is published within the 30-second watchdog.
+    """
+    deadline = monotonic() + 30.0
+    # With no handoff left to resolve, the worker publishes a terminal snapshot.
+    while True:
+        execution.wait(min(3.0, max(0.0, deadline - monotonic())))
+        snapshot = execution.snapshot()
+        if snapshot.phase == "terminal":
+            return snapshot
+        assert snapshot.status not in {"waiting", "interactive"}, (
+            f"Recipe {snapshot.execution} unexpectedly handed off as {snapshot.status}"
+        )
+        assert monotonic() < deadline, (
+            f"Recipe {snapshot.execution} did not publish a terminal state "
+            f"within 30 s (last status: {snapshot.status})"
+        )
+
+
 def answer_writeback(execution: ScriptRecipeExecution) -> None:
-    """Accept the current public writeback question and await its continuation."""
+    """Accept the current public writeback question and require a terminal state."""
     execution.wait(3)
     pending = execution.snapshot().pending_question
     assert pending is not None
@@ -213,7 +239,7 @@ def answer_writeback(execution: ScriptRecipeExecution) -> None:
             },
         }
     )
-    execution.wait(3)
+    wait_for_terminal(execution)
 
 
 def start(client: MeasureClient, name: str, count: int = 9) -> ScriptRecipeExecution:

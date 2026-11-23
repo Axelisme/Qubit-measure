@@ -1,24 +1,10 @@
 """Fixed native declarations for offline migration, never a runtime registry."""
 
-from collections.abc import Sequence
-from copy import deepcopy
-from pathlib import Path
-from typing import TypeVar
-
 import numpy as np
-from zcu_tools.cfg_model import ConfigBase
-from zcu_tools.experiment import (
-    AxesSpec,
-    Axis,
-    GroupedAxesSpec,
-    VariableAxisSpec,
-    VariableZSpec,
-    ZSpec,
-    load_run,
-)
-from zcu_tools.experiment.metadata import CfgSnapshot, validate_cfg_snapshot
 
-from migrations.experiment_declaration import MigrationExperiment
+from migrations.experiment_declaration import (
+    declare_migration_experiment as _declaration,
+)
 from migrations.legacy_labber import LegacyAxisSchema, LegacyVariableSchema
 from zcu_lab.v2.fastflux.distortion.acc_phase import (
     core as fastflux_distortion_acc_phase,
@@ -122,73 +108,47 @@ from zcu_lab.v2.twotone.time_domain.t2ramsey import core as twotone_time_domain_
 from zcu_lab.v2.twotone.zigzag import core as twotone_zigzag
 from zcu_lab.v2.twotone.zigzag_sweep import core as twotone_zigzag_sweep
 
-ResultT = TypeVar("ResultT")
-CfgT = TypeVar("CfgT", bound=ConfigBase)
+# Historical disk schemas precede the Native-only shot moments. Neither the
+# current native variables nor the Labber export projection defines these logs.
+_ECHO_SCHEMA = (
+    LegacyVariableSchema(
+        variable="data",
+        axes=(LegacyAxisSchema(name="Time", unit="s", dtype=np.dtype("float64")),),
+        signal_name="Signal",
+        signal_unit="a.u.",
+        signal_dtype=np.dtype("complex128"),
+    ),
+)
 
-
-def _legacy_schema(
-    variable: str, axes: Sequence[Axis | VariableAxisSpec], z: ZSpec | VariableZSpec
-) -> LegacyVariableSchema:
-    return LegacyVariableSchema(
-        variable=variable,
-        axes=tuple(
+_TONE_AXIS = LegacyAxisSchema(name="Tone", unit="", dtype=np.dtype("float64"))
+_MUX_COHERENCE_SCHEMA = (
+    LegacyVariableSchema(
+        variable="signals",
+        axes=(
             LegacyAxisSchema(
-                name=axis.label,
-                unit=axis.unit,
-                dtype=np.dtype(axis.dtype)
-                if isinstance(axis, VariableAxisSpec) and axis.generated == "arange"
-                else (np.empty(0, dtype=axis.dtype) * axis.scale).dtype,
-            )
-            for axis in axes
+                name="Requested delay", unit="s", dtype=np.dtype("float64")
+            ),
+            _TONE_AXIS,
         ),
-        signal_name=z.label,
-        signal_unit=z.unit,
-        signal_dtype=(np.empty(0, dtype=z.dtype) * z.scale).dtype,
-    )
-
-
-def _legacy_schemas(
-    spec: AxesSpec[ResultT, CfgT] | GroupedAxesSpec[ResultT, CfgT],
-) -> tuple[LegacyVariableSchema, ...]:
-    if isinstance(spec, GroupedAxesSpec):
-        return tuple(
-            _legacy_schema(item.data_variable, item.axes, item.z)
-            for item in spec.variables
-        )
-    return (_legacy_schema(spec.data_variable, spec.axes, spec.z),)
-
-
-def _declaration(
-    spec: AxesSpec[ResultT, CfgT] | GroupedAxesSpec[ResultT, CfgT] | None,
-    *,
-    source_tag: str | None = None,
-) -> MigrationExperiment:
-    if spec is None:
-        raise ValueError("Missing native experiment declaration")
-
-    def validate_cfg(snapshot: CfgSnapshot) -> None:
-        validate_cfg_snapshot(snapshot)
-        if snapshot.cfg_type != spec.cfg_type.__name__:
-            raise ValueError(f"cfg_type must be {spec.cfg_type.__name__}")
-        if int(snapshot.schema_version.split(".")[0]) != int(
-            spec.cfg_schema_version.split(".")[0]
-        ):
-            raise ValueError(
-                f"cfg_schema_version major must match {spec.cfg_schema_version}"
-            )
-        spec.cfg_type.model_validate(deepcopy(snapshot.values), extra="ignore")
-
-    def validate(path: Path) -> None:
-        load_run(path, spec=spec)
-
-    return MigrationExperiment(
-        source_tag=spec.tag if source_tag is None else source_tag,
-        native_tag=spec.tag,
-        cfg_type=spec.cfg_type.__name__,
-        schemas=_legacy_schemas(spec),
-        validate_cfg=validate_cfg,
-        validate_native=validate,
-    )
+        signal_name="Signal",
+        signal_unit="a.u.",
+        signal_dtype=np.dtype("complex128"),
+    ),
+    LegacyVariableSchema(
+        variable="actual_detunes",
+        axes=(_TONE_AXIS,),
+        signal_name="Actual detune",
+        signal_unit="Hz",
+        signal_dtype=np.dtype("float64"),
+    ),
+    LegacyVariableSchema(
+        variable="source_frequencies",
+        axes=(_TONE_AXIS,),
+        signal_name="Source frequency",
+        signal_unit="Hz",
+        signal_dtype=np.dtype("float64"),
+    ),
+)
 
 
 # Explicit core declarations, including notebook-only experiments. No discovery,
@@ -226,8 +186,16 @@ MIGRATION_EXPERIMENTS = (
     _declaration(mux_onetone.MuxOnetoneExp.AXES_SPEC, source_tag="mux/onetone"),
     _declaration(mux_singleshot_ge.MuxGEExp.AXES_SPEC),
     _declaration(mux_t1.MuxT1Exp.AXES_SPEC),
-    _declaration(mux_t2echo.MuxT2EchoExp.AXES_SPEC),
-    _declaration(mux_t2ramsey.MuxT2RamseyExp.AXES_SPEC),
+    _declaration(
+        mux_t2echo.MuxT2EchoExp.AXES_SPEC,
+        source_tag="mux/time_domain/t2echo",
+        schemas=_MUX_COHERENCE_SCHEMA,
+    ),
+    _declaration(
+        mux_t2ramsey.MuxT2RamseyExp.AXES_SPEC,
+        source_tag="mux/time_domain/t2ramsey",
+        schemas=_MUX_COHERENCE_SCHEMA,
+    ),
     _declaration(onetone_flux_dep.FluxDepExp.AXES_SPEC),
     _declaration(onetone_freq.FreqExp.AXES_SPEC),
     _declaration(onetone_power_dep.PowerDepExp.AXES_SPEC),
@@ -275,7 +243,11 @@ MIGRATION_EXPERIMENTS = (
     _declaration(twotone_time_domain_t1.T1Exp.AXES_SPEC),
     _declaration(twotone_time_domain_t1_with_tone.T1WithToneExp.AXES_SPEC),
     _declaration(twotone_time_domain_scan_t1_with_tone.ScanT1WithToneExp.AXES_SPEC),
-    _declaration(twotone_time_domain_t2echo.T2EchoExp.AXES_SPEC),
+    _declaration(
+        twotone_time_domain_t2echo.T2EchoExp.AXES_SPEC,
+        source_tag="twotone/ge/t2echo",
+        schemas=_ECHO_SCHEMA,
+    ),
     _declaration(twotone_time_domain_t2ramsey.T2RamseyExp.AXES_SPEC),
     _declaration(twotone_zigzag.ZigZagExp.AXES_SPEC),
     _declaration(twotone_zigzag_sweep.ZigZagScanExp.AXES_SPEC),

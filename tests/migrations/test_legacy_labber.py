@@ -1,10 +1,12 @@
 """Migration-only Labber reading through the public offline contract."""
 
+from dataclasses import dataclass
 from pathlib import Path
 
 import h5py as h5
 import numpy as np
 import pytest
+from zcu_tools.cfg_model import ConfigBase
 from zcu_tools.datafile import (
     GroupedLabberData,
     LabberData,
@@ -14,7 +16,15 @@ from zcu_tools.datafile import (
     load_labber_logs,
 )
 from zcu_tools.datafile.grouped import write_grouped_labber_data_file
+from zcu_tools.experiment import (
+    GroupedAxesSpec,
+    GroupedLoadData,
+    VariableAxisSpec,
+    VariableSpec,
+    VariableZSpec,
+)
 
+from migrations.experiment_declaration import declare_migration_experiment
 from migrations.legacy_labber import (
     LegacyAxisSchema,
     LegacyVariableSchema,
@@ -67,6 +77,77 @@ def test_explicit_variable_identity_and_reader_metadata_are_preserved(
     np.testing.assert_array_equal(loaded.vars["measured"].values, [2.0, 3.0])
     assert loaded.vars["measured"].values.dtype == np.dtype("float64")
     assert source.read_bytes() == before
+
+
+class _EchoCfg(ConfigBase):
+    pass
+
+
+@dataclass(frozen=True)
+class _EchoResult:
+    times: np.ndarray
+    signal: np.ndarray
+    iq_moments: np.ndarray | None = None
+
+
+@pytest.fixture
+def echo_spec() -> GroupedAxesSpec[_EchoResult, _EchoCfg]:
+    time = VariableAxisSpec(label="Time", unit="s", field_name="times", scale=1e-6)
+
+    def restore(data: GroupedLoadData[_EchoCfg]) -> _EchoResult:
+        signal = data.variable("data")
+        return _EchoResult(signal.axes[0], signal.z)
+
+    return GroupedAxesSpec(
+        variables=(
+            VariableSpec(
+                "data",
+                (time,),
+                VariableZSpec(
+                    "signal", label="Signal", unit="a.u.", dtype=np.complex128
+                ),
+            ),
+            VariableSpec(
+                "iq_moments",
+                (VariableAxisSpec(label="Moment", unit="", generated="arange"), time),
+                VariableZSpec("iq_moments", label="Moments", unit="a.u."),
+                required=False,
+            ),
+        ),
+        result_type=_EchoResult,
+        cfg_type=_EchoCfg,
+        result_builder=restore,
+        tag="synthetic/echo",
+    )
+
+
+def test_declaration_rejects_empty_historical_schema(
+    echo_spec: GroupedAxesSpec[_EchoResult, _EchoCfg],
+) -> None:
+    with pytest.raises(ValueError, match="at least one legacy log"):
+        declare_migration_experiment(echo_spec, schemas=())
+
+
+def test_declared_historical_echo_schema_reads_unmarked_log_with_native_moments(
+    tmp_path: Path, echo_spec: GroupedAxesSpec[_EchoResult, _EchoCfg]
+) -> None:
+    history = LegacyVariableSchema(
+        variable="data",
+        axes=(LegacyAxisSchema(name="Time", unit="s", dtype=np.dtype("float64")),),
+        signal_name="Signal",
+        signal_unit="a.u.",
+        signal_dtype=np.dtype("complex128"),
+    )
+    declaration = declare_migration_experiment(echo_spec, schemas=(history,))
+    source = tmp_path / "echo.hdf5"
+    LabberData(
+        ("Signal", "a.u.", np.array([1 + 2j, 3 + 4j])),
+        [("Time", "s", np.array([0.0, 1e-6]))],
+    ).save(str(source))
+
+    assert [item.variable for item in declaration.schemas] == ["data"]
+    loaded, _ = load_legacy_labber_payload(source, schema=declaration.schemas)
+    np.testing.assert_array_equal(loaded.vars["data"].values, [1 + 2j, 3 + 4j])
 
 
 def test_unmarked_file_does_not_guess_multiple_variable_identities(
