@@ -29,6 +29,7 @@ from zcu_tools.simulate.evolution import (
 
 from .accuracy import AccuracyMeasurement, measurement_property, require_families
 from .accuracy_cases import (
+    COMPLEX_SINGLE_GATE_CASES,
     CPU_DP54_CASES,
     DISSIPATIVE_DC_CASES,
     OPENCL_CASES,
@@ -39,6 +40,7 @@ from .accuracy_cases import (
     history_case,
     multisegment_case,
     multitone_phase_case,
+    single_gate_diagonal_case,
     timeline,
 )
 from .guard_edge_cases import (
@@ -68,6 +70,7 @@ CASE_NAMES = (
     "sampled_multitone_short_sweep_32",
     "adiabatic_ramp",
     "single_tone_sideband",
+    *COMPLEX_SINGLE_GATE_CASES,
     *DISSIPATIVE_DC_CASES,
 )
 KNOWN_EDGE_ERRORS = {
@@ -150,8 +153,9 @@ def test_pinned_family_density(
     case = accuracy_case(name)
     reference = matrix_reference(case)
     families = (case.idle_family, family) if case.idle_family is not None else (family,)
+    budget = 2e-3 if name in COMPLEX_SINGLE_GATE_CASES else 1e-3
     with closing(Engine(1, families=families, backend="cpu")) as engine:
-        result = engine.evolve(case.source, (case.batch,))
+        result = engine.evolve(case.source, (case.batch,), budget=budget)
     require_families(result.paths, families)
     if case.idle_family is not None:
         actual = {
@@ -169,6 +173,31 @@ def test_pinned_family_density(
         )
     )
     assert error <= 2e-3, f"{name}/{family}: density error {error:.9g} > 2e-3"
+
+
+@pytest.mark.parametrize("complex_envelope", [False, True], ids=["real", "complex"])
+def test_single_gate_diagonal_density(
+    complex_envelope: bool,
+    request: pytest.FixtureRequest,
+    matrix_reference: Callable[[AccuracyCase], ReferenceResult],
+) -> None:
+    budget = 1e-3
+    family = "single_tone_gate"
+    case = single_gate_diagonal_case(complex_envelope=complex_envelope)
+    with (
+        closing(case.source),
+        closing(Engine(1, families=(family,), backend="cpu")) as engine,
+    ):
+        actual = engine.evolve(case.source, (case.batch,), budget=budget)
+        reference = matrix_reference(case)
+    require_families(actual.paths, (family,))
+    error = density_error(actual.densities, reference.density)
+    request.node.user_properties.append(
+        measurement_property(
+            AccuracyMeasurement(case.name, family, error, reference.convergence_error)
+        )
+    )
+    assert error <= budget, f"{case.name}: density error {error:.9g} > {budget}"
 
 
 @pytest.mark.parametrize(

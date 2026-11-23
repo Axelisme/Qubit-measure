@@ -1,10 +1,12 @@
 """Same-carrier drive folding at the public Engine boundary."""
 
+from collections.abc import Mapping
 from contextlib import closing
 from dataclasses import replace
 
 import numpy as np
 import pytest
+from numpy.typing import NDArray
 from zcu_tools.simulate.evolution import (
     CaptureBuffer,
     DriveTrack,
@@ -12,11 +14,16 @@ from zcu_tools.simulate.evolution import (
     EnvelopeSpec,
     ModelSource,
     NoValidKernel,
+    RoutingHistory,
     SecularDrive,
+    SecularModel,
     canonical_json,
     physical_input,
     read_capture_metadata,
 )
+from zcu_tools.simulate.evolution.kernel import GuardResult, KernelContext, SegmentTable
+from zcu_tools.simulate.evolution.kernels.floquet import FloquetKernel
+from zcu_tools.simulate.evolution.kernels.multitone_rwa import MultitoneRWAKernel
 
 from ._engine import RecordingKernel, batch, run, source, track
 from .contract.floquet_cases import floquet_case
@@ -161,8 +168,20 @@ def test_incompatible_lines_stay_in_the_existing_multitone_route(mismatch: str):
     assert result.paths.segments_by_kernel == {"dop853": 1}
 
 
-def test_unrelated_fold_does_not_change_two_tone_floquet_admission():
+def test_unrelated_fold_does_not_change_two_tone_floquet_frame():
+    class FrameSizes(FloquetKernel):
+        def __init__(self) -> None:
+            self.sizes: list[int] = []
+
+        def guard_prepared(
+            self, table: SegmentTable, rows: NDArray[np.int64], context: KernelContext
+        ) -> GuardResult:
+            result = super().guard_prepared(table, rows, context)
+            self.sizes.extend(item.prepared.nbytes for item in result.preparations)
+            return result
+
     case = floquet_case("sideband")
+    floquet = FrameSizes()
     # This separate DC pair exercises the virtual bank, not Floquet playback.
     dc = replace(
         case.batch.tracks[0], frequency_ghz=np.zeros(1), amplitude=np.full(1, 1e18)
@@ -170,10 +189,54 @@ def test_unrelated_fold_does_not_change_two_tone_floquet_admission():
     other = replace(dc, port=case.batch.tracks[1].port)
     folded = replace(case.batch, points=np.array([1]), tracks=(dc, other))
     # Observe routing of the real Floquet row without evolving the strong DC pair.
-    from zcu_tools.simulate.evolution.kernels.floquet import FloquetKernel
-
     with (
         closing(case.source),
+        closing(
+            Engine(
+                1,
+                backend="cpu",
+                kernels=(floquet, RecordingKernel("slow_envelope")),
+            )
+        ) as engine,
+    ):
+        standalone = engine.evolve(case.source, (case.batch,))
+        standalone_sizes = tuple(floquet.sizes)
+        floquet.sizes.clear()
+        combined = engine.evolve(case.source, (case.batch, folded))
+    assert standalone.paths.segments_by_kernel == {"floquet": 1}
+    assert combined.paths.segments_by_kernel == {"floquet": 1, "slow_envelope": 1}
+    np.testing.assert_array_equal(combined.densities[0], standalone.densities[0])
+    assert standalone_sizes and tuple(floquet.sizes) == standalone_sizes
+
+
+@pytest.mark.parametrize("folded_slot", ["stark", "probe"])
+def test_floquet_uses_its_folded_port_after_an_unrelated_virtual_port(
+    folded_slot: str,
+) -> None:
+    case = floquet_case("sideband")
+    stark, probe = case.batch.tracks
+    # Floquet picks its Stark tone by gain, and a folded slot always has gain 1.
+    # Rescale the physical operator and gain inversely to retain the same pump.
+    with closing(case.source):
+        native = case.source.model((0,))
+        pump, read = native.drives
+        model = replace(
+            native, drives=(replace(pump, in_phase_ghz=pump.in_phase_ghz / 10), read)
+        )
+        initial = case.source.initial_density
+    stark = replace(stark, amplitude=10 * stark.amplitude, phase_rad=np.zeros(1))
+    probe = replace(probe, phase_rad=np.zeros(1))
+    standalone = replace(case.batch, tracks=(stark, probe))
+    pulse = stark if folded_slot == "stark" else probe
+    half = replace(pulse, amplitude=pulse.amplitude / 2)
+    tracks = (half, half, probe) if folded_slot == "stark" else (stark, half, half)
+    folded = replace(standalone, tracks=tracks)
+    dc = replace(stark, frequency_ghz=np.zeros(1))
+    unrelated = replace(
+        standalone, points=np.array([1]), tracks=(dc, replace(dc, port=probe.port))
+    )
+    with (
+        closing(ModelSource(initial, lambda level: model)) as src,
         closing(
             Engine(
                 1,
@@ -182,11 +245,92 @@ def test_unrelated_fold_does_not_change_two_tone_floquet_admission():
             )
         ) as engine,
     ):
-        standalone = engine.evolve(case.source, (case.batch,))
-        combined = engine.evolve(case.source, (case.batch, folded))
-    assert standalone.paths.segments_by_kernel == {"floquet": 1}
-    assert combined.paths.segments_by_kernel == {"floquet": 1, "slow_envelope": 1}
-    np.testing.assert_array_equal(combined.densities[0], standalone.densities[0])
+        expected = engine.evolve(src, (standalone,))
+        actual = engine.evolve(src, (unrelated, folded))
+    assert expected.paths.segments_by_kernel == {"floquet": 1}
+    assert actual.paths.segments_by_kernel == {"floquet": 1, "slow_envelope": 1}
+    np.testing.assert_allclose(
+        actual.densities[1], expected.densities[0], rtol=0, atol=1e-10
+    )
+
+
+def test_expanded_pair_history_follows_fold_recipe_not_encounter_order() -> None:
+    class UsageHistory(RoutingHistory):
+        def __init__(self) -> None:
+            super().__init__()
+            self.usage: dict[bytes, int] = {}
+
+        def record_gate_usage(
+            self, inventory: Mapping[bytes, int], *, content: bytes
+        ) -> dict[bytes, int]:
+            self.usage = super().record_gate_usage(inventory, content=content)
+            return self.usage
+
+    # The 60 MHz detuning is outside the initial 50 MHz window. The 4 MHz
+    # circular component exceeds the omission-transfer limit. At 75 ns the
+    # restored RWA product wins the price comparison at two uses, not one.
+    positive = np.array([[0, 0.004], [0, 0]], dtype=complex)
+    zero = np.zeros_like(positive)
+    model = SecularModel(
+        (0,),
+        "folded-expanded-pair",
+        np.array([0.0, 0.36]),
+        np.eye(2, dtype=complex),
+        (
+            SecularDrive("a", positive + positive.T, 1j * (positive - positive.T)),
+            *(SecularDrive(name, zero, zero) for name in ("b", "c", "probe")),
+        ),
+        zero.real,
+        zero.real,
+    )
+    pulse = replace(
+        track(1, EnvelopeSpec("constant"), duration=75.0),
+        port="a",
+        frequency_ghz=np.array([0.3]),
+    )
+    probe = replace(pulse, port="probe", frequency_ghz=np.array([0.9]))
+    template = batch(1, duration=75.0)
+    first, other = (
+        replace(
+            template,
+            points=np.array([point]),
+            tracks=(pulse, replace(pulse, port=channel), probe),
+        )
+        for point, channel in enumerate(("b", "c"))
+    )
+    # Both folds produce identical quadratures but use different physical lines.
+    history = UsageHistory()
+    with (
+        closing(
+            ModelSource(np.eye(2) / 2, lambda level: model, history=history)
+        ) as src,
+        closing(
+            Engine(
+                1,
+                kernels=(MultitoneRWAKernel(), RecordingKernel("dop853")),
+                backend="cpu",
+            )
+        ) as engine,
+    ):
+        cold = engine.evolve(src, (first,), reuse_key=b"cold")
+        assert cold.paths.segments_by_kernel == {"dop853": 1}
+        assert engine.reuse(src, b"cold")
+        assert list(history.usage.values()) == [1]
+        (first_key,) = history.usage
+
+        warming = engine.evolve(src, (other, first))
+        assert first_key in history.usage, "the warm recipe lost its history key"
+        (other_key,) = history.usage.keys() - {first_key}
+        assert history.usage == {first_key: 2, other_key: 1}
+        assert warming.paths.segments_by_kernel == {"dop853": 1, "multitone_rwa": 1}
+        assert not engine.reuse(src, b"cold")
+
+        warm = engine.evolve(src, (first, other))
+        assert history.usage == {first_key: 3, other_key: 2}
+        assert warm.paths.segments_by_kernel == {"multitone_rwa": 2}
+        repeated = engine.evolve(src, (first, other))
+        assert history.usage == {first_key: 3, other_key: 2}
+        assert repeated.paths.segments_by_kernel == warm.paths.segments_by_kernel
 
 
 @pytest.fixture
@@ -222,6 +366,39 @@ def test_channel_sets_keep_distinct_preparations_across_batches(channel_sets):
     assert result.paths.routing["slow_envelope"].prepare_key_builds == 2
     np.testing.assert_array_equal(result.densities[:2], result.densities[2:])
     assert np.max(np.abs(result.densities[0] - result.densities[1])) > 1e-3
+
+
+def test_model_only_prepare_shares_dop853_without_aliasing_fold_recipes(channel_sets):
+    drives, batches = channel_sets
+    folded = batches[:2]
+    # Identical interpolation does not imply an identical sample clock.
+    times = np.array([0.0, 1.5, 3.0])
+    redundant_clock = np.array([0.0, 0.75, 1.5, 3.0])
+    envelope = EnvelopeSpec("sampled", np.ones(len(times)), times)
+    resampled = EnvelopeSpec("sampled", np.ones(len(redundant_clock)), redundant_clock)
+    folded = tuple(
+        replace(
+            item, tracks=tuple(replace(t, envelopes=(envelope,)) for t in item.tracks)
+        )
+        for item in folded
+    )
+    unfurled = tuple(
+        replace(
+            item,
+            tracks=(item.tracks[0], replace(item.tracks[1], envelopes=(resampled,))),
+        )
+        for item in folded
+    )
+    with (
+        closing(_source(*drives)) as src,
+        closing(Engine(1, backend="cpu", families=("dop853",))) as engine,
+    ):
+        actual = engine.evolve(src, folded, budget=1e-10, telemetry=True)
+        expected = engine.evolve(src, unfurled, budget=1e-10)
+
+    assert actual.paths.routing["dop853"].prepare_key_builds == 1
+    np.testing.assert_allclose(actual.densities, expected.densities, rtol=0, atol=5e-10)
+    assert np.max(np.abs(actual.densities[0] - actual.densities[1])) > 1e-3
 
 
 def test_prefix_reuses_only_the_same_channels_and_capture_keeps_physics(channel_sets):
