@@ -286,7 +286,12 @@ def _contrast(cfg: HeraldedSpectroscopyCfg) -> str:
 
 
 def _branch_figure(
-    plots: Plots, name: str, *, ylabel: str, sharey: bool = False
+    plots: Plots,
+    name: str,
+    frequencies: NDArray[np.float64] | None = None,
+    *,
+    ylabel: str,
+    sharey: bool = False,
 ) -> Figure:
     fig, _ = plots.subplots(
         num=name, nrows=2, ncols=2, sharey=sharey, figsize=(12, 9), layout="constrained"
@@ -294,6 +299,11 @@ def _branch_figure(
     for ax, branch in zip(fig.axes, _HERALDS, strict=True):
         ax.set(title=f"Herald: {branch}", xlabel=_RF_LABEL, ylabel=ylabel)
         ax.xaxis.set_major_locator(MaxNLocator(nbins=5))
+    if frequencies is not None:
+        low, high = float(frequencies.min()), float(frequencies.max())
+        margin = 0.05 * (high - low) if high > low else 1.0
+        for ax in fig.axes:
+            ax.set_xlim(low - margin, high + margin)
     return fig
 
 
@@ -305,7 +315,9 @@ def _live_spectra(
 ) -> Callable[[NDArray[np.float64]], None]:
     views = []
     for index, bias in enumerate(dc):
-        fig = _branch_figure(plots, f"spectra_{index}", ylabel="Terminal P(e)")
+        fig = _branch_figure(
+            plots, f"spectra_{index}", frequencies, ylabel="Terminal P(e)"
+        )
         panels = [live_errorbar(ax, num_lines=2) for ax in fig.axes]
         title = f"{_title(cfg, float(bias))} · {_contrast(cfg)}"
         fig.suptitle(
@@ -345,7 +357,7 @@ def _plot_spectra(
     excitation: NDArray[np.float64],
     sem: NDArray[np.float64],
 ) -> None:
-    fig = _branch_figure(plots, f"spectra_{index}", ylabel="Terminal P(e)")
+    fig = _branch_figure(plots, f"spectra_{index}", frequencies, ylabel="Terminal P(e)")
     fig.suptitle(title)
     for ax, (q1, q2) in zip(fig.axes, np.ndindex(2, 2), strict=True):
         for values, errors, label in zip(
@@ -365,7 +377,11 @@ def _plot_coverage(
     shots: NDArray[np.float64],
 ) -> None:
     fig = _branch_figure(
-        plots, f"coverage_{index}", ylabel="Retained shots (count)", sharey=True
+        plots,
+        f"coverage_{index}",
+        frequencies,
+        ylabel="Retained shots (count)",
+        sharey=True,
     )
     fig.suptitle(f"{title} · Retained shots by herald")
     fig.axes[0].yaxis.set_major_locator(MaxNLocator(integer=True))
