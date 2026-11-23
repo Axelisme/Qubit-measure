@@ -179,25 +179,17 @@ class RangeFindExp(Experiment[RangeFindResult, RangeFindCfg]):
         ax.set(
             xlabel="Readout RF frequency (MHz)", ylabel="Magnitude of mean IQ (a.u.)"
         )
-        progress = ax.set_title(f"Averaging round 0 / {cfg.rounds}", fontsize=11)
         line = live_line(ax)
         signals = SignalBuffer((len(freqs),))
-        rounds_done = 0
 
         @context.plots.on_plot_thread
-        def update(completed: int) -> Iterable[Artist]:
-            """Plot the cumulative mean and nominal shot count at a completed round."""
-            progress.set_text(
-                f"Averaging round {completed} / {cfg.rounds} · "
-                f"{completed * cfg.reps:,} nominal shots/point"
-            )
-            return (*line.set(freqs, np.abs(signals.array)), progress)
+        def update(_: None) -> Iterable[Artist]:
+            """Plot the cumulative mean IQ magnitude."""
+            return line.set(freqs, np.abs(signals.array))
 
         def show_round() -> bool:
             """Observe completed rounds without asking the acquisition to stop."""
-            nonlocal rounds_done
-            rounds_done += 1
-            update(rounds_done)
+            update(None)
             return False
 
         fig.show()

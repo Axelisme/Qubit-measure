@@ -21,6 +21,7 @@ from .workplan import WorkPlan
 
 if TYPE_CHECKING:
     from ._capture import CaptureRun
+    from ._carrier_fold import CarrierGroup
     from ._probe_memo import SampledRWAProbeMemo
     from .kernels._dop853_opencl import OpenCLBackend, OpenCLDOP853
 
@@ -65,6 +66,8 @@ class SegmentTable:
         Workers adopt the latest saved input and skip its preceding rows.
         These densities never enter model-only preparations.
         Absent groups have no known input yet.
+    carrier_groups: sparse row-indexed groups of repeated signed carriers, with
+        original channel names mapped to the effective tone slots.
     Arrays own read-only copies. Invalid shapes/counts/indices raise ValueError.
     Adjacent rows of one timeline may be merged by DOP853 kernels into a
     multi-interval work item: stop at boundaries and reset each row's step seed.
@@ -102,6 +105,8 @@ class SegmentTable:
     has_collapse_operators: NDArray[np.bool_] = field(
         default_factory=lambda: np.empty(0, dtype=bool)
     )
+
+    carrier_groups: Mapping[int, tuple[CarrierGroup, ...]] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         timeline = integers(self.timeline, "segment timelines")
@@ -155,6 +160,17 @@ class SegmentTable:
         object.__setattr__(self, "has_collapse_operators", has_collapse_operators)
         self._validate_prefixes(rows)
         self._validate_tones(rows)
+        object.__setattr__(
+            self, "carrier_groups", MappingProxyType(dict(self.carrier_groups))
+        )
+
+    def folded_channel_key(self, row: int) -> bytes:
+        """Return ordered virtual-port identities, independent of the local port IDs."""
+        return b"".join(
+            group.slots[0].to_bytes(8, "little") + group.folded_identity
+            for group in self.carrier_groups.get(row, ())
+            if group.folded_identity
+        )
 
     def model(self, source: ModelSource, row: SupportsIndex):
         """Resolve a row by physical flux and its independent shift identity."""

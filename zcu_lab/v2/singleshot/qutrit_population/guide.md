@@ -14,7 +14,7 @@ In each sequence, prepare g (no pulse), e (**g↔e π pulse**), or f (**Pi 03** 
 
 ## How to read the results
 
-Live shows the three IQ clouds and acquisition progress. Analyze overlays the training centroids on the acquired clouds; the evaluation matrices use only held-out shots. Assignment uses the nearest centroid with no rejection region (exact ties choose g, then e, then f). The color maps and scatters have no shot SEM bars.
+Live shows the three preparation IQ clouds. Analyze overlays the training centroids on the acquired clouds; the evaluation matrices use only held-out shots. Assignment uses the nearest centroid with no rejection region (exact ties choose g, then e, then f). The color maps and scatters have no shot SEM bars.
 
 **Training confusion** has requested labels in rows and classified labels in columns. Analyze solves against the transposed matrix to estimate preparation-coordinate populations, without clipping negative or above-one values. Those departures can reflect finite shots or preparation contamination. The result is not pure-state fidelity.
 

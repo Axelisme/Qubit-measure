@@ -156,11 +156,7 @@ class FreqExp(Experiment[FreqResult, FreqCfg]):
         @plots.on_plot_thread
         def update(data: NDArray[np.complex128]) -> tuple[Artist, ...]:
             """Refresh the measurement artists from the current acquired data."""
-            count = int(np.count_nonzero(np.isfinite(data)))
-            title = ax.set_title(
-                f"{_TITLE}\nAcquired frequencies: {count}/{len(freqs)} count"
-            )
-            return (*viewer.set(freqs, reset_signal2real(data)), title)
+            return viewer.set(freqs, reset_signal2real(data))
 
         fig.show()
         signals_buffer = SignalBuffer((len(freqs),), on_update=update)

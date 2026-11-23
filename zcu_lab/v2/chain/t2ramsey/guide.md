@@ -18,7 +18,7 @@ Bind the qubit and its resonator. Select a calibrated single-tone pulse Readout;
 
 ## Read the plots
 
-Run shows first-read IQ on its dominant sweep axis in a.u. (I if too few points define an axis). The lower panel uses all 65 features, centered by their across-sweep median and scaled by pooled noise. It has no shot-SEM bars. The header counts cycles per point after each completed round. Stop keeps completed rounds. Stopping before any round finishes fails Run.
+Run shows first-read IQ on its dominant sweep axis in a.u. (I if too few points define an axis). The lower panel uses all 65 features, centered by their across-sweep median and scaled by pooled noise. It has no shot-SEM bars. Stop keeps completed rounds. Stopping before any round finishes fails Run.
 The first-read `fit` figure and upper live panel use shot SEM: the projected single-cycle standard deviation divided by √(retained cycles at that point). Each cycle contributes its first read once. These bars are not fit errors or round-to-round scatter.
 
 Analyze fits all 65 IQ and correlation statistics jointly across the sweep once. The separate first-read damped cosine estimates the seed fringe and decay.

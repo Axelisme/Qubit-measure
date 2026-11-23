@@ -16,6 +16,15 @@ from zcu_tools.simulate.evolution import (
 from zcu_tools.simulate.evolution.secular import SecularDrive, SecularModel
 
 
+def _with_last_interval_midpoint(envelope: EnvelopeSpec) -> EnvelopeSpec:
+    # Keep the waveform unchanged while using a different grid to prevent folding.
+    return replace(
+        envelope,
+        samples=np.insert(envelope.samples, -1, envelope.samples[-2:].mean()),
+        sample_ns=np.insert(envelope.sample_ns, -1, envelope.sample_ns[-2:].mean()),
+    )
+
+
 def test_long_resonant_drive_preserves_spectator_coherences():
     # The circular drive is exact in the rotating frame. A coherent spectator
     # exposes relative phase errors that populations and trace cannot detect.
@@ -38,6 +47,11 @@ def test_long_resonant_drive_preserves_spectator_coherences():
     source = ModelSource(np.outer(initial, initial.conj()), lambda _: model)
     durations = np.array([11.0, 137.0, 503.0, 1000.0])
     count = len(durations)
+    envelope = EnvelopeSpec(
+        "sampled",
+        np.array([0.2, 1.0], dtype=np.complex128),
+        np.array([0.0, 1000.0]),
+    )
     track = DriveTrack(
         "a",
         np.zeros(count),
@@ -45,19 +59,16 @@ def test_long_resonant_drive_preserves_spectator_coherences():
         np.full(count, carrier),
         np.full(count, phase),
         np.ones(count),
-        (
-            EnvelopeSpec(
-                "sampled",
-                np.array([0.2, 1.0], dtype=np.complex128),
-                np.array([0.0, 1000.0]),
-            ),
-        ),
+        (envelope,),
         np.zeros(count, dtype=np.int64),
         np.ones(count, dtype=bool),
     )
+    track_b = replace(
+        track, port="b", envelopes=(_with_last_interval_midpoint(envelope),)
+    )
     timeline = TimelineBatch(
         np.arange(count),
-        (track, replace(track, port="b")),
+        (track, track_b),
         FluxSchedule(
             np.arange(count + 1), np.zeros(count), np.zeros((count, 1), dtype=np.int64)
         ),
@@ -130,9 +141,12 @@ def test_narrow_envelope_knots_preserve_resonant_pulse_area():
         np.zeros(4, dtype=np.int64),
         np.ones(4, dtype=bool),
     )
+    track_b = replace(
+        track, port="b", envelopes=(_with_last_interval_midpoint(envelope),)
+    )
     timeline = TimelineBatch(
         np.arange(4),
-        (track, replace(track, port="b")),
+        (track, track_b),
         FluxSchedule(np.arange(5), np.zeros(4), np.zeros((4, 1), dtype=np.int64)),
         np.full(4, duration),
     )

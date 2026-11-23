@@ -206,9 +206,9 @@ class ChainT2RamseyExp(Experiment[CycleSums, ChainT2RamseyCfg]):
         first plus 180 degrees, so at zero delay it undoes the first, plus the
         ramp 360 × detune × x degrees. One round makes cfg.reps cycles at every
         delay. The live plot shows projected first-read IQ with shot SEM, the
-        all-feature diagnostic and cycle progress after each round. Return the running sums of all completed
-        rounds as CycleSums along the delay axis in us. A stop keeps completed
-        rounds; a stop before the first round finishes raises RuntimeError.
+        all-feature diagnostic after each round. Return the running sums of
+        completed rounds as CycleSums along the delay axis in us. A stop keeps
+        completed rounds; a stop before the first round finishes raises RuntimeError.
         """
         # 1. Delay axis and the live plot.
         delays = sweep2array(cfg.delay, "time", {"soccfg": context.soccfg})
@@ -221,21 +221,15 @@ class ChainT2RamseyExp(Experiment[CycleSums, ChainT2RamseyCfg]):
         diagnostic_ax.xaxis.set_major_locator(MaxNLocator(nbins=4))
         iq_points = live_errorbar(ax)
         diagnostic_line = live_line(diagnostic_ax)
-        progress = fig.suptitle("Waiting for the first round")
 
         @context.plots.on_plot_thread
         def update(data: NDArray[np.float64]):
             sums = CycleSums.from_augmented(delays, data)
             signal, sem = first_read_projection(sums)
             joint = cycle_curves(sums)
-            shots = int(joint.cycle_count.min())
-            progress.set_text(
-                f"Round {shots // cfg.reps}/{cfg.rounds} · {shots} cycles per point (count)"
-            )
             return (
                 *iq_points.set(delays, signal, sem),
                 *diagnostic_line.set(delays, joint.main_sigma),
-                progress,
             )
 
         fig.show()

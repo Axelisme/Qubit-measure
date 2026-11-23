@@ -259,20 +259,14 @@ class AllXY_Exp(Experiment[AllXY_Result, AllXYCfg]):
 
         @context.plots.on_plot_thread
         def update(moments: NDArray[np.float64]) -> tuple[Artist, ...]:
-            """Refresh projected mean IQ, shot SEM and retained counts per pair."""
-            counts, mean = split_sums(moments)
+            """Refresh projected mean IQ and shot SEM per gate pair."""
+            _, mean = split_sums(moments)
             i, q = _direction(mean)
             sem = iq_shot_sem(moments, direction=(i, q))
-            title = ax.set_title(
-                f"AllXY · {np.nanmax(counts, initial=0):.0f} retained shots/pair"
-            )
-            return (
-                *viewer.set(
-                    np.arange(len(ALLXY_SEQUENCE), dtype=np.float64),
-                    mean.real * i + mean.imag * q,
-                    sem,
-                ),
-                title,
+            return viewer.set(
+                np.arange(len(ALLXY_SEQUENCE), dtype=np.float64),
+                mean.real * i + mean.imag * q,
+                sem,
             )
 
         fig.show()

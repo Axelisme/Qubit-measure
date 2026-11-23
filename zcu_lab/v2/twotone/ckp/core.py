@@ -351,8 +351,7 @@ class CKP_Exp(Experiment[CKP_Result, CKP_Cfg]):
             sharex=True,
             layout="constrained",
         )
-        title = "CKP spectroscopy · resonator and qubit · IQ contrast"
-        headline = figure.suptitle(title)
+        figure.suptitle("CKP spectroscopy · resonator and qubit · IQ contrast")
         ax_ground, ax_excited = figure.axes
         ground = live_heatmap(ax_ground, uniform=False, clim=(0, 1), cmap="viridis")
         excited = live_heatmap(ax_excited, uniform=False, clim=(0, 1), cmap="viridis")
@@ -376,11 +375,7 @@ class CKP_Exp(Experiment[CKP_Result, CKP_Cfg]):
         def plot_fn(data: NDArray[np.complex128]):
             """Refresh the measurement artists from the current acquired data."""
             real_signal = ckp_signal2real(data)
-            headline.set_text(
-                f"{title}\nPreparation / RF pairs with data: {np.count_nonzero(np.isfinite(data))}/{data.size}"
-            )
             return (
-                headline,
                 *ground.set(res_freqs, qub_freqs, real_signal[0]),
                 *excited.set(res_freqs, qub_freqs, real_signal[1]),
             )

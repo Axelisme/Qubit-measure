@@ -13,7 +13,7 @@ See [`zcu_lab/v2/operator-workflow.md`](../../operator-workflow.md) for the shar
 
 ## Read the plots
 
-Run shows measured g/e/f label fractions against actual detuning (MHz) or gain (a.u.), or three maps when both vary. The title counts acquired points and retained shots. Stop keeps completed rows; unfinished rows stay blank.
+Run shows measured g/e/f label fractions against actual detuning (MHz) or gain (a.u.), or three maps when both vary. Stop keeps completed rows; unfinished rows stay blank.
 
 Analyze reads saved g/e/f counts and never uses the current library. With a usable saved matrix, it shows measured and corrected fractions. With valid saved cfg but no classifier, it shows only **classified populations**. A singular matrix or a nonfinite solve at a valid point logs one warning and uses the same classified view. For 1D, each bar is one shot SEM: √[p(1−p)/(N−1)] for measured fraction p and N > 1 retained shots. Corrected bars propagate the retained shots' label-count covariance with the saved calibration matrix treated as known. The bars are not fit errors, shot spread or scatter between rounds. Each 2D map in Run and Analyze uses its own data range and has no pointwise bars. Compare fractions using the colorbars.
 

@@ -47,6 +47,7 @@ from scipy.integrate import solve_ivp
 from scipy.linalg import eig, schur
 from scipy.optimize import linear_sum_assignment
 
+from .._carrier_fold import FoldedDrive
 from ..kernel import (
     ApplyContext,
     GuardPreparation,
@@ -70,8 +71,39 @@ from ._secular import coherence_decay
 
 
 @dataclass(frozen=True)
+class _FramePorts:
+    """Physical port prefix plus only the virtual ports used by this frame."""
+
+    physical_count: int
+    virtual: tuple[int, ...]
+
+    def index(self, port: int) -> int:
+        return (
+            port
+            if port < self.physical_count
+            else self.physical_count + self.virtual.index(port)
+        )
+
+    def remap(self, parameters: NDArray[np.float64]) -> NDArray[np.float64]:
+        virtual = parameters[:, -1] >= self.physical_count
+        if not virtual.any():
+            return parameters
+        ports = parameters[virtual, -1].astype(np.int64)
+        frame_ports = np.asarray(self.virtual, dtype=np.int64)
+        indices = np.searchsorted(frame_ports, ports)
+        if np.any(indices == len(frame_ports)) or np.any(frame_ports[indices] != ports):
+            raise ValueError(
+                "Floquet probe port was not in the complete frame inventory"
+            )
+        result = parameters.copy()
+        result[virtual, -1] = self.physical_count + indices
+        return result
+
+
+@dataclass(frozen=True)
 class _Entry:
     frequency: float
+    ports: _FramePorts
     energies: NDArray[np.float64]
     rotations: NDArray[np.complex128]
     harmonic: NDArray[np.float64]
@@ -81,7 +113,7 @@ class _Entry:
     omitted: NDArray[np.float64]
     strengths: NDArray[np.float64]
     bath_omitted: float
-    convergence: float
+    convergence: NDArray[np.float64]
     frame_error: float
     lam: NDArray[np.complex128]
     modes: NDArray[np.complex128]
@@ -103,6 +135,7 @@ class _Entry:
                 self.y,
                 self.omitted,
                 self.strengths,
+                self.convergence,
                 self.lam,
                 self.modes,
                 self.inverse,
@@ -274,18 +307,30 @@ def _fourier_averages(samples: NDArray[np.complex128]):
     return fourier, coarse_zero
 
 
-def _averages(model: SecularModel, rotations: NDArray[np.complex128]):
-    """Transform each sample once and return full harmonics and convergence."""
+def _averages(
+    model: SecularModel,
+    rotations: NDArray[np.complex128],
+    stark_port: int,
+    ports: _FramePorts,
+):
+    """Return harmonics and the zero-mode convergence bound for each probe port."""
     count, size, _ = rotations.shape
     loss = model.rates_per_ns.sum(axis=0)
     gamma = coherence_decay(model)
     # Population rows use the transfer matrix, which already contains -loss.
     np.fill_diagonal(gamma, loss)
     baths = np.empty((count, size * size, size * size), dtype=np.complex128)
-    xs = np.zeros((count, len(model.drives), size, size), dtype=np.complex128)
+    drives = model.drives[: ports.physical_count] + tuple(
+        model.drives[p] for p in ports.virtual
+    )
+    xs = np.zeros((count, len(drives), size, size), dtype=np.complex128)
     ys = np.zeros_like(xs)
-    active_x = [p for p, d in enumerate(model.drives) if np.any(d.in_phase_ghz)]
-    active_y = [p for p, d in enumerate(model.drives) if np.any(d.quadrature_ghz)]
+    active_x = [
+        (p, d.in_phase_ghz) for p, d in enumerate(drives) if np.any(d.in_phase_ghz)
+    ]
+    active_y = [
+        (p, d.quadrature_ghz) for p, d in enumerate(drives) if np.any(d.quadrature_ghz)
+    ]
     for index, rotation in enumerate(rotations):
         adjoint = rotation.conj().T
         # The secular bath is diagonal coherence loss plus population transfer.
@@ -301,20 +346,25 @@ def _averages(model: SecularModel, rotations: NDArray[np.complex128]):
         baths[index] = (transfer - decay.transpose(0, 2, 1, 3)).reshape(
             size * size, size * size
         )
-        for port in active_x:
-            xs[index, port] = adjoint @ model.drives[port].in_phase_ghz @ rotation
-        for port in active_y:
-            ys[index, port] = adjoint @ model.drives[port].quadrature_ghz @ rotation
+        for port, matrix in active_x:
+            xs[index, port] = adjoint @ matrix @ rotation
+        for port, matrix in active_y:
+            ys[index, port] = adjoint @ matrix @ rotation
     bath, coarse_bath = _fourier_averages(baths)
     del baths
     x, coarse_x = _fourier_averages(xs)
     y, coarse_y = _fourier_averages(ys)
-    convergence = float(
-        max(
-            np.linalg.norm(bath[0] - coarse_bath, 2),
-            np.max(abs(x[0] - coarse_x)),
-            np.max(abs(y[0] - coarse_y)),
-        )
+    errors = np.maximum(
+        np.max(abs(x[0] - coarse_x), axis=(1, 2)),
+        np.max(abs(y[0] - coarse_y), axis=(1, 2)),
+    )
+    # The shared bound covers all physical ports and the Stark port. A virtual
+    # probe adds only its own error, leaving other rows' admission unchanged.
+    common_error = np.max(
+        errors[: ports.physical_count], initial=errors[ports.index(stark_port)]
+    )
+    convergence = np.maximum(
+        errors, max(np.linalg.norm(bath[0] - coarse_bath, 2), common_error)
     )
     return bath, x, y, convergence
 
@@ -345,7 +395,16 @@ def _build(
     )
     if not (residual <= 1e-9 and overlap >= 0.5):
         return None
-    bath, x, y, convergence = _averages(model, rotations)
+    physical_count = next(
+        (p for p, drive in enumerate(model.drives) if isinstance(drive, FoldedDrive)),
+        len(model.drives),
+    )
+    probes = parameters[:, -1]
+    virtual = set(probes[probes >= physical_count].astype(np.int64).tolist())
+    if port >= physical_count:
+        virtual.add(port)
+    ports = _FramePorts(physical_count, tuple(sorted(virtual)))
+    bath, x, y, convergence = _averages(model, rotations, port, ports)
     l0 = _comm(np.diag(energies).astype(complex)) + bath[0]
     decomposition = eig(l0)
     lam = np.asarray(decomposition[0], dtype=np.complex128)
@@ -361,10 +420,7 @@ def _build(
         ]
     )
     omitted = np.array(
-        [
-            _fourier_norm(x[:, p]) + _fourier_norm(y[:, p])
-            for p in range(len(model.drives))
-        ]
+        [_fourier_norm(x[:, p]) + _fourier_norm(y[:, p]) for p in range(x.shape[1])]
     )
     strengths = np.array(
         [
@@ -393,6 +449,7 @@ def _build(
         y_zero,
         omitted,
         strengths,
+        convergence,
         lam,
         modes,
         inverse,
@@ -402,6 +459,7 @@ def _build(
         array.flags.writeable = False
     entry = _Entry(
         frequency,
+        ports,
         energies,
         coefficients,
         harmonic,
@@ -419,7 +477,7 @@ def _build(
         couplings,
         True,
     )
-    _, eligible = _admission(entry, parameters, budget)
+    _, eligible = _admission(entry, ports.remap(parameters), budget)
     if eligible.any():
         # Use the original samples, without the former FFT/ifft roundtrip and
         # second full bath transform. Only compact candidates survive the build.
@@ -461,7 +519,11 @@ def _admission(
     sideband = (
         (~legacy)
         & entry.valid
-        & (entry.convergence * parameters[:, 0] + entry.frame_error <= budget / 40)
+        & (
+            entry.convergence[parameters[:, 6].astype(np.int64)] * parameters[:, 0]
+            + entry.frame_error
+            <= budget / 40
+        )
         # This existing sideband refusal does not apply to legacy accepts.
         & ~(np.ptp(entry.lam.real) * parameters[:, 0] > 14)
     )
@@ -660,7 +722,8 @@ class FloquetKernel:
             entry = prepared.entries[0]
             if entry is None:
                 continue
-            _, eligible = _admission(entry, params[members], budget)
+            active_parameters = entry.ports.remap(params[members])
+            _, eligible = _admission(entry, active_parameters, budget)
             if eligible.any():
                 if entry.sidebands is None:
                     raise RuntimeError("Floquet sideband preparation failed")
@@ -669,7 +732,7 @@ class FloquetKernel:
                     entry.lam,
                     entry.modes,
                     entry.inverse,
-                    params[members[eligible]],
+                    active_parameters[eligible],
                     budget=budget,
                 )
                 entry = replace(entry, sidebands=frame)
@@ -678,7 +741,7 @@ class FloquetKernel:
                 GuardPreparation(keys[key_index : key_index + 1], prepared)
             )
             passed, plans = _entry_admission(
-                entry, params[members], selected[members], budget
+                entry, active_parameters, selected[members], budget
             )
             accepted[positions[members]] = passed
             admissions.update(plans)
@@ -833,18 +896,19 @@ class FloquetKernel:
                 if decision is None:
                     raise RuntimeError(f"Floquet guard failed at segments {[int(row)]}")
                 decisions.append(decision)
+            active_parameters = entry.ports.remap(parameters[positions])
             chunk = states[positions].copy()
             old = np.array([d.variant != "sidebands" for d in decisions], dtype=bool)
             modal = np.array([d.variant == "modal" for d in decisions], dtype=bool)
             if old.all():
                 # Preserve the incumbent apply batch and its numerical path.
-                _advance(entry, parameters[positions], chunk, budget, modal)
+                _advance(entry, active_parameters, chunk, budget, modal)
             else:
                 legacy = chunk[old].copy()
-                _advance(entry, parameters[positions][old], legacy, budget, modal[old])
+                _advance(entry, active_parameters[old], legacy, budget, modal[old])
                 chunk[old] = legacy
             for local in np.flatnonzero(~old):
-                p = parameters[positions[local]]
+                p = active_parameters[local]
                 selected = decisions[local].plan
                 if selected is None:
                     raise RuntimeError("Floquet sideband admission requires a plan")

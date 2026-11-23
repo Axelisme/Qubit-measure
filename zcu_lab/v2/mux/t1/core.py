@@ -392,25 +392,21 @@ def _show_live_t1(plots: Plots, cfg: MuxT1Cfg, times: NDArray[np.float64]):
         fig, ax = plots.subplots(num=f"measurement_{index}")
         fig.suptitle(f"Mux T1 · {cfg.tones[index].name} · IQ contrast")
         ax.set(xlabel=_DELAY_LABEL, ylabel=_IQ_LABEL)
-        progress = ax.set_title(f"Acquired delay points: 0 / {times.size}")
         viewer = live_errorbar(ax)
         ax.lines[0].set(marker="o", markersize=3, label="Measured IQ ± shot SEM")
         ax.legend()
-        viewers.append((viewer, progress))
+        viewers.append(viewer)
         fig.show()
 
     @plots.on_plot_thread
     def update(data: NDArray[np.float64]):
         _, mean = split_sums(data)
         artists = []
-        for row, (viewer, progress) in enumerate(viewers):
+        for row, viewer in enumerate(viewers):
             measured = mean[:, row]
             acquired = np.isfinite(measured)
             real, sem = project_iq(np.where(acquired, measured, np.nan), data[:, row])
-            progress.set_text(
-                f"Acquired delay points: {np.count_nonzero(acquired)} / {times.size}"
-            )
-            artists.extend((*viewer.set(times, real, sem), progress))
+            artists.extend(viewer.set(times, real, sem))
         return artists
 
     return update

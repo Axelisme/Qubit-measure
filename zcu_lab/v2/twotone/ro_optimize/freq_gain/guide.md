@@ -15,7 +15,7 @@ Optional **Reset** → omit or apply the calibrated **Qubit π pulse** → reado
 
 ## Read the figures and choose a setting
 
-Live and Analyze show the same frequency × gain heatmap with measured SNR as color. Live counts scored cells. Analyze labels the selected pair, which may differ from the brightest measured cell if smoothing moves the peak. The map has no per-cell shot SEM.
+Live and Analyze show the same frequency × gain heatmap with measured SNR as color. Analyze labels the selected pair, which may differ from the brightest measured cell if smoothing moves the peak. The map has no per-cell shot SEM.
 
 **Smooth method** and **Smooth strength** affect selection, not the raw measured values. Strength scales the wavelet threshold or sets Gaussian width in sample steps. Missing scores enter smoothing as zeros; check the measured points before using a result from an incomplete sweep.
 

@@ -220,10 +220,6 @@ class FreqExp(Experiment[FreqResult, FreqCfg]):
             real = dual_reset_signal2real(data.T)
             valid = np.flatnonzero(~np.all(np.isnan(real), axis=0))
             current = real[:, valid[-1]] if valid.size else np.full(len(freqs1), np.nan)
-            count = int(np.count_nonzero(np.isfinite(data)))
-            title = map_ax.set_title(
-                f"Dual-tone reset · IQ contrast map\nAcquired cells: {count}/{data.size} count"
-            )
             row = line_ax.set_title(
                 f"Tone 2 RF = {freqs2[valid[-1]]:.3f} MHz"
                 if valid.size
@@ -232,7 +228,6 @@ class FreqExp(Experiment[FreqResult, FreqCfg]):
             return (
                 *viewer.set(freqs1, freqs2, real),
                 *line.set(freqs1, current),
-                title,
                 row,
             )
 
@@ -286,11 +281,7 @@ class FreqExp(Experiment[FreqResult, FreqCfg]):
         @plots.on_plot_thread
         def update(data: NDArray[np.complex128]) -> tuple[Artist, ...]:
             """Refresh the measurement artists from the current acquired data."""
-            acquired = int(np.count_nonzero(np.isfinite(data)))
-            title = ax.set_title(
-                f"{_TITLE}\nAcquired cells: {acquired}/{data.size} count"
-            )
-            return (*viewer.set(freqs1, freqs2, dual_reset_signal2real(data)), title)
+            return viewer.set(freqs1, freqs2, dual_reset_signal2real(data))
 
         fig.show()
         signals_buffer = SignalBuffer(

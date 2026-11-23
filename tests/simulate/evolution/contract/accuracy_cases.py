@@ -173,6 +173,86 @@ def linear_drive_model() -> SecularModel:
     )
 
 
+COMPLEX_SINGLE_GATE_CASES = (
+    "single_gate_drag",
+    "single_gate_fast_drag",
+    "single_gate_imaginary_slope_edge",
+    "single_gate_diagonal_inside",
+)
+
+
+def _complex_single_gate_case(name: str) -> AccuracyCase:
+    if name == "single_gate_diagonal_inside":
+        return single_gate_diagonal_case(inside=True)
+    if name == "single_gate_imaginary_slope_edge":
+        # Just inside the normalized .025/ns limit, with zero in-phase peak.
+        slope = 0.025 * (1 - 1e-6)
+        times = np.array([0.0, 4.0, 8.0])
+        samples = 1j * (1 - slope * (times[-1] - times))
+    else:
+        duration_ns = 128 if name == "single_gate_drag" else 154
+        times = np.arange(duration_ns + 1, dtype=float)
+        if name == "single_gate_drag":
+            coordinate = (times - duration_ns / 2) / (duration_ns / 4)
+            in_phase = np.exp(-0.5 * coordinate**2)
+            derivative = -coordinate * in_phase / (duration_ns / 4)
+        else:
+            # FAST-DRAG uses a cosine series for I and its derivative for Q.
+            angular = 2 * np.pi / duration_ns
+            angle = angular * times
+            in_phase = 0.5 * (1 - np.cos(angle)) + 0.1 * (1 - np.cos(2 * angle))
+            derivative = angular * (0.5 * np.sin(angle) + 0.2 * np.sin(2 * angle))
+        samples = in_phase + 12j * derivative
+    envelope = EnvelopeSpec("sampled", np.asarray(samples, dtype=np.complex128), times)
+    batch = timeline(2, float(times[-1]))
+    return AccuracyCase(
+        name,
+        coherent_source(linear_drive_model()),
+        replace(batch, tracks=(drive_track(batch, envelope, frequency=0.6, gain=1.0),)),
+        ("single_tone_gate",),
+    )
+
+
+def single_gate_diagonal_case(
+    *, inside: bool, complex_envelope: bool = True
+) -> AccuracyCase:
+    """Build a 64 ns diagonal-spread case for the 1e-3 gate budget.
+
+    Use a spread just inside the bound if inside is true, and a real
+    envelope if complex_envelope is false.
+    """
+    a = np.exp(-0.5)
+    q = a / 32 if complex_envelope else 0.0
+    envelope = EnvelopeSpec(
+        "sampled", np.array([a + 1j * q, 1.0, a - 1j * q]), np.array([0.0, 32.0, 64.0])
+    )
+    # With unit peak and gain, π*64*4.97e-6 is just below 1e-3. The
+    # common-mode offset is larger than this spread but cannot change density.
+    diagonal = [0.0001, 0.00010497] if inside else [0.0, 0.00028]
+    model = SecularModel(
+        (0,),
+        "single-gate-diagonal",
+        np.array([0.0, 0.6]),
+        np.eye(2, dtype=complex),
+        (SecularDrive("drive", np.diag(diagonal), np.zeros((2, 2), dtype=complex)),),
+        np.zeros((2, 2)),
+        np.zeros((2, 2)),
+    )
+    batch = timeline(1, 64.0)
+    pulse = replace(
+        drive_track(batch, envelope, frequency=4.5 / 64, gain=1.0),
+        phase_rad=np.array([-np.pi / 2]),
+    )
+    shape = "complex" if complex_envelope else "real"
+    case_suffix = ("inside" if complex_envelope else "inside_real") if inside else shape
+    return AccuracyCase(
+        f"single_gate_diagonal_{case_suffix}",
+        coherent_source(model),
+        replace(batch, tracks=(pulse,)),
+        ("single_tone_gate",) if inside else (),
+    )
+
+
 def adiabatic_case() -> AccuracyCase:
     """Build an undriven 8 ns flux ramp with a weak, noncommuting flux term.
 
@@ -637,7 +717,9 @@ def accuracy_case(name: str) -> AccuracyCase:
     two_carriers, continuous_flux, joint_gate_inventory, joint_constant, low_carrier,
     linear_shaped, linear_plateau, nearby_carriers, cheap_sampled_nearby,
     cheap_sampled_separated, adiabatic_ramp, single_tone_sideband,
-    dephasing_pump, raman_decay, raman_weak_legs, and the OPENCL_CASES.
+    COMPLEX_SINGLE_GATE_CASES, single_gate_diagonal_inside_real, dephasing_pump,
+    raman_decay, raman_weak_legs,
+    and the OPENCL_CASES.
     Each call
     owns a fresh source/history. The joint gate keeps its 20-point inventory.
     """
@@ -645,6 +727,8 @@ def accuracy_case(name: str) -> AccuracyCase:
         return dissipative_dc_case(name)
     if name in OPENCL_CASES:
         return _opencl_case(name)
+    if name in COMPLEX_SINGLE_GATE_CASES:
+        return _complex_single_gate_case(name)
     specialized: dict[str, Callable[[], AccuracyCase]] = {
         "linear_shaped": partial(linear_case, shaped=True),
         "linear_plateau": partial(linear_case, shaped=False),
@@ -659,6 +743,9 @@ def accuracy_case(name: str) -> AccuracyCase:
         "sampled_multitone_short_sweep_32": sampled_multitone_short_sweep_case,
         "joint_constant": partial(joint_case, constant=True),
         "single_tone_sideband": single_tone_sideband_case,
+        "single_gate_diagonal_inside_real": partial(
+            single_gate_diagonal_case, inside=True, complex_envelope=False
+        ),
     }
     if name in specialized:
         return specialized[name]()
