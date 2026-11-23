@@ -189,8 +189,8 @@ def test_deferred_floquet_retains_shared_admissions_alongside_direct_plans(worke
             local,
             replace(local, frequency_ghz=np.full(n, 0.425)),
             direct,
-            direct,
-            direct,
+            replace(direct, frequency_ghz=np.full(n, 0.13)),
+            replace(direct, frequency_ghz=np.full(n, 0.16)),
         ),
     )
     floquet, dop853 = PlannedFloquet(), PlannedDirect()

@@ -219,8 +219,7 @@ class StirapAmplitudeExp(Experiment[StirapAmplitudeResult, StirapAmplitudeCfg]):
             figsize=(12, 4),
             layout="constrained",
         )
-        title = "STIRAP amplitude · g → f · measured fractions"
-        headline = figure.suptitle(title)
+        figure.suptitle("STIRAP amplitude · g → f · measured fractions")
         maps = []
         for ax, state in zip(tuple(figure.axes), STATE_LABELS, strict=True):
             ax.grid(False)
@@ -250,10 +249,7 @@ class StirapAmplitudeExp(Experiment[StirapAmplitudeResult, StirapAmplitudeCfg]):
                 heatmap.set_array(panel)
                 if np.isfinite(panel).any():
                     heatmap.autoscale()
-            headline.set_text(
-                f"{title}\nRetained shots: {int(np.nansum(total)):,} count"
-            )
-            return (*maps, headline)
+            return tuple(maps)
 
         figure.show()
         counts = SignalBuffer(

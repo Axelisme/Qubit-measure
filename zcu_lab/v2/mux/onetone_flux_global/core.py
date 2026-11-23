@@ -187,20 +187,17 @@ def _plot_flux_maps_and_make_updater(
         )
         line_ax.lines[1].set(label="Latest bias", marker="o", markersize=3, color="C0")
         line_ax.legend(fontsize=10)
-        panels.append((fig, heatmap, line, heat_ax.title, line_ax.title))
+        panels.append((fig, heatmap, line, line_ax.title))
 
     @plots.on_plot_thread
     def update(data: NDArray[np.complex128]):
         artists = []
-        for row, (_, heatmap, line, progress, slice_label) in enumerate(panels):
+        for row, (_, heatmap, line, slice_label) in enumerate(panels):
             real = np.abs(data[row])
             valid = np.flatnonzero(np.all(np.isfinite(real), axis=1))
             history = np.full((2, frequencies.shape[1]), np.nan)
             for offset, bias_index in enumerate(valid[-2:][::-1]):
                 history[-offset - 1] = real[bias_index]
-            progress.set_text(
-                f"Acquired bias points: {valid.size} / {flux_values.shape[1]}"
-            )
             latest = (
                 f"Bias = {flux_values[row, valid[-1]]:.5g} {unit}"
                 if valid.size
@@ -209,7 +206,7 @@ def _plot_flux_maps_and_make_updater(
             slice_label.set_text(latest)
             artists.extend(heatmap.set(flux_values[row], frequencies[row], real))
             artists.extend(line.set(frequencies[row], history))
-            artists.extend((progress, slice_label))
+            artists.append(slice_label)
         return artists
 
     update(result.signals)

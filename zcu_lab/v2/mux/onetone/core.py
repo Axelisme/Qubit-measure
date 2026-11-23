@@ -354,22 +354,18 @@ class MuxOnetoneExp(Experiment[MuxOnetoneResult, MuxOnetoneCfg]):
             fig, ax = context.plots.subplots(num=f"measurement_{index}")
             fig.suptitle(f"Mux one-tone spectrum · {name} · Readout amplitude")
             ax.set(xlabel=_RF_LABEL, ylabel=_IQ_LABEL)
-            progress = ax.set_title(f"Acquired frequency points: 0 / {dfs.size}")
             viewer = live_line(ax)
             ax.lines[0].set(marker="o", markersize=3, label="Measured IQ")
             ax.legend()
-            viewers.append((tone.freq + dfs, viewer, progress))
+            viewers.append((tone.freq + dfs, viewer))
             fig.show()
 
         @context.plots.on_plot_thread
         def update(data: NDArray[np.complex128]):
             artists = []
-            for row, (freqs, viewer, progress) in enumerate(viewers):
+            for row, (freqs, viewer) in enumerate(viewers):
                 measured = data[:, row]
-                progress.set_text(
-                    f"Acquired frequency points: {np.count_nonzero(np.isfinite(measured))} / {dfs.size}"
-                )
-                artists.extend((*viewer.set(freqs, np.abs(measured)), progress))
+                artists.extend(viewer.set(freqs, np.abs(measured)))
             return artists
 
         signals_buffer = SignalBuffer((len(dfs), len(tone_indices)), on_update=update)

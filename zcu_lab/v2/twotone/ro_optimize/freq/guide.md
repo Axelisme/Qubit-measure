@@ -15,7 +15,7 @@ Optional **Reset** → omit or apply the calibrated **Qubit π pulse** → reado
 
 ## Read the figures and choose a setting
 
-Live counts scored settings. Live and Analyze plot SNR versus readout frequency (MHz). Analyze keeps the measured points, overlays the selection SNR if different and marks its measured-grid maximum with a dashed line. No shot SEM or pointwise SNR uncertainty is shown.
+Live and Analyze plot SNR versus readout frequency (MHz). Analyze keeps the measured points, overlays the selection SNR if different and marks its measured-grid maximum with a dashed line. No shot SEM or pointwise SNR uncertainty is shown.
 
 **Smooth method** and **Smooth strength** affect selection, not the raw measured values. Strength scales the wavelet threshold or sets Gaussian width in sample steps. Missing scores enter smoothing as zeros; check the measured points before using a result from an incomplete sweep.
 

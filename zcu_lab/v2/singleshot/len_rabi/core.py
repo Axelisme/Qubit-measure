@@ -368,13 +368,10 @@ class LenRabiExp(Experiment[LenRabiResult, LenRabiCfg]):
         # 2. Preview classified populations while keeping raw IQ as the result.
 
         viewer = None
-        progress = None
         if classifier is not None:
             figure, ax = context.plots.subplots(num="measurement")
             ax.set(xlabel="Drive envelope length (µs)", ylabel="Outcome probability")
-            progress = figure.suptitle(
-                "Single-shot length Rabi · qubit · classified populations"
-            )
+            figure.suptitle("Single-shot length Rabi · qubit · classified populations")
             viewer = live_errorbar(ax, num_lines=3)
             for line, label in zip(ax.lines, ("P(g)", "P(e)", "P(other)"), strict=True):
                 line.set_label(label)
@@ -402,16 +399,7 @@ class LenRabiExp(Experiment[LenRabiResult, LenRabiCfg]):
             other = 1.0 - populations.sum(axis=1)
             covariance = class_probability_covariance(counts)
             sem = np.sqrt(np.diagonal(covariance, axis1=-2, axis2=-1))
-            artists = viewer.set(
-                lengths, np.column_stack((populations, other)).T, sem.T
-            )
-            if progress is None:
-                return artists
-            progress.set_text(
-                "Single-shot length Rabi · qubit · classified populations\n"
-                f"{np.count_nonzero(acquired_rows)}/{acquired_rows.size} lengths acquired"
-            )
-            return (progress, *artists)
+            return viewer.set(lengths, np.column_stack((populations, other)).T, sem.T)
 
         buffer = SignalBuffer(
             expected_shape,

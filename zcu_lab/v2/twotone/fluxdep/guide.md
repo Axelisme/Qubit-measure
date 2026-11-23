@@ -15,7 +15,7 @@ At each DC bias, Run steps the qubit probe RF frequency. One shot uses optional 
 
 ## Read the figures
 
-- **Run:** x is DC bias; y is probe RF frequency in MHz. Each spectrum shows the magnitude of mean IQ after subtracting that spectrum's median complex IQ (a.u.). Blank cells lack data. The row count includes a bias still averaging; latest and previous bias traces help distinguish a ridge from an isolated bright cell.
+- **Run:** x is DC bias; y is probe RF frequency in MHz. Each spectrum shows the magnitude of mean IQ after subtracting that spectrum's median complex IQ (a.u.). Blank cells lack data. The latest and previous bias traces help distinguish a ridge from an isolated bright cell.
 - **Analyze picker:** dark features are stronger smoothed contrast on a GHz axis, with per-spectrum normalization in the phase-aware view. Red is the half-flux pick; blue is integer flux. Lower mirror loss means greater local symmetry, not correct physical assignment. Refine a nearby turning point with **Auto Align**; **Conjugate Line** inspects the other line, **Swap Lines** exchanges labels, and **Done** records positions.
 - **Saved flux-line picks:** same MHz axis and contrast as Run. The lines mark selections, not extra spectra or a fit. The two-dimensional map locates a ridge and has no pointwise shot SEM. The Analyze summary identifies the run and its configured **Reps × Rounds**.
 

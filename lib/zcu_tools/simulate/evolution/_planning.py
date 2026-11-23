@@ -9,6 +9,14 @@ from numpy.typing import NDArray
 
 from zcu_tools.simulate.boundary import CancellationQuery, Cancelled
 
+from ._carrier_fold import (
+    CarrierGroup,
+    CarrierRow,
+    FoldedDrives,
+    ToneColumns,
+    fold_row,
+    repeated_carrier_rows,
+)
 from .engine import DriveTrack, EnvelopeSpec, PathDiagnostics, TimelineBatch
 from .kernel import SegmentTable
 from .secular import FluxWaveform, ModelSource, StarkOrderInversion
@@ -211,6 +219,20 @@ def _support_rows(active, support_start, support_end, row_offsets, start, end):
     return chosen
 
 
+def _flatten_plateaus(
+    columns: ToneColumns, geometry: _TrackGeometry, table, rows, slots
+):
+    """Use a plateau's complex value as gain and phase on constant rows."""
+    point, start, end, _ = table
+    for support, value in geometry.plateaus:
+        flat = support.contains(point[rows], start[rows], end[rows])
+        rr, cc = rows[flat], slots[flat]
+        columns.envelope[rr, cc] = 0
+        columns.amplitude[rr, cc] *= abs(value)
+        columns.theta[rr, cc] += np.angle(value)
+        columns.offset[rr, cc] = 0
+
+
 def _tone_columns(batch, tracks, table, source, flux_point):
     """Write only playing tones, in track order, folding phase and flux flags."""
     point, start, end, level = table
@@ -234,7 +256,9 @@ def _tone_columns(batch, tracks, table, source, flux_point):
     port = np.full((rows, width), -1, dtype=np.int64)
     frequency, amplitude, theta, offset = (np.zeros((rows, width)) for _ in range(4))
     env_index = np.full((rows, width), -1, dtype=np.int64)
+    columns = ToneColumns(port, frequency, amplitude, theta, env_index, offset)
     used = np.zeros(rows, dtype=np.int64)
+    original_tracks = np.empty((rows, width), dtype=np.int64) if width > 1 else None
     envelopes = [EnvelopeSpec("constant")]
     flux_drive = np.zeros(rows, dtype=bool)
     complete = np.ones(rows, dtype=bool)
@@ -244,7 +268,9 @@ def _tone_columns(batch, tracks, table, source, flux_point):
     )
     change[batch.flux.offsets[:-1]] = False
     level_index, ports = _active_level_ports(source, level, counts > 0)
-    for track, geometry, chosen in zip(batch.tracks, tracks, track_rows, strict=True):
+    for track_index, (track, geometry, chosen) in enumerate(
+        zip(batch.tracks, tracks, track_rows, strict=True)
+    ):
         if not len(chosen):
             continue
         pulse_points = point[chosen]
@@ -253,6 +279,8 @@ def _tone_columns(batch, tracks, table, source, flux_point):
         )
         slot = used[chosen]
         used[chosen] += 1
+        if original_tracks is not None:
+            original_tracks[chosen, slot] = track_index
         frequency[chosen, slot] = track.frequency_ghz[point[chosen]]
         amplitude[chosen, slot] = track.amplitude[point[chosen]]
         theta[chosen, slot] = (
@@ -265,13 +293,7 @@ def _tone_columns(batch, tracks, table, source, flux_point):
         base = len(envelopes)
         envelopes.extend(track.envelopes)
         env_index[chosen, slot] = base + track.envelope_index[point[chosen]]
-        for support, value in geometry.plateaus:
-            flat = support.contains(point[chosen], start[chosen], end[chosen])
-            rr, cc = chosen[flat], slot[flat]
-            env_index[rr, cc] = 0
-            amplitude[rr, cc] *= abs(value)
-            theta[rr, cc] += np.angle(value)
-            offset[rr, cc] = 0
+        _flatten_plateaus(columns, geometry, table, chosen, slot)
         for index, lookup in enumerate(ports):
             same = level_index[chosen] == index
             if same.any():
@@ -288,13 +310,26 @@ def _tone_columns(batch, tracks, table, source, flux_point):
         )
         np.logical_or.at(changed_points, flux_point, inside)
         flux_drive[chosen] |= changed_points[point[chosen]]
-    return (
-        counts,
-        (port, frequency, amplitude, theta, env_index, offset),
-        tuple(envelopes),
-        flux_drive,
-        complete,
-    )
+    return counts, columns, tuple(envelopes), flux_drive, complete, original_tracks
+
+
+def _fold_carriers(batch, counts, columns, original_tracks, row_geometry, drives):
+    """Compact rows with repeated carriers and retain their channel provenance."""
+    if original_tracks is None:
+        return {}
+    point, start, _, level = row_geometry
+    groups = {}
+    for row in repeated_carrier_rows(columns):
+        original = CarrierRow(
+            int(point[row]),
+            float(start[row]),
+            tuple(int(v) for v in level[row]),
+            original_tracks[row, : counts[row]],
+        )
+        counts[row], groups[int(row)] = fold_row(
+            batch, columns, int(row), original, drives
+        )
+    return groups
 
 
 def _waveform_varies(batch: TimelineBatch, point, start, end):
@@ -332,7 +367,10 @@ def batch_boundaries(batch: TimelineBatch, plateau_cache: _PlateauCache):
 
 
 def _batch_geometry(
-    batch: TimelineBatch, source: ModelSource, plateau_cache: _PlateauCache
+    batch: TimelineBatch,
+    source: ModelSource,
+    plateau_cache: _PlateauCache,
+    drives: FoldedDrives,
 ) -> Geometry:
     tracks = tuple(_track_geometry(track, plateau_cache) for track in batch.tracks)
     events, end, flux_point = batch_boundaries(batch, plateau_cache)
@@ -344,11 +382,15 @@ def _batch_geometry(
     flux_events = _events(flux_point, batch.flux.start_ns)
     flux_row = np.searchsorted(flux_events, events, side="right") - 1
     level = batch.flux.level[flux_row]
-    tones, columns, envelopes, flux_drive, complete = _tone_columns(
-        batch, tracks, (point, start, end, level), source, flux_point
+    row_geometry = (point, start, end, level)
+    tones, columns, envelopes, flux_drive, complete, original_tracks = _tone_columns(
+        batch, tracks, row_geometry, source, flux_point
+    )
+    groups = _fold_carriers(
+        batch, tones, columns, original_tracks, row_geometry, drives
     )
     flux_drive |= _waveform_varies(batch, point, start, end)
-    port, frequency, amplitude, theta, envelope_index, offset = columns
+    width = int(tones.max(initial=0))
     shift_content, inversions = _shift_contents(batch, point, start, level, source)
     levels, level_index = np.unique(level, axis=0, return_inverse=True)
     has_collapse_operators = np.array(
@@ -373,17 +415,18 @@ def _batch_geometry(
         duration,
         level,
         tones,
-        port,
-        frequency,
-        amplitude,
-        theta,
-        envelope_index,
-        offset,
+        columns.port[:, :width],
+        columns.frequency[:, :width],
+        columns.amplitude[:, :width],
+        columns.theta[:, :width],
+        columns.envelope[:, :width],
+        columns.offset[:, :width],
         envelopes,
         batch.flux_waveform,
         shift_content=shift_content,
         complete_pulses=complete,
         has_collapse_operators=has_collapse_operators,
+        carrier_groups=groups,
     )
     return Geometry(
         table,
@@ -428,15 +471,16 @@ def _shift_contents(batch, point, start, levels, source):
 
 def plan(
     source: ModelSource, batches: Sequence[TimelineBatch], *, cancel: CancellationQuery
-) -> Geometry:
-    """Segment templates and assign global indices; raise Cancelled between batches."""
+) -> tuple[Geometry, ModelSource]:
+    """Return global geometry and its numerical source; check cancellation between batches."""
     plateau_cache: _PlateauCache = {}
+    drives = FoldedDrives(source)
     geometries = []
     for batch in batches:
-        geometries.append(_batch_geometry(batch, source, plateau_cache))
+        geometries.append(_batch_geometry(batch, source, plateau_cache, drives))
         if cancel.is_set():
             raise Cancelled()
-    return _merge_geometries(source, batches, geometries)
+    return _merge_geometries(source, batches, geometries), drives.source(batches)
 
 
 def _merge_geometries(
@@ -460,6 +504,7 @@ def _merge_geometries(
             "prefix_group",
             "prefix_no_drive",
             "prefix_inputs",
+            "carrier_groups",
         )
     }
     envelopes: list[EnvelopeSpec] = []
@@ -505,6 +550,7 @@ def _merge_geometries(
         tone_envelope=np.concatenate(columns["tone_envelope"]),
         tone_envelope_offset_ns=np.concatenate(columns["tone_envelope_offset_ns"]),
         envelopes=tuple(envelopes),
+        carrier_groups=_merge_carrier_groups(tables),
         flux_waveform=waveform,
         flux_waveform_available=(
             np.concatenate(
@@ -534,6 +580,20 @@ def _merge_geometries(
         initial_densities=initial,
         stark_order_inversions=tuple(inversions),
     )
+
+
+def _merge_carrier_groups(
+    tables: Sequence[SegmentTable],
+) -> dict[int, tuple[CarrierGroup, ...]]:
+    """Translate per-batch sidecar rows into the complete table's row space."""
+    groups = {}
+    base = 0
+    for table in tables:
+        groups.update(
+            {base + row: group for row, group in table.carrier_groups.items()}
+        )
+        base += len(table.timeline)
+    return groups
 
 
 def _initial_densities(

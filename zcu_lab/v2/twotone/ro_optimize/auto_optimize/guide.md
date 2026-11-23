@@ -15,7 +15,7 @@ Optional **Reset** → omit or apply the calibrated **Qubit π pulse** → reado
 
 ## Read the figures and choose a setting
 
-The four panels show SNR by candidate index, readout frequency (MHz), gain (a.u.) and pulse duration (µs). Live counts scored candidates. Only the candidate-index panel connects scores; the other panels show coverage by setting. Analyze marks the best measured triple with a red star in each panel. Points sharing one coordinate can differ in the other two; these are not independent sweeps. The nonlinear score has no plotted pointwise uncertainty.
+The four panels show SNR by candidate index, readout frequency (MHz), gain (a.u.) and pulse duration (µs). Only the candidate-index panel connects scores; the other panels show coverage by setting. Analyze marks the best measured triple with a red star in each panel. Points sharing one coordinate can differ in the other two; these are not independent sweeps. The nonlinear score has no plotted pointwise uncertainty.
 
 Compare the winner with other high scores. Extend a bound if good candidates cluster there and it is safe to extend; use more candidates if coverage is sparse. Confirm the triple in a new measurement. The proposal updates `$qubit.ext.best_ro_freq`, `$qubit.ext.best_ro_gain` and `$qubit.ext.best_ro_length` and, for a pulse readout with the needed calibration coordinates available, the resonator readout module and slot.
 

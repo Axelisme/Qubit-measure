@@ -25,7 +25,7 @@ The joint fit shares a phase slope per gate for each actual spectator and freque
 
 The third panel subtracts the joint spectator-g slope from the joint spectator-e slope. It alone determines the π crossing and proposal status; the gg-only fit is not a fallback.
 
-**Phase points** shows pooled X/Y contrast and wrapped phase versus frequency for each CZ gate count. Compare the spectator traces to see whether an apparent phase change occurs where contrast drops or points are missing. **X/Y contrast (Live)** shows the pooled contrast for the latest train with a completed X/Y pair. Both show one trace for each actual spectator state.
+**Phase points** shows pooled X/Y contrast and wrapped phase versus frequency for each CZ gate count. Compare the spectator traces to see whether an apparent phase change occurs where contrast drops or points are missing. **X/Y contrast (Live)** shows the pooled contrast for the latest train with a completed X/Y pair. Its title gives the number of CZ gates per shot in that train. Both show one trace for each actual spectator state.
 
 **Live** also shows the same joint phase per CZ and 180° reference as the third panel. The host runs one CZ gate count at a time. Each completed hardware round supplies the entire frequency axis for that CZ train. When the last train has all planned spectator and X/Y projections at full Reps × Rounds, counted across all 81 classes, the frequencies can appear as a batch. Zero accepted shots in a herald group is not incomplete acquisition, but can leave its slope unavailable. The current Live curve does not support widening the frequency window or deciding to stop early during the sweep.
 

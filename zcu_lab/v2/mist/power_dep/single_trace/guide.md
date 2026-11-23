@@ -30,7 +30,7 @@ Set **Reps** for shots per gain point in each full sweep and **Rounds** for repe
 
 Each point shows `|mean IQ at this gain − reference IQ|` in a.u. Subtract the complex reference before taking the magnitude. This counts displacement in any IQ direction, but it is not a state population and cannot identify a leakage level. Lines connect the measured points; the Analyze figure named `fit` does not contain a model fit.
 
-Live and default Analyze use the complex mean of the first 5% of gain points in scan order, rounded down with a minimum of one point. If that reference is missing, the plot does not substitute a later point. Live reports completed rounds and nominal shots per point. The Analyze summary identifies the source Run and its requested Reps × Rounds when its configuration is available.
+Live and default Analyze use the complex mean of the first 5% of gain points in scan order, rounded down with a minimum of one point. If that reference is missing, the plot does not substitute a later point. The Analyze summary identifies the source Run and its requested Reps × Rounds when its configuration is available.
 
 Live updates the error bars after each round. The bars show one shot standard error, estimated by propagating the uncertainty of the mean IQ into the distance. They include projection noise from the retained shots but do not estimate drift between rounds. The scan-start reference uses those same data, so its uncertainty and its correlation with the scan points contribute to the bars. A reference you enter is treated as exact.
 

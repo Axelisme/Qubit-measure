@@ -418,8 +418,17 @@ def test_sampled_multitone_rejects_outside_the_two_carrier_domain(
     assert rejected.value.points == (0,)
 
 
-@pytest.mark.parametrize("frequency", [0.3, 0.301437, -0.301437])
-def test_close_carriers_keep_joint_interference_and_coherent_density(frequency):
+@pytest.mark.parametrize(
+    "frequency, driven_kernel",
+    [
+        (0.3, "single_tone_rwa"),
+        (0.301437, "multitone_rwa"),
+        (-0.301437, "multitone_rwa"),
+    ],
+)
+def test_close_carriers_keep_joint_interference_and_coherent_density(
+    frequency: float, driven_kernel: str
+) -> None:
     batch = timeline()
     batch = replace(
         batch,
@@ -437,7 +446,8 @@ def test_close_carriers_keep_joint_interference_and_coherent_density(frequency):
     with closing(Engine(1)) as engine:
         actual = engine.evolve(source, (batch,), cancel=Event())
         expected = engine.evolve(source, (batch,), budget=1e-7, cancel=Event())
-    assert actual.paths.segments_by_kernel == {"t4": 1, "multitone_rwa": 1}
+    # Equal signed carriers with the same constant shape and support fold.
+    assert actual.paths.segments_by_kernel == {"t4": 1, driven_kernel: 1}
     # RWA is approximate: use the existing constant-pair density tolerance,
     # still much tighter than the qualitative population allowance of 0.1.
     np.testing.assert_allclose(actual.densities, expected.densities, atol=0.01, rtol=0)

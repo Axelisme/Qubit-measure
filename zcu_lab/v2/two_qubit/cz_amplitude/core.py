@@ -351,7 +351,7 @@ class CZAmplitudeExp(Experiment[CZAmplitudeResult, CZAmplitudeCfg]):
         ax.set(
             xlabel=_X_LABEL,
             ylabel=_RETURN_LABEL,
-            title=f"{_TITLE}\nWaiting for retained shots",
+            title=_TITLE,
         )
         viewer = live_errorbar(ax)
         ax.xaxis.set_major_locator(MaxNLocator(nbins=4))
@@ -359,20 +359,9 @@ class CZAmplitudeExp(Experiment[CZAmplitudeResult, CZAmplitudeCfg]):
 
         @context.plots.on_plot_thread
         def update_view(sums: NDArray[np.float64]) -> tuple[Artist, ...]:
-            totals = sums.sum(axis=(-2, -1))
-            measured = totals[np.isfinite(totals)]
-            if measured.size:
-                low, high = int(measured.min()), int(measured.max())
-                shots = str(low) if low == high else f"{low}–{high}"
-                ax.set_title(
-                    f"{_TITLE}\n{measured.size}/{scales.size} points · retained shots/point: {shots} count"
-                )
             covariance = class_probability_covariance(sums.reshape(-1, 9))
             errors = np.sqrt(covariance[:, 0, 0])
-            return (
-                *viewer.set(scales, joint_probabilities(sums)[:, 0, 0], errors),
-                ax.title,
-            )
+            return viewer.set(scales, joint_probabilities(sums)[:, 0, 0], errors)
 
         # 3. Sweep gains in hardware between simultaneous preparation and contrast; sum terminal class counts.
         buffer = SignalBuffer(

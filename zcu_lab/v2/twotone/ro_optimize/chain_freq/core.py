@@ -132,19 +132,16 @@ class ChainFreqExp(Experiment[ThermalChainSums, ChainFreqCfg]):
             3, 1, num="measurement", sharex=True, figsize=(8, 8)
         )
 
+        fig.suptitle("Thermal-chain frequency sweep · Resonator · Readout score")
+
         @context.plots.on_plot_thread
-        def draw(
-            payload: tuple[ThermalChainScore | None, str],
-        ) -> tuple[Artist, ...]:
-            """Refresh the measurement artists and acquisition progress."""
-            result, progress = payload
-            title = fig.suptitle(
-                "Thermal-chain frequency sweep · Resonator · Readout score"
-            )
+        def draw(result: ThermalChainScore | None) -> tuple[Artist, ...]:
+            """Refresh the measurement artists and report when no score is available."""
             artists = _draw_metric(tuple(fig.axes), result)
-            status = fig.axes[0].set_title(progress)
+            if result is None:
+                fig.axes[0].set_title("Score unavailable")
             fig.tight_layout()
-            return (*artists, title, status)
+            return artists
 
         def update(sums: NDArray[np.float64]) -> None:
             # Calculate off the GUI thread; the plot thread only draws.
@@ -154,15 +151,7 @@ class ChainFreqExp(Experiment[ThermalChainSums, ChainFreqCfg]):
                 result = thermal_chain_score(saved)
             except ThermalMomentsUnavailable:
                 result = None
-            done = len(saved.axis)
-            shots = int(saved.shot_count.min())
-            progress = (
-                f"{done}/{len(settings)} settings acquired\n"
-                f"Minimum shots per acquired setting: {shots} count"
-            )
-            if result is None:
-                progress += " · score unavailable"
-            draw((result, progress))
+            draw(result)
 
         fig.show()
         shot_sums = SignalBuffer(

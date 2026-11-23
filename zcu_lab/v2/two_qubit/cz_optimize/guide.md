@@ -21,7 +21,7 @@
 
 非零候選的 I、Q 共同除以複數包絡峰，保持兩者比例。全零候選記零分，不取數，也不參與勝選。全零起始擬合則在取數前報錯。候選時長固定在起點總長。每個候選都用單一完整的記憶體 arb 包絡，尾端補零到 16 samples 的倍數。記憶體用量約等於整段樣本數。若超過容量，QICK 在上傳時報錯。
 
-總評估數為 `1 + Optimizer generations × Candidates per generation`。每個實測候選以相同的 seed 數與 Reps 取數。每個 seed 以保留 shots 為分母，包含 other。某個 seed 沒有保留 shots 時，Run 報出該 seed。
+總評估數為 `1 + Optimizer generations × Candidates per generation`。每個實測候選以相同的 seed 數與 Reps 取數。每個 seed 以保留 shots 為分母，包含 other。某個 seed 沒有保留 shots 時，Run 報出該 seed。Stop 時，未完成候選已保留的 shots 仍存入結果，但不算該候選的目標值。
 
 ## 比較圖與重載
 

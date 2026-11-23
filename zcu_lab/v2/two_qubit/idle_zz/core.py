@@ -362,28 +362,21 @@ class IdleZZExp(Experiment[IdleZZResult, IdleZZCfg]):
             fig, ax = context.plots.subplots(
                 num=f"ramsey_{index}", figsize=(9, 5), layout="constrained"
             )
-            title = _label_ramsey(fig, config, index)
+            fig.suptitle(_label_ramsey(fig, config, index))
             viewer = live_errorbar(ax, num_lines=2)
             for line, name in zip(ax.get_lines(), _BRANCH_NAMES, strict=True):
                 line.set(label=f"Spectator {name} data")
             fig.legend(loc="outside lower center", ncols=2)
-            fig.suptitle(f"{title}\n0/{2 * len(delays)} branch-delay points sampled")
-            views.append((fig, viewer, title))
+            views.append((fig, viewer))
             fig.show()
 
         @context.plots.on_plot_thread
         def update_view(sums: NDArray[np.float64]) -> tuple[Figure, ...]:
             traces = qubit_sigma(sums, config.target)
             errors = _shot_sem(sums, config.target)
-            totals = sums.sum(axis=(-1, -2))
-            for index, (fig, viewer, title) in enumerate(views):
+            for index, (_, viewer) in enumerate(views):
                 viewer.set(delays, traces[index], errors[index])
-                sampled = np.isfinite(totals[index])
-                fig.suptitle(
-                    f"{title}\n{np.count_nonzero(sampled)}/{sampled.size} branch-delay points sampled"
-                    f" · {np.nansum(totals[index]):,.0f} retained shots (count)"
-                )
-            return tuple(fig for fig, _, _ in views)
+            return tuple(fig for fig, _ in views)
 
         # 3. Set DC on the host; sweep spectator preparation and detuned target Ramsey delay in hardware.
         buffer = SignalBuffer(

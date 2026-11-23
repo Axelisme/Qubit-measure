@@ -173,9 +173,7 @@ class FreqDepExp(Experiment[FreqResult, FreqCfg]):
         # 3. Show the measured G/E/Other fractions in classifier order.
 
         figure, ax = context.plots.subplots(num="measurement", layout="constrained")
-        progress = figure.suptitle(
-            "MIST probe spectrum · qubit · classified populations"
-        )
+        figure.suptitle("MIST probe spectrum · qubit · classified populations")
         ax.set(xlabel="MIST drive RF frequency (MHz)", ylabel="Outcome probability")
         viewer = live_errorbar(ax, num_lines=POPULATION_COUNT)
         for line, bars, label, color in zip(
@@ -191,15 +189,11 @@ class FreqDepExp(Experiment[FreqResult, FreqCfg]):
 
         @context.plots.on_plot_thread
         def update(data: NDArray[np.float64]):
-            """Display acquired fractions, their shot SEM and scan progress."""
+            """Display class fractions and their shot SEM."""
             totals = data.sum(axis=-1)
-            progress.set_text(
-                f"MIST probe spectrum · qubit · classified populations\n"
-                f"{np.count_nonzero(totals > 0)}/{totals.size} points acquired"
-            )
             covariance = class_probability_covariance(data)
             sem = np.sqrt(np.diagonal(covariance, axis1=-2, axis2=-1))
-            return (progress, *viewer.set(freqs, (data / totals[..., None]).T, sem.T))
+            return viewer.set(freqs, (data / totals[..., None]).T, sem.T)
 
         figure.show()
         buffer = SignalBuffer(
