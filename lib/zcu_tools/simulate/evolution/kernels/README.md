@@ -1,6 +1,6 @@
 # Evolution kernels
 
-**Last updated:** 2026-11-22，CPU DOP853 的完整 collapse operators
+**Last updated:** 2026-11-23，CPU DOP853 與 DP5(4) 的適用條件
 
 **讀者：** framework-dev、agent。查找演化算法的數值 owner，以及 kernel 與 dispatch、scheduler 的接縫。
 
@@ -44,8 +44,8 @@ Scheduler 只建構獲選的 key。Key 不含起始相位，同一次 evolve 的
 
 `dop853.advance_endpoints` 擁有旋轉座標 density 積分。
 固定 flux 的完整 collapse operators 走 CPU DOP853。RHS 保留每個算符的 recycling 和 anticommutator；旋轉座標的兩項一起換基。
-其餘 `dop853` 的 CPU row 和符合 [OpenCL 條件](../README.md#gpu-backend)的 row，在時長 ≤10 µs 且 budget ≥1e-3 時走 DP5(4)，兩個局部容差都除以三。
-[共用 solver](_dop853.py) 提供兩套 tableau 與 controller 常數。兩種方法在各自的裝置上共用積分迴圈、RHS 與 knot 停點。
+[`dop853.py`](dop853.py) 的 `cpu_dp54_rows` 同時供 CPU tableau 與計價使用。沒有顯式 collapse operators、時長 ≤10 µs 且 budget ≥1e-3 的 CPU row 使用 DP5(4)，兩個局部容差都除以三。
+[OpenCL](../README.md#gpu-backend) 獨立決定裝置端適用條件。[共用 solver](_dop853.py) 提供兩套 tableau 與 controller 常數。兩種方法在各自的裝置上共用積分迴圈、RHS 與 knot 停點。
 `t6` direct、period fractional tail 與 `flux_dop853` 仍用 DOP853。
 局部容差不保證整條序列的最終誤差；見 [DP5(4) 精度案例](../README.md#cpu-dp54-accuracy)。
 `t6` 的每一列都走 direct，不依 key 重用數選算法，也不掃描完整 acquire inventory。

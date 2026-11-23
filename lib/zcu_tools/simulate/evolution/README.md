@@ -74,9 +74,12 @@ secular bath and transforms it with the Hamiltonian into the integration frame.
 Keep the coherent components of one physical jump in one matrix. Use `()` when
 there are no explicit operators; the existing secular routes are unchanged.
 The model builder owns physical applicability. Records own read-only copies
-and reject invalid shapes or nonfinite operators. `SecularModel.content_identity`
-combines the builder's `identity` with the ordered matrices and equals `identity`
-when the tuple is empty.
+and reject invalid shapes or nonfinite operators. `SecularModel.identity` is the
+caller's model namespace, not a complete physics key. A shifted model appends
+the correction fingerprint to that namespace. `SecularModel.content_identity`
+adds the ordered complex jump matrices to the namespace and equals `identity`
+when there are no jumps. The Engine uses it for preparation and routing reuse.
+The frozen codec stores the namespace and matrices separately.
 
 For a row with explicit operators, `dop853` is the only candidate. The timeline
 must stay at a fixed flux level without a supplied flux waveform. `families=` can
@@ -208,9 +211,10 @@ managed lanes can run GPU tests on machines with a compatible driver.
 | `"opencl"` | Requires a device that passes detection at construction. Sends eligible DOP853 rows to that device without price comparison or fallback. A build failure for the selected dimension and tableau raises during evolve. Ineligible rows can still run on CPU. |
 
 Eligibility depends on structure, not envelope shape. The row must be an
-independent, unchained interaction-frame `dop853` endpoint at fixed DC, with no
-flux modulation or segment shift. It must last 100 ns to 10 µs and have at most
-32 retained levels. Two sampled tones must cover the whole row. The union of
+independent, unchained interaction-frame `dop853` endpoint at fixed DC. OpenCL
+rejects explicit collapse operators, flux modulation and segment shifts. The
+row must last 100 ns to 10 µs and have at most 32 retained levels. Two sampled
+tones must cover the whole row. The union of
 their sample grids can contain at most 960 knots, because the runner restarts
 integration at knots from either tone. Other rows in the same timeline may
 run on CPU.
@@ -276,12 +280,13 @@ The record contains the initial density, scheduled models plus DC zero,
 continuous-flux expansion when used, slow-envelope subdivisions and complete
 batch data. Point order, complex128/float64/int64/bool record dtypes, segment
 corrections and continuation fields survive the round trip. The reconstructed
-source has a fresh owned history and a finite level-to-model mapping. Unlisted
-levels raise `KeyError`. A model omits `collapse_operators` when it has none.
-Otherwise it records the ordered complex matrices. An explicitly empty field,
-an invalid matrix or a v1 container fails validation, even with matching hashes.
-No-jump snapshots keep their v1 physical and oracle hashes. Python builders,
-devices and registered source shifts are not serialized.
+source has a fresh owned history and a finite level-to-model mapping. Each flux
+level may appear only once in the model table. Unlisted levels raise `KeyError`.
+Omit `collapse_operators` for models without explicit jumps. When present, it
+must be a nonempty ordered list of finite complex matrices of the model's size.
+The v2 standalone reader rejects v1 containers even with matching hashes.
+No-jump snapshots keep their v1 physical and oracle hashes. The codec does not
+store Python builders, devices or registered source shifts.
 
 `canonical_json` uses sorted keys, compact separators, nested array lists and
 real/imag objects for complex values. It rejects nonfinite values. `digest`
@@ -295,8 +300,8 @@ metadata=None)` keeps caller metadata opaque. Its `physical_sha256` and
 `oracle_sha256` properties calculate the complete and identity-free hashes.
 The writer calculates both hashes. `read_frozen_manifest(path)` checks the
 version and both hashes, then returns a tuple in original order. Both reject
-duplicate names. The gzip
-header has mtime=0 and no filename, so identical records produce identical bytes
+duplicate names, duplicate flux levels and invalid collapse operators. The
+gzip header has mtime=0 and no filename, so identical records produce identical bytes
 at different paths. Reconstruct a source separately with
 `read_physical_input(record.physical)` and close it after use. The container
 neither interprets scene declarations nor selects a reference solver.
@@ -333,8 +338,10 @@ The independent preparation entry point is
 [`family_pareto_reference_producer.py`](../../../../tests/simulate/evolution/contract/family_pareto_reference_producer.py).
 It reads only frozen record names and physics. The caller explicitly maps each
 index to the independent lab-frame or interaction-picture solver and supplies
-an explicit scene cache. The current solvers reject cache misses for models
-with explicit collapse operators instead of publishing a secular approximation.
+an explicit scene cache. The producer checks the reference cache first. A miss
+calls only the selected solver. If the selected bath has explicit collapse
+operators, the built-in solvers raise `ValueError` and the producer writes no
+result.
 `--scenario NAME` requires one matching row across the
 supplied indexes before reading payloads. Zero or multiple matches fail without
 solving; other rows need no payload. Without a scenario, all indexed rows remain
@@ -1051,10 +1058,10 @@ and [interaction-picture `interaction_density`](../../../../tests/simulate/evolu
 build their dissipative terms from the secular bath's `rates_per_ns` and
 `dephasing_per_ns`. On inputs both support, they integrate the same Lindblad
 equation with this secular bath and retain all Hamiltonian drive terms, without
-a rotating-wave approximation. Neither accepts non-secular collapse operators
-or a full Lindblad superoperator (full L) as input.
-Both reject batches with `segment_shifts`. The matrix does not certify shifted
-spans.
+a rotating-wave approximation. Both raise `ValueError` for explicit collapse
+operators in a selected bath. Neither accepts a full Lindblad superoperator.
+Both also reject batches with `segment_shifts`. The matrix does not certify
+shifted spans.
 For the FTF producer and guard query, see [Common-frame guard diagnostics](#common-frame-guard-diagnostics).
 
 ### Constant-pair guard evidence

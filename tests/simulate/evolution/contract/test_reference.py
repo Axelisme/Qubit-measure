@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from contextlib import closing
 from dataclasses import replace
 
 import numpy as np
@@ -202,6 +203,26 @@ def test_timeline_matches_stitched_flux_and_bath_changes() -> None:
         state = reference_timeline(source, part)
     np.testing.assert_allclose(full, state, atol=2e-10, rtol=0)
     assert np.max(np.abs(full[0] - initial)) > 0.05
+
+
+def test_reference_timeline_rejects_explicit_collapse_at_active_level() -> None:
+    initial = np.diag([0, 1]).astype(complex)
+    with closing(doublet_source(rate_per_ns=0.7)) as secular:
+        dc = secular.model((0,))
+    jump = np.array([[0, 0.2j], [0, 0]], complex)
+    shifted = replace(dc, level=(1,), collapse_operators=(jump,))
+    batch = replace(
+        idle_batch(np.array([0.3])),
+        flux=evolution.FluxSchedule(
+            np.array([0, 2]), np.array([0.0, 0.1]), np.array([[0], [1]])
+        ),
+    )
+    models = {dc.level: dc, shifted.level: shifted}
+    with (
+        closing(evolution.ModelSource(initial, models.__getitem__)) as source,
+        pytest.raises(ValueError, match="explicit collapse operators"),
+    ):
+        reference_timeline(source, batch)
 
 
 def test_reference_timeline_matches_pure_decay() -> None:

@@ -88,7 +88,7 @@ def _domains(geometry: Geometry) -> dict[str, NDArray[np.bool_]]:
     Each domain's classifier owns its named candidate choices.
     """
     table = geometry.table
-    secular_only = ~table.full_loss
+    secular_only = ~table.has_collapse_operators
     flux = geometry.flux_drive & (table.tones > 0) & secular_only
     ordinary = ~flux & secular_only
     constant = table.constant_envelopes(np.arange(len(table.timeline), dtype=np.int64))
@@ -703,9 +703,9 @@ class Classifier:
 
     def classify(self) -> Dispatch:
         rows = np.flatnonzero(self.scope)
-        full = rows[self.table.full_loss[rows]]
-        self.accept("full_loss_flux", full[self.geometry.flux_drive[full]], ())
-        self.accept("full_loss", full, ("dop853",))
+        with_jumps = rows[self.table.has_collapse_operators[rows]]
+        self.accept("full_loss_flux", rows[self.geometry.reject_jump_flux[rows]], ())
+        self.accept("full_loss", with_jumps, ("dop853",))
         self.accept("idle", rows[self.domains["idle"][rows]], ("t4",))
         self.accept(
             "adiabatic", rows[self.domains["adiabatic"][rows]], ("adiabatic_map",)

@@ -40,8 +40,9 @@ def opencl_rows(
 
     Supply the completed direct plan for this acquire or resolved timeline.
     Return a read-only mask, or None for unsupported models or no DOP853 plan.
-    Admission requires at most 32 levels, 100–10000 ns of full-support sampled
-    playback and at most 960 distinct sample knots across both tones.
+    Admission requires at most 32 levels, no explicit collapse operators,
+    100–10000 ns of full-support sampled playback and at most 960 distinct
+    sample knots across both tones.
     """
     if (
         not isinstance(plan, DOP853Plan)
@@ -51,7 +52,7 @@ def opencl_rows(
         return None
     eligible = (
         (plan.frame == "interaction")
-        & ~table.full_loss
+        & ~table.has_collapse_operators
         & table.complete_pulses
         & (table.tones == 2)
         & (table.duration_ns >= _MIN_OPENCL_DURATION_NS)
@@ -158,7 +159,7 @@ def opencl_wave_prices(
     # This model is in seconds, unlike the relative scheduling units. On the
     # 960-knot FTF rows, measured DP5(4) CPU was 1.02–1.52 times the legacy
     # CPU estimate (which underpredicted actual DOP853 CPU on this host).
-    cpu_row *= np.where(cpu_dp54_rows(table.duration_ns[rows], budget), 1.2, 1.0)
+    cpu_row *= np.where(cpu_dp54_rows(table, rows, budget), 1.2, 1.0)
     cpu = max(float(cpu_row.sum()) / lanes, float(cpu_row.max()))
     gpu_work = work * _DP54_GPU_WORK_SCALE if dp54 else work
     # Like routing history, replacing the Engine must not change the route.
@@ -234,10 +235,8 @@ def direct_plans(
             frame[rows[selected & ~members]] = "interaction"
             frame.setflags(write=False)
             dp54 = np.zeros(size, dtype=bool)
-            selected_rows = rows[selected & ~table.full_loss[rows]]
-            dp54[selected_rows] = cpu_dp54_rows(
-                table.duration_ns[selected_rows], budget
-            )
+            selected_rows = rows[selected]
+            dp54[selected_rows] = cpu_dp54_rows(table, selected_rows, budget)
             dp54.setflags(write=False)
             plans[name] = DOP853Plan(frame, chain, dp54)
         else:

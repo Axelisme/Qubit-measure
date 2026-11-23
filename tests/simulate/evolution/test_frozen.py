@@ -244,14 +244,28 @@ def test_explicit_invalid_collapse_is_rejected_even_with_correct_hashes(
         evolution.write_frozen_manifest(manifest, (record,))
     assert not manifest.exists()
 
+    standalone, manifest = _signed_frozen_files(tmp_path, record)
+    for decode in (
+        lambda: evolution.read_physical_input(physical),
+        lambda: evolution.read_frozen_input(standalone),
+        lambda: evolution.read_frozen_manifest(manifest),
+    ):
+        with pytest.raises(ValueError, match="collapse_operators"):
+            decode()
+
+
+def _signed_frozen_files(
+    directory: Path, record: evolution.FrozenRecord
+) -> tuple[Path, Path]:
     # An external producer can supply matching digests for malformed physics.
     payload = {
         "version": evolution.FROZEN_PHYSICAL_VERSION,
-        "physical": physical,
+        "physical": record.physical,
         "physical_sha256": record.physical_sha256,
     }
-    standalone = tmp_path / "input.json"
+    standalone = directory / "input.json"
     standalone.write_text(evolution.canonical_json(payload), encoding="utf-8")
+    manifest = directory / "scenes.json.gz"
     manifest.write_bytes(
         gzip.compress(
             evolution.canonical_json(
@@ -269,13 +283,42 @@ def test_explicit_invalid_collapse_is_rejected_even_with_correct_hashes(
             ).encode()
         )
     )
-    for decode in (
-        lambda: evolution.read_physical_input(physical),
-        lambda: evolution.read_frozen_input(standalone),
-        lambda: evolution.read_frozen_manifest(manifest),
-    ):
-        with pytest.raises(ValueError, match="collapse_operators"):
-            decode()
+    return standalone, manifest
+
+
+@pytest.mark.parametrize("codec", ["physical", "standalone", "manifest", "write"])
+def test_frozen_codec_rejects_duplicate_flux_level_with_correct_hashes(
+    tmp_path: Path, codec: str
+) -> None:
+    fixture = _empty_numeric_input(1)
+    with closing(fixture.source):
+        physical = json.loads(
+            evolution.canonical_json(
+                evolution.physical_input(fixture.source, fixture.batch)
+            )
+        )
+    [secular] = physical["models"]
+    explicit = {
+        **secular,
+        "collapse_operators": [[[0, {"real": 0, "imag": 0.2}], [0, 0]]],
+    }
+    physical["models"] = [explicit, secular]
+    record = evolution.FrozenRecord("duplicate-level", physical)
+    standalone, manifest = _signed_frozen_files(tmp_path, record)
+    if codec == "write":
+        output = tmp_path / "output.json.gz"
+        with pytest.raises(ValueError, match="duplicate frozen flux level"):
+            evolution.write_frozen_manifest(output, (record,))
+        assert not output.exists()
+        return
+
+    decode = {
+        "physical": lambda: evolution.read_physical_input(physical).source.close(),
+        "standalone": lambda: evolution.read_frozen_input(standalone).source.close(),
+        "manifest": lambda: evolution.read_frozen_manifest(manifest),
+    }
+    with pytest.raises(ValueError, match="duplicate frozen flux level"):
+        decode[codec]()
 
 
 @pytest.mark.parametrize("loops", [1, 2])

@@ -28,20 +28,26 @@ _MAX_DP54_DURATION_NS = 10_000.0
 _DP54_CPU_WORK_SCALE = 0.6
 
 
-def cpu_dp54_rows(duration_ns: NDArray[np.float64], budget: float) -> NDArray[np.bool_]:
-    """Mark positive-duration dop853 rows that use DP5(4) if run on CPU.
+def cpu_dp54_rows(
+    table: SegmentTable, rows: NDArray[np.int64], budget: float
+) -> NDArray[np.bool_]:
+    """Mark dop853 rows that would use DP5(4) on CPU, in the supplied row order.
 
-    Supply validated row durations in ns and a positive finite evolve budget.
-    The result aligns with duration_ns.
+    Use the positive finite evolve budget. Only rows up to 10 µs, with no
+    explicit collapse operators, qualify at budgets of at least 1e-3.
     """
-    return (budget >= DP54_MIN_BUDGET) & (duration_ns <= _MAX_DP54_DURATION_NS)
+    return (
+        (budget >= DP54_MIN_BUDGET)
+        & (table.duration_ns[rows] <= _MAX_DP54_DURATION_NS)
+        & ~table.has_collapse_operators[rows]
+    )
 
 
 def cpu_work_scale(
-    duration_ns: NDArray[np.float64], budget: float
+    table: SegmentTable, rows: NDArray[np.int64], budget: float
 ) -> NDArray[np.float64]:
     """Scale DOP853 CPU work estimates by the eligible production tableau."""
-    return np.where(cpu_dp54_rows(duration_ns, budget), _DP54_CPU_WORK_SCALE, 1.0)
+    return np.where(cpu_dp54_rows(table, rows, budget), _DP54_CPU_WORK_SCALE, 1.0)
 
 
 @dataclass(frozen=True)
@@ -306,11 +312,7 @@ class DOP853Kernel:
         Backend selection happens later, on the scheduler's ready wave.
         """
         duration = table.duration_ns[rows]
-        scale = (
-            1.0
-            if budget is None
-            else np.where(table.full_loss[rows], 1.0, cpu_work_scale(duration, budget))
-        )
+        scale = 1.0 if budget is None else cpu_work_scale(table, rows, budget)
         return np.asarray(
             0.8 * scale * (1.0 + table.tones[rows]) * np.maximum(1.0, duration / 0.1),
             dtype=np.float64,

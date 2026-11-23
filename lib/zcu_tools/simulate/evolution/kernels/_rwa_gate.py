@@ -132,7 +132,7 @@ def canonical_keys(table: SegmentTable, context: KernelContext) -> tuple[bytes, 
     key = FactKey(("covariant-gate-keys", TableIdentity(table), context.source), tuple)
 
     def build() -> tuple[bytes, ...]:
-        rows = np.flatnonzero((table.tones > 0) & ~table.full_loss)
+        rows = np.flatnonzero((table.tones > 0) & ~table.has_collapse_operators)
         result = [b""] * len(table.timeline)
         if not len(rows):
             return tuple(result)

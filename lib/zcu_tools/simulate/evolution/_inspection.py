@@ -105,7 +105,7 @@ def needs_prefix_input(table: SegmentTable) -> NDArray[np.bool_]:
             ],
             dtype=bool,
         )
-        & ~table.full_loss
+        & ~table.has_collapse_operators
     )
 
 

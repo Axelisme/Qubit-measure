@@ -56,7 +56,7 @@ class SegmentTable:
         one source/evolve, including timing, levels, tones and flux samples.
         Only the planner assigns groups; kernels must not infer them from level.
     prefix_no_drive: group-aligned tuple. True preserves no-drive B2 exemption.
-    full_loss: boolean (rows,), model has explicit collapse operators.
+    has_collapse_operators: boolean (rows,), model has explicit collapse operators.
     complete_pulses: row-aligned flags; True means the row covers the full
         support of every active pulse. Empty means no such planner facts.
     prefix_inputs: immutable group-ID to read-only DC density mapping. The
@@ -98,7 +98,7 @@ class SegmentTable:
         default_factory=lambda: np.empty(0, dtype=np.bool_)
     )
 
-    full_loss: NDArray[np.bool_] = field(
+    has_collapse_operators: NDArray[np.bool_] = field(
         default_factory=lambda: np.empty(0, dtype=bool)
     )
 
@@ -143,13 +143,15 @@ class SegmentTable:
         if len(complete):
             shape(complete, (rows,), "complete pulses")
         object.__setattr__(self, "complete_pulses", complete)
-        full_loss = owned(
-            self.full_loss if len(self.full_loss) else np.zeros(rows, dtype=bool),
+        has_collapse_operators = owned(
+            self.has_collapse_operators
+            if len(self.has_collapse_operators)
+            else np.zeros(rows, dtype=bool),
             np.bool_,
             "full loss",
         )
-        shape(full_loss, (rows,), "full loss")
-        object.__setattr__(self, "full_loss", full_loss)
+        shape(has_collapse_operators, (rows,), "has collapse operators")
+        object.__setattr__(self, "has_collapse_operators", has_collapse_operators)
         self._validate_prefixes(rows)
         self._validate_tones(rows)
 

@@ -14,6 +14,7 @@ from zcu_tools.simulate.evolution import (
     Engine,
     EnvelopeSpec,
     FluxSchedule,
+    FluxWaveform,
     ModelSource,
     NoValidKernel,
     SecularDrive,
@@ -81,11 +82,21 @@ def _two_level_source(*jumps: NDArray[np.complex128]) -> ModelSource:
     )
 
 
-def test_full_loss_refuses_flux_changes_even_without_drive() -> None:
-    timeline = replace(
-        batch(1),
-        flux=FluxSchedule(np.array([0, 2]), np.array([0.0, 1.0]), np.array([[0], [1]])),
-    )
+@pytest.mark.parametrize("static_waveform", [False, True])
+def test_full_loss_refuses_flux_controls_even_without_drive(
+    static_waveform: bool,
+) -> None:
+    timeline = batch(1)
+    if static_waveform:
+        waveform = FluxWaveform(
+            np.array([0, 2]), np.array([0.0, timeline.end_ns[0]]), np.zeros((2, 1))
+        )
+        timeline = replace(timeline, flux_waveform=waveform)
+    else:
+        flux = FluxSchedule(
+            np.array([0, 2]), np.array([0.0, 1.0]), np.array([[0], [1]])
+        )
+        timeline = replace(timeline, flux=flux)
     with (
         closing(
             _two_level_source(np.array([[0, 0.2], [0, 0]], dtype=complex))
@@ -272,9 +283,16 @@ def test_frozen_full_loss_evolves_identically_and_distinguishes_keys(
         closing(_two_level_source(2 * jump)) as changed,
         closing(Engine(1, backend="cpu")) as engine,
     ):
+        original_model = source.model((0,))
+        changed_model = changed.model((0,))
+        assert original_model.identity == changed_model.identity
+        assert original_model.content_identity != changed_model.content_identity
         write_frozen_input(key, source, timeline)
         replay = read_frozen_input(key)
         with closing(replay.source):
+            restored_model = replay.source.model((0,))
+            assert restored_model.identity == original_model.identity
+            assert restored_model.content_identity == original_model.content_identity
             digest = reference_key(source, timeline).encode()
             actual = engine.evolve(source, (timeline,), reuse_key=digest)
             assert engine.reuse(source, digest)

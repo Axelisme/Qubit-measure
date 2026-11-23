@@ -47,9 +47,9 @@ def _model_identity(
     digest: _InputDigest, source: ModelSource, table: SegmentTable
 ) -> None:
     digest.text(source.model((0,) * table.level.shape[1]).content_identity)
-    if np.any(table.full_loss):
+    if np.any(table.has_collapse_operators):
         digest.text("explicit collapse operators")
-        for level in np.unique(table.level[table.full_loss], axis=0):
+        for level in np.unique(table.level[table.has_collapse_operators], axis=0):
             digest.array(level)
             digest.text(source.model(tuple(int(v) for v in level)).content_identity)
 
@@ -60,10 +60,12 @@ def input_key(
     budget: float,
     table: SegmentTable,
 ) -> bytes:
-    """Digest full input records before geometry/planning, with source identity.
+    """Digest the full input records after geometry and before dispatch.
 
-    The DC identity describes the entire source builder, including nonzero flux
-    levels. Initial density and optional continuous Hamiltonian expansion are
+    The caller's DC namespace describes the source builder, including nonzero
+    flux levels. The planned table identifies used levels with explicit jumps;
+    their content identities include the matrices. Initial density and optional
+    continuous Hamiltonian expansion are
     separate source inputs and are hashed by content. Every batch/track field,
     including unused envelope candidates and beyond-readout values, participates.
     The source's midpoint subdivision policy also participates. Other fixed

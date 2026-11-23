@@ -124,7 +124,7 @@ def plan_ramp_families(
     returned rows always index this complete table, not a worker/prefix slice.
     No harmonic, amplitude-node or convergence decision is made here.
     """
-    rows = np.flatnonzero((table.tones == 1) & ~table.full_loss)
+    rows = np.flatnonzero((table.tones == 1) & ~table.has_collapse_operators)
     rows = rows[~table.constant_envelopes(rows)]
     if not len(rows):
         return ()
@@ -217,7 +217,7 @@ def _reindex_ramps(table: SegmentTable, context: KernelContext) -> _RampRows:
         ): index
         for index, family in enumerate(families)
     }
-    rows = np.flatnonzero((table.tones == 1) & ~table.full_loss)
+    rows = np.flatnonzero((table.tones == 1) & ~table.has_collapse_operators)
     rows = rows[~table.constant_envelopes(rows)]
     # Prefix tables are renumbered. Resolve their physical coordinates once,
     # then every build uses the same cheap table-local row lookup as the main scan.

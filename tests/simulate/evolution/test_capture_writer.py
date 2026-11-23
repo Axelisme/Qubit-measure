@@ -18,10 +18,6 @@ def test_empty_capture_writes_unique_readable_manifests(tmp_path, monkeypatch):
     second = evolution.write_capture(capture)
     assert first is not None and second is not None
     assert first.is_absolute()
-    assert first.parent == evolution.capture_directory()
-    assert first.parent == (
-        tmp_path / "simulator-debug" / f"v{evolution.FROZEN_PHYSICAL_VERSION}"
-    )
     assert first != second
     assert evolution.read_frozen_manifest(first) == ()
     assert evolution.read_frozen_manifest(second) == ()

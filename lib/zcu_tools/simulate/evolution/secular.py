@@ -131,8 +131,9 @@ class SecularModel:
     """One flux level's Lindblad model, in its own H0 eigenbasis.
 
     level: quantized flux, one integer per loop; zero is round DC.
-    identity: caller's nonempty namespace for the level and all model data
-        other than explicit collapse operators. See content_identity for keys.
+    identity: caller's nonempty namespace for the level and its secular model
+        data. Shifted models append the correction fingerprint. It does not
+        distinguish explicit collapse operators; use content_identity for that.
     energies_ghz: float64 (M,), H0/h eigenvalues in cycles/ns. A physical
         model must be ascending. ModelSource.shifted_model keeps the physical
         indices even when its corrected energies no longer ascend.
@@ -213,10 +214,11 @@ class SecularModel:
 
     @cached_property
     def content_identity(self) -> str:
-        """Model key including the ordered, complex collapse matrices.
+        """Return the Engine model key, including ordered complex jump matrices.
 
-        With no explicit operators this is the caller's identity unchanged.
-        A shifted model also includes the registered correction fingerprint.
+        With no explicit operators this equals identity. A shifted model's
+        identity already includes the registered correction fingerprint.
+        The frozen codec stores identity and the matrices separately.
         """
         if not self.collapse_operators:
             return self.identity

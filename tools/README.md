@@ -479,8 +479,8 @@ the default selection does not read their payloads or references.
 `--scenario NAME` selects exactly one row from the supplied index or both default
 indexes, including rows outside the Pareto set. Adding a Pareto scene requires
 both its index row and an explicit addition to the name set. Profile rows do
-not provide evidence for family retention or removal. Numeric records live
-in the repository-shared `<git common dir parent>/.agent_state/benchmark/family_pareto/scenes/v1-physical-v2`.
+not provide evidence for family retention or removal. See
+[Freeze numeric scenes](#freeze-numeric-scenes) for the shared scene root.
 `--scene-cache DIR` requires an absolute override. Tools resolve Git locations;
 simulate only receives explicit paths. No caller should infer scene identity
 from an index location or file hash. Cross-index duplicate names always fail.
@@ -1259,9 +1259,9 @@ reference key. An intermediate checkpoint is not a reference-cache entry.
 The reference producer reads names and physics; metadata never selects a solver.
 All selected numeric files must load before any solver runs. Missing scene files
 list the name, hashes and scene-producer command, then fail without rebuilding.
-Existing reference keys are read cache-only. Missing reference keys are solved
-only by that separately approved producer. Both current reference solvers
-reject a cache miss for explicit collapse operators without publishing an NPZ.
+The producer reads existing keys without solving. On a miss it calls the selected
+solver. Both built-in solvers reject explicit collapse operators in a selected
+bath. The producer reports that error without publishing an NPZ.
 Measurement never writes references or copies selected records. Its `main(argv)` accepts only CLI arguments.
 Small tests write temporary indexes and scene files through the public codec.
 `read_inputs(indexes, scene_cache)` also accepts explicit paths and returns
@@ -1392,9 +1392,10 @@ uv run --directory <worktree> --no-sync -- python tools/inspect_simulator_captur
 
 The inspector prints JSON from recorded manifests and telemetry JSONL. It does
 not construct models, run evolution, inspect dispatch or evaluate guards.
-Omitting `path` uses `simulate.evolution.capture_directory()` and scans
-`<user-cache-root>/simulator-debug/v2`. To inspect a v1 capture, run this tool
-from a v1 checkout and pass the old file and its telemetry directory. A directory
+Omitting `path` scans the directory returned by
+[`simulate.evolution.capture_directory()`](../lib/zcu_tools/simulate/evolution/README.md#capture-persistence).
+To inspect a v1 capture, run this tool from a v1 checkout and pass the old file
+and its telemetry directory. A directory
 selects only its immediate `capture-*.json.gz` files, sorted by filename. An
 explicit file selects that file alone. The default telemetry directory is
 `.sim_telemetry` under the tool's own worktree root, regardless of the caller's

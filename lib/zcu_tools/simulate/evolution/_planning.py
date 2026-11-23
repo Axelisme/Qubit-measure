@@ -21,8 +21,8 @@ class Geometry:
     table contains global rows and optional engine-computed prefix certificates.
     points maps timeline indices to unique caller point IDs.
     flux_drive marks continuous motion and driven quantized flux changes.
-    For explicit collapse operators it also marks any retained flux-level
-    change or supplied flux waveform on the same timeline.
+    reject_jump_flux marks rows with explicit collapse operators
+    whose timelines do not satisfy the fixed-flux, no-waveform requirement.
     prefix_paths maps computed prefix IDs to diagnostics adopted by timelines.
     initial_densities optionally supplies point-aligned DC input matrices; None
     uses the common source input and enables shared-prefix/input preparation.
@@ -33,6 +33,7 @@ class Geometry:
     table: SegmentTable
     points: NDArray[np.int64]
     flux_drive: NDArray[np.bool_]
+    reject_jump_flux: NDArray[np.bool_]
     prefix_paths: Mapping[int, PathDiagnostics] = field(default_factory=dict)
     initial_densities: NDArray[np.complex128] | None = None
     stark_order_inversions: tuple[StarkOrderInversion, ...] = ()
@@ -350,18 +351,21 @@ def _batch_geometry(
     port, frequency, amplitude, theta, envelope_index, offset = columns
     shift_content, inversions = _shift_contents(batch, point, start, level, source)
     levels, level_index = np.unique(level, axis=0, return_inverse=True)
-    full_loss = np.array(
+    has_collapse_operators = np.array(
         [
             bool(source.model(tuple(int(v) for v in lev)).collapse_operators)
             for lev in levels
         ],
         dtype=bool,
     )[level_index]
-    if np.any(full_loss):
+    reject_jump_flux = np.zeros_like(has_collapse_operators)
+    if np.any(has_collapse_operators):
         changed = (point[1:] == point[:-1]) & np.any(level[1:] != level[:-1], axis=1)
         moving_points = point[1:][changed]
-        flux_drive |= full_loss & (
-            (batch.flux_waveform is not None) | np.isin(point, moving_points)
+        reject_jump_flux = has_collapse_operators & (
+            flux_drive
+            | (batch.flux_waveform is not None)
+            | np.isin(point, moving_points)
         )
     table = SegmentTable(
         point,
@@ -379,9 +383,15 @@ def _batch_geometry(
         batch.flux_waveform,
         shift_content=shift_content,
         complete_pulses=complete,
-        full_loss=full_loss,
+        has_collapse_operators=has_collapse_operators,
     )
-    return Geometry(table, batch.points, flux_drive, stark_order_inversions=inversions)
+    return Geometry(
+        table,
+        batch.points,
+        flux_drive,
+        reject_jump_flux,
+        stark_order_inversions=inversions,
+    )
 
 
 def _shift_contents(batch, point, start, levels, source):
@@ -487,7 +497,7 @@ def _merge_geometries(
         tones=np.concatenate(columns["tones"]),
         shift_content=np.concatenate(columns["shift_content"]),
         complete_pulses=np.concatenate(columns["complete_pulses"]),
-        full_loss=np.concatenate(columns["full_loss"]),
+        has_collapse_operators=np.concatenate(columns["has_collapse_operators"]),
         tone_port=np.concatenate(columns["tone_port"]),
         tone_frequency_ghz=np.concatenate(columns["tone_frequency_ghz"]),
         tone_amplitude=np.concatenate(columns["tone_amplitude"]),
@@ -520,6 +530,7 @@ def _merge_geometries(
         combined,
         points,
         np.concatenate([g.flux_drive for g in geometries]),
+        np.concatenate([g.reject_jump_flux for g in geometries]),
         initial_densities=initial,
         stark_order_inversions=tuple(inversions),
     )

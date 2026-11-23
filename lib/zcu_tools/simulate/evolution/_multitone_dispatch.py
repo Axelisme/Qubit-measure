@@ -35,7 +35,7 @@ def populate_gate_inventory(
     def build() -> tuple[tuple[bytes, int], ...]:
         rows = np.flatnonzero(
             (table.tones >= 2)
-            & ~table.full_loss
+            & ~table.has_collapse_operators
             & ~table.constant_envelopes(np.arange(len(table.timeline)))
         )
         if not len(rows):
@@ -192,7 +192,7 @@ def populate_multitone_inventory(
             return MultitoneInventory((), (), ())
         context = KernelContext(source, budget, plan)
         kernel = MultitoneRWAKernel()
-        pairs = np.flatnonzero((table.tones == 2) & ~table.full_loss)
+        pairs = np.flatnonzero((table.tones == 2) & ~table.has_collapse_operators)
         # Sampled guard work is lazy: never integrate probes to price constants
         # or to build caller-owned routing reuse facts.
         candidates = pairs[table.constant_envelopes(pairs)]
