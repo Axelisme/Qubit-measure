@@ -41,7 +41,7 @@ from zcu_tools.program.v2.modules import (
     Reset,
 )
 
-from .._drive import QubitDriveCfg
+from .._drive import SweptQubitDriveCfg
 from .._rabi_analysis import RabiRate, ReturnData, cosine, fit_duration_rates
 from .._rabi_scan import RabiScanResult
 from .._readout import POINT_ALIAS_DESCRIPTION, MuxResetCfg
@@ -66,8 +66,9 @@ class ChevronCfg(ConfigBase):
     Both frequencies change together. Gain ratio, phases and source waveforms remain fixed.
     Optional reset precedes preparation. Qubit1/Qubit2 classifiers require GE Post radii.
     duration sets both positive envelope lengths in us; scalar length-settable
-    envelopes are required. drive carries common MHz frequency, signed gains,
-    phases in degrees and timing. The tone indices address the full readout.
+    envelopes are required. drive carries signed gains, phases in degrees and
+    timing; frequency supplies the common MHz carrier. The tone indices address
+    the full readout.
     Preparation and contrast use x180_qubit1/x180_qubit2 on the drive generators.
     Acquisition sums repetitions across rounds without storing individual shots.
     initial_delay precedes the first repetition; relax_delay follows each one.
@@ -96,7 +97,7 @@ class ChevronCfg(ConfigBase):
         ),
     ]
     drive: Annotated[
-        QubitDriveCfg,
+        SweptQubitDriveCfg,
         FieldMeta(
             label="Dual-line drive",
             description="Set the two charge-line pulses. The scan varies their common frequency and envelope duration.",
@@ -296,7 +297,7 @@ class ChevronExp(Experiment[ChevronResult, ChevronCfg]):
         ),
         result_type=ChevronResult,
         cfg_type=ChevronCfg,
-        cfg_schema_version="5.0",
+        cfg_schema_version="5.1",
         tag="two_qubit/chevron",
         result_builder=restore_result,
     )

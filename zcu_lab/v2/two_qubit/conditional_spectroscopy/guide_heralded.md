@@ -7,7 +7,7 @@
 ## 設定表單
 
 - 核對 [qubit 位置與 mux tone 次序](../guide.md#綁定位置與讀出-tones)，兩顆都要有校準的 Xπ 和同一讀出條件下的 GE Post 圓形分類器。Herald 與終端共用完整的 **Mux readout** 與 `post_delay`。從 `5/(2π·κ)` µs 開始，κ 取讀出 tones 中最小的 linewidth，詳見[等待的校準方法](../guide.md#herald-reset-與獨立-heralded-入口)。**Reset** 留空就略過，只接受一般 reset。不要再加一層 herald reset。
-- **Two-qubit spectroscopy probe** 不是準備用的 Xπ。兩線用各自的 qubit generator，包絡長度與 pre-delay 相同。若用 coupler 的 CZ slots 當初值，先降到探譜所需的 gain，不照搬 CZ 功率。**Common probe RF frequency** 同時覆蓋兩路 RF；若打開 **Double Xπ contrast**，probe 後依序翻轉 Qubit1、Qubit2，終端 P(e) 仍是讀出時的值。
+- **Two-qubit spectroscopy probe** 不是準備用的 Xπ。兩線用各自的 qubit generator，包絡長度與 pre-delay 相同。若表單引用 coupler 的 CZ slots，先用 **Convert to inline** 再降到探譜所需的 gain。**Common probe RF frequency** 同時設定兩路 RF，不使用 Library 裡保存的頻率。若打開 **Double Xπ contrast**，probe 後依序翻轉 Qubit1、Qubit2，終端 P(e) 仍是讀出時的值。
 - **Coupler DC source** 留空不動 bias，不要求 `coupler` alias。掃 bias 時填裝置、單位和掃描範圍。掃描只改選定來源，完成或 Stop 都不復原。
 
 ## 讀圖與選下一步

@@ -359,7 +359,7 @@ class ConditionalPhaseHeraldedExp(
         ),
         result_type=ConditionalPhaseHeraldedResult,
         cfg_type=ConditionalPhaseHeraldedCfg,
-        cfg_schema_version="4.0",
+        cfg_schema_version="4.1",
         tag="two_qubit/conditional_phase_heralded",
         result_builder=restore_result,
     )

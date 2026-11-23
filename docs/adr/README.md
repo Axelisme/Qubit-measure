@@ -45,6 +45,7 @@ ADR 宣告 package 之間的依賴方向時，同時在 `.importlinter` 建立�
 
 ## Cfg / Value Model
 
+原則：表單預設引用 library，只在改了 Run 不會覆寫的欄位時複製，見 [ADR-0073](0073-measure-form-derivation.md#表單預設引用-library只在改了-run-不覆寫的欄位時複製)。
 原則：掃描初值每軸至少 31 點、以中心為準的用奇數；只管初值，不擋輸入，見 [ADR-0073〈Form 的形狀與初值〉](0073-measure-form-derivation.md#掃描初值的點數)。
 原則：表單初值用簡單固定的公式，不依板子調整；可填算好的數值或寫 expression，兩種寫法都遵守與板子無關的固定範圍，見 [ADR-0073](0073-measure-form-derivation.md#自動推導點到為止)。
 原則：初值在一般 point 上就違反實驗自己的規則時，修初值公式，不加檢查；依板子的限制不改初值，見 [ADR-0073](0073-measure-form-derivation.md#預設值的瑕疵就改預設值)。

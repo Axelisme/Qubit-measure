@@ -18,7 +18,7 @@ def make_form(ctx: FormContext) -> Form[ChevronCfg]:
     """Seed the chevron from GUI aliases $qubit1, $qubit2, $mux and $coupler.
 
     Missing or inconsistent bindings raise ValueError on Open/Reset. Notebook
-    bindings of the same names are separate. Tone indices are hidden. Copy
+    bindings of the same names are separate. Tone indices are hidden. Reference
     the coupler's cz_qubit1/cz_qubit2 slots when present, otherwise offer
     cosine templates on captured qubit wiring. Scan endpoints and missing
     calibration must be supplied before Run.
@@ -28,8 +28,7 @@ def make_form(ctx: FormContext) -> Form[ChevronCfg]:
     for position in ("qubit1", "qubit2"):
         # CZ slots: $coupler.module.cz_qubit1 and $coupler.module.cz_qubit2.
         slot = f"$coupler.module.cz_{position}"
-        # Run replaces both line frequencies with the common scan coordinate.
-        node = source(
+        pulse = source(
             ctx,
             slot,
             Template(
@@ -37,16 +36,14 @@ def make_form(ctx: FormContext) -> Form[ChevronCfg]:
                 set={
                     "ch": Expr(f"${position}.wiring.ch"),
                     "nqz": None,
-                    "freq": Hidden(0.0),
                     "gain": None,
                     "waveform.style": "cosine",
                     "waveform.length": None,
                 },
             ),
         )
-        if isinstance(node, Slot):
-            node = replace(node, copy=True, set={"freq": Hidden(0.0)})
-        drive[position] = node
+        # Hide the swept frequency in inline without changing a captured ref.
+        drive[position] = replace(pulse, set={**pulse.set, "freq": Hidden(0.0)})
     readout = mux_readout_initial(ctx)
     return TwoQubitForm(
         ChevronCfg,
@@ -58,8 +55,8 @@ def make_form(ctx: FormContext) -> Form[ChevronCfg]:
             "qubit1_tone": Hidden(qubits.qubit1_tone),
             "qubit2_tone": Hidden(qubits.qubit2_tone),
             "reset": None,
-            "x180_qubit1": Slot("$qubit1.module.x180", copy=True),
-            "x180_qubit2": Slot("$qubit2.module.x180", copy=True),
+            "x180_qubit1": Slot("$qubit1.module.x180"),
+            "x180_qubit2": Slot("$qubit2.module.x180"),
             "readout": readout,
             "drive": drive,
             "frequency": Range(None, None, expts=31),

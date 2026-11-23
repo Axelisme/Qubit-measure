@@ -151,6 +151,7 @@ def mux_readout_initial(
     if wait_for_ringup:
         seeds.update(_ringup_timing(ctx, group))
     if wait_for_ringup and has_readout:
+        # Spectroscopy uses these tone and ring-up timing seeds in Run.
         return Slot("$mux.module.readout", copy=True, set=seeds)
     seeds["gen_ch"] = Expr("$mux.wiring.gen_ch")
     seeds["mixer_freq"] = Expr("$mux.mixer_freq")
