@@ -1,6 +1,6 @@
 # FTF environment composition
 
-**Last updated:** 2026-11-23, sampled RWA probe lifetime
+**Last updated:** 2026-11-24, sampled RWA probe lifetime and simulator optimization index
 
 **讀者：** framework-dev、agent。FTF 環境的組裝接縫、數值接線與 acquisition 契約。
 
@@ -16,6 +16,8 @@ Startup, Notebook calls and caller-owned YAML setup belong to
 [simulation environments](../../../../../zcu_lab/simulation_envs/README.md#ftf-startup-與-yaml-設定).
 Field units and entry wiring belong to the [FTF field guide](../../../../../zcu_lab/simulation_envs/FTF/field-guide.md);
 schema and validation belong to [FTF config](../config/README.md).
+
+See the [simulator optimization index](../../../../../docs/simulator-attempts/INDEX.md) for attempts and historical measurements.
 
 Pass `history=RoutingHistory()` from `zcu_tools.simulate.evolution` to retain
 caller-controlled routing history across acquires and model rebuilds. The source

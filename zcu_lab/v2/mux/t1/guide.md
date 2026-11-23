@@ -20,7 +20,7 @@ In `mux_t1`, omitted inputs retain settings. Null `participants` leaves a missin
 
 ## Read the plots and use the result
 
-Live `measurement_i` and Analyze `fit_i` use the original tone index `i`, not the participant-list row. Live shows delay coverage after each completed round. Analyze adds the exponential and marks T1 if inside the scan. Compare the contrast, tail and baseline. Both plots label the signed projection of mean IQ **IQ projection (a.u.)**. It is not excited-state probability. They use the principal axis, or I if fewer than two finite points are available. Analyze counts points after the requested skip.
+Live `measurement_i` and Analyze `fit_i` use the original tone index `i`, not the participant-list row. Live updates the measured trace after each completed round. Analyze adds the exponential and marks T1 if inside the scan. Compare the contrast, tail and baseline. Both plots label the signed projection of mean IQ **IQ projection (a.u.)**. It is not excited-state probability. They use the principal axis, or I if fewer than two finite points are available. Analyze counts points after the requested skip.
 
 Bars in Live and Analyze are shot SEM: the projected shot sample standard deviation divided by √(shot count). They describe uncertainty of the point mean, not fit error, shot spread or round-to-round spread. Mean-only files still fit without bars, and fewer than two shots give no bar. R² measures explained variation, normalized residual RMS measures mismatch relative to signal range, and the reported ± is fit uncertainty.
 
