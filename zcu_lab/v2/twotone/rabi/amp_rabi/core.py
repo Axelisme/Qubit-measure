@@ -257,13 +257,9 @@ class AmpRabiExp(Experiment[AmpRabiResult, AmpRabiCfg]):
 
         @context.plots.on_plot_thread
         def update(moments: NDArray[np.float64]) -> tuple[Artist, ...]:
-            """Update the live trace, shot SEM and retained counts; return changed artists."""
+            """Update the live trace and shot SEM; return changed artists."""
             contrast, sem = _contrast_with_sem(_mean_iq(moments), moments)
-            counts = moments[:, 0]
-            low, high = counts.min(), counts.max()
-            retained = f"{low:.0f}" if low == high else f"{low:.0f}–{high:.0f}"
-            title = ax.set_title(f"Amplitude Rabi · {retained} retained shots/point")
-            return (*viewer.set(gains, contrast, sem), title)
+            return viewer.set(gains, contrast, sem)
 
         fig.show()
         moments_buffer = SignalBuffer(

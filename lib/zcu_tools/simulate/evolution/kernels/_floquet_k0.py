@@ -15,7 +15,7 @@ Bounds = tuple[
     bool,  # valid: whether the frame is valid.
     NDArray[np.float64],  # omitted drive norms (ports,) in GHz per gain.
     float,  # bath omitted norm per ns.
-    float,  # convergence: max zero-mode residual (bath per ns, drive GHz/gain).
+    NDArray[np.float64],  # convergence: zero-mode residual bound per probe port.
     float,  # frame error, dimensionless.
 ]
 ModalData = tuple[
@@ -257,8 +257,8 @@ def legacy_mask(
     data borrows, in order, energies (M,) GHz, bath (M²,M²) per ns,
     and probe x/y (ports,M,M) GHz per gain. bounds is ordered valid bool,
     omitted drive norms (ports,) GHz per gain, bath omitted norm per ns,
-    convergence, frame error. Convergence is the existing maximum of bath
-    per-ns and drive GHz-per-gain zero-mode residuals. Frame error is
+    convergence per probe port, frame error. The convergence bound combines
+    bath per-ns and drive GHz-per-gain zero-mode residuals. Frame error is
     dimensionless. budget is the absolute per-segment error allowance.
 
     parameters is float64 (rows,7), ordered duration_ns, Stark start phase_rad,
@@ -283,7 +283,8 @@ def legacy_mask(
         )
         omitted *= np.sqrt(len(energies))
         result[row] = (
-            omitted <= budget / 3 and convergence * duration + frame_error <= budget / 3
+            omitted <= budget / 3
+            and convergence[port] * duration + frame_error <= budget / 3
         )
     return result
 

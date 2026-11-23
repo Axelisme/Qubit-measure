@@ -446,29 +446,23 @@ class MuxLenRabiExp(Experiment[MuxRabiResult, MuxLenRabiCfg]):
             fig, ax = context.plots.subplots(num=f"measurement_{index}")
             fig.suptitle(f"Mux length Rabi · {cfg.tones[index].name} · IQ contrast")
             ax.set(xlabel=_SWEEP_LABEL, ylabel=_IQ_LABEL)
-            progress = ax.set_title(f"Acquired length points: 0 / {cfg.expts}")
             viewer = live_errorbar(ax)
             ax.lines[0].set(marker="o", markersize=3, label="Measured IQ ± shot SEM")
             ax.legend()
-            viewers.append((viewer, progress))
+            viewers.append(viewer)
             fig.show()
 
         @context.plots.on_plot_thread
         def update(data: NDArray[np.float64]):
             _, mean = split_sums(data)
             artists = []
-            for row, (viewer, progress) in enumerate(viewers):
+            for row, viewer in enumerate(viewers):
                 measured = mean[:, row]
                 acquired = np.isfinite(measured)
                 real, sem = project_iq(
                     np.where(acquired, measured, np.nan), data[:, row]
                 )
-                progress.set_text(
-                    f"Acquired length points: {np.count_nonzero(acquired)} / {cfg.expts}"
-                )
-                artists.extend(
-                    (*viewer.set(scan.coordinates[row], real, sem), progress)
-                )
+                artists.extend(viewer.set(scan.coordinates[row], real, sem))
             return artists
 
         # 1. One hardware point loop selects all participants' length tables.
@@ -537,11 +531,10 @@ class MuxLenRabiExp(Experiment[MuxRabiResult, MuxLenRabiCfg]):
             fig, ax = context.plots.subplots(num=f"measurement_{index}")
             fig.suptitle(f"Mux length Rabi · {cfg.tones[index].name} · IQ contrast")
             ax.set(xlabel=_SWEEP_LABEL, ylabel=_IQ_LABEL)
-            progress = ax.set_title(f"Acquired length points: 0 / {cfg.expts}")
             viewer = live_errorbar(ax)
             ax.lines[0].set(marker="o", markersize=3, label="Measured IQ ± shot SEM")
             ax.legend()
-            viewers.append((viewer, progress))
+            viewers.append(viewer)
             fig.show()
 
         def sum_host_rounds(data: NDArray[np.float64]) -> NDArray[np.float64]:
@@ -555,18 +548,13 @@ class MuxLenRabiExp(Experiment[MuxRabiResult, MuxLenRabiCfg]):
             sums = sum_host_rounds(data)
             _, mean = split_sums(sums)
             artists = []
-            for row, (viewer, progress) in enumerate(viewers):
+            for row, viewer in enumerate(viewers):
                 measured = mean[:, row]
                 acquired = np.isfinite(measured)
                 real, sem = project_iq(
                     np.where(acquired, measured, np.nan), sums[:, row]
                 )
-                progress.set_text(
-                    f"Acquired length points: {np.count_nonzero(acquired)} / {cfg.expts}"
-                )
-                artists.extend(
-                    (*viewer.set(scan.coordinates[row], real, sem), progress)
-                )
+                artists.extend(viewer.set(scan.coordinates[row], real, sem))
             return artists
 
         # 2. Reuse each point's reset/simultaneous-drive/readout program across host rounds.

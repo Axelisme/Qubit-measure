@@ -382,29 +382,23 @@ class MuxAmpRabiExp(Experiment[MuxRabiResult, MuxAmpRabiCfg]):
             )
             fig.suptitle(f"Mux amplitude Rabi · {cfg.tones[index].name} · IQ contrast")
             ax.set(xlabel=_SWEEP_LABEL, ylabel=_IQ_LABEL)
-            progress = ax.set_title(f"Acquired gain points: 0 / {cfg.expts}")
             viewer = live_errorbar(ax)
             ax.lines[0].set(marker="o", markersize=3, label="Measured IQ ± shot SEM")
             fig.legend(loc="outside lower center")
-            viewers.append((viewer, progress))
+            viewers.append(viewer)
             fig.show()
 
         @context.plots.on_plot_thread
         def update(data: NDArray[np.float64]):
             _, mean = split_sums(data)
             artists = []
-            for row, (viewer, progress) in enumerate(viewers):
+            for row, viewer in enumerate(viewers):
                 measured = mean[:, row]
                 acquired = np.isfinite(measured)
                 real, sem = project_iq(
                     np.where(acquired, measured, np.nan), data[:, row]
                 )
-                progress.set_text(
-                    f"Acquired gain points: {np.count_nonzero(acquired)} / {cfg.expts}"
-                )
-                artists.extend(
-                    (*viewer.set(scan.coordinates[row], real, sem), progress)
-                )
+                artists.extend(viewer.set(scan.coordinates[row], real, sem))
             return artists
 
         # Advance each drive gain in the same tProc point loop.

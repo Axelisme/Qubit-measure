@@ -37,7 +37,7 @@ def live_transfer(
         except AnalysisFailed:
             return ()
         previous = calibrated
-        status.set_text(f"{sums[:, 0, 0].max():.0f} retained pairs/point")
+        status.set_visible(False)
         return (*viewer.set(times, calibrated.change_probability), status)
 
     return update

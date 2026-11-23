@@ -11,7 +11,7 @@ See [`zcu_lab/v2/operator-workflow.md`](../../../operator-workflow.md) for the s
 
 ## Read the plots
 
-Both plots show the principal-axis projection of mean IQ (a.u.), not population, versus relaxation delay (µs). The live title counts retained shots per point. One bar is one shot SEM: retained-shot sample SD along that axis divided by √(retained shot count). It is not shot spread, round-to-round scatter or fit error. Points without sufficient shot statistics have no bar; mean-only files still load. Bars do not weight the fit.
+Both plots show the principal-axis projection of mean IQ (a.u.), not population, versus relaxation delay (µs). One bar is one shot SEM: retained-shot sample SD along that axis divided by √(retained shot count). It is not shot spread, round-to-round scatter or fit error. Points without sufficient shot statistics have no bar; mean-only files still load. Bars do not weight the fit.
 
 Analyze overlays the decay curve and reports T₁ with fit standard error; a dual fit adds a second timescale. R² compares the residual with the variation of the data, not an acceptance cutoff. If the trace does not flatten, extend the delay window and keep enough points early in the decay.
 

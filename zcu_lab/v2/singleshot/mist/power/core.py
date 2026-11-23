@@ -174,7 +174,7 @@ class PowerExp(Experiment[PowerResult, PowerCfg]):
         # 3. Show the measured G/E/Other fractions in classifier order.
 
         figure, ax = context.plots.subplots(num="measurement", layout="constrained")
-        progress = figure.suptitle("MIST gain scan · qubit · classified populations")
+        figure.suptitle("MIST gain scan · qubit · classified populations")
         ax.set(xlabel="MIST drive gain (a.u.)", ylabel="Outcome probability")
         viewer = live_errorbar(ax, num_lines=POPULATION_COUNT)
         for line, bars, label, color in zip(
@@ -190,15 +190,11 @@ class PowerExp(Experiment[PowerResult, PowerCfg]):
 
         @context.plots.on_plot_thread
         def update(data: NDArray[np.float64]):
-            """Display acquired fractions and completed scan positions."""
+            """Display class fractions and their shot SEM."""
             totals = data.sum(axis=-1)
-            progress.set_text(
-                f"MIST gain scan · qubit · classified populations\n"
-                f"{np.count_nonzero(totals > 0)}/{totals.size} points acquired"
-            )
             covariance = class_probability_covariance(data)
             sem = np.sqrt(np.diagonal(covariance, axis1=-2, axis2=-1))
-            return (progress, *viewer.set(gains, (data / totals[..., None]).T, sem.T))
+            return viewer.set(gains, (data / totals[..., None]).T, sem.T)
 
         figure.show()
         buffer = SignalBuffer(

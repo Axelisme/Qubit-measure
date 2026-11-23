@@ -179,7 +179,6 @@ class MistExp(Experiment[MistResult, MistCfg]):
         fig, ax = context.plots.subplots(num="measurement", layout="constrained")
         fig.suptitle("Fast-flux MIST · Qubit · Readout contrast")
         ax.set(xlabel="Flux pulse gain (a.u.)", ylabel="MIST pulse gain (a.u.)")
-        ax.set_title(f"0/{flux_gains.size * mist_gains.size} scan points with IQ")
         ax.grid(False)
         viewer = live_heatmap(ax)
         (image,) = viewer.set(
@@ -190,9 +189,7 @@ class MistExp(Experiment[MistResult, MistCfg]):
         @context.plots.on_plot_thread
         def update(data: NDArray[np.complex128]) -> Iterable[Artist]:
             """Display available IQ on the scan grid without changing the buffer."""
-            count = np.count_nonzero(np.isfinite(data))
-            title = ax.set_title(f"{count}/{data.size} scan points with IQ")
-            return (*viewer.set(flux_gains, mist_gains, mist_signal2real(data)), title)
+            return viewer.set(flux_gains, mist_gains, mist_signal2real(data))
 
         fig.show()
         signals_buffer = SignalBuffer(

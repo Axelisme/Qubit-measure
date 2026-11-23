@@ -16,7 +16,7 @@ Live and Analyze plot the same three panels versus frequency (MHz):
 - **Estimated QND** uses the decay of the early cross covariances. It is not clipped to [0,1]. Check the trade-off at the selected setting.
 - **Correlation diagnostics** compares M and |ρ|. M can rise even with two-state redistribution; it is not a leakage or MIST probability. The score is neither calibrated g/e SNR nor a direct measure of information.
 
-The score and QND bars are approximate model-conditional error scales, not shot SEM or confidence intervals. They hold M and the main IQ axis fixed. The selection uses the score only, not its error bars. Live counts settings with completed data and reports minimum acquired shots. Stop keeps only settings with a completed round; stopping before any do causes Run to fail.
+The score and QND bars are approximate model-conditional error scales, not shot SEM or confidence intervals. They hold M and the main IQ axis fixed. The selection uses the score only, not its error bars. Stop keeps only settings with a completed round; stopping before any do causes Run to fail.
 
 Extend a boundary peak and repeat. There is no writeback. Enter the selected frequency in the readout module.
 

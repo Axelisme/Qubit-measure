@@ -243,13 +243,11 @@ class LenRabiExp(Experiment[LenRabiResult, LenRabiCfg]):
 
         @context.plots.on_plot_thread
         def update(moments: NDArray[np.float64]) -> tuple[Artist, ...]:
-            """Update the projected IQ, shot SEM and acquisition count."""
-            counts, mean = split_sums(moments)
+            """Update the projected IQ and shot SEM."""
+            _, mean = split_sums(moments)
             i, q = _direction(mean)
             sem = iq_shot_sem(moments, direction=(i, q))
-            retained = np.nanmax(counts, initial=0)
-            title = ax.set_title(f"{experiment} · {retained:.0f} retained shots/point")
-            return (*viewer.set(lengths, mean.real * i + mean.imag * q, sem), title)
+            return viewer.set(lengths, mean.real * i + mean.imag * q, sem)
 
         fig.show()
         signals = SignalBuffer(
@@ -315,15 +313,10 @@ class LenRabiExp(Experiment[LenRabiResult, LenRabiCfg]):
         def update(data: NDArray[np.float64]) -> tuple[Artist, ...]:
             """Display projected IQ and shot SEM from completed length points."""
             moments = accumulated_moments(data)
-            counts, mean = split_sums(moments)
+            _, mean = split_sums(moments)
             i, q = _direction(mean)
             sem = iq_shot_sem(moments, direction=(i, q))
-            acquired = counts[np.isfinite(counts)]
-            title = ax.set_title(
-                f"Length Rabi · {acquired.size}/{len(lengths)} lengths\n"
-                f"Up to {np.max(acquired, initial=0):.0f} retained shots/point"
-            )
-            return (*viewer.set(lengths, mean.real * i + mean.imag * q, sem), title)
+            return viewer.set(lengths, mean.real * i + mean.imag * q, sem)
 
         fig.show()
         signals = SignalBuffer(

@@ -219,11 +219,7 @@ class PowerExp(Experiment[PowerResult, PowerCfg]):
             Return the changed artists without modifying the input array.
             """
             contrast = first_read_contrast(sums)
-            count = int(np.nansum(sums[0, 2, 0, 0]))
-            status = ax.set_title(
-                f"Accumulated shots per branch and gain: {count} count"
-            )
-            return (*viewer.set(gains, contrast.values, contrast.sem), status)
+            return viewer.set(gains, contrast.values, contrast.sem)
 
         fig.show()
         buffer = SignalBuffer((len(gains), 8, 6, 6), dtype=np.float64, on_update=update)

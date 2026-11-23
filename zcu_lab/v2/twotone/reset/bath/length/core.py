@@ -289,10 +289,6 @@ class LengthExp(Experiment[LengthResult, LengthCfg]):
             direction = principal_iq_direction(signals)
             projected = direction[0] * signals.real + direction[1] * signals.imag
             sem = iq_shot_sem(moments, direction=direction)
-            shots = int(np.nan_to_num(moments[..., 0]).max())
-            title = contrast_ax.set_title(
-                f"Up to {shots} retained shots per duration and phase (count)"
-            )
             return (
                 *contrast.set(
                     lengths,
@@ -300,7 +296,6 @@ class LengthExp(Experiment[LengthResult, LengthCfg]):
                     _contrast_sem(signals, moments),
                 ),
                 *viewer.set(lengths, projected.T, sem.T),
-                title,
             )
 
         fig.show()
