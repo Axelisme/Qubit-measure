@@ -14,6 +14,7 @@ from zcu_tools.simulate.evolution import (
     EvolutionResult,
     ModelSource,
     PathDiagnostics,
+    SampledRWAProbeMemo,
     TimelineBatch,
 )
 
@@ -62,6 +63,7 @@ class EngineDouble(Engine):
         telemetry: bool = False,
         reuse_key: bytes | None = None,
         capture: CaptureBuffer | None = None,
+        probe_memo: SampledRWAProbeMemo | None = None,
     ) -> EvolutionResult:
         """Record the public handoff and deliver the fixture's Engine answer."""
         self.calls.append((source, tuple(batches)))

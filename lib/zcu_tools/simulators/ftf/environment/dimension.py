@@ -153,6 +153,7 @@ def _isolated_evolve(
             cancel=options.cancel,
             telemetry=options.telemetry,
             capture=options.capture,
+            probe_memo=options.probe_memo,
         )
 
 
@@ -273,6 +274,7 @@ def evolve_terminal(
             cancel=options.cancel,
             telemetry=options.telemetry,
             capture=options.capture,
+            probe_memo=options.probe_memo,
             reuse_key=key,
         )
     result = embed_upper(result, upper)

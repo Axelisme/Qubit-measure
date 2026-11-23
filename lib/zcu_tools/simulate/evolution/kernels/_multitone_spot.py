@@ -2,6 +2,7 @@
 
 from dataclasses import dataclass
 from functools import cache
+from hashlib import sha256
 from math import gcd
 
 import numpy as np
@@ -141,6 +142,34 @@ def _spot_rows(
     )
     # The first row at each peak wins a tie, including repeated numeric keys.
     return tuple(dict.fromkeys(rows[index] for index in np.argmax(amplitude, axis=0)))
+
+
+def probe_key(
+    table: SegmentTable, row: int, context: KernelContext, prepare_key: bytes
+) -> bytes:
+    """Hash exact inputs to the independent, fixed-state probe for one row.
+
+    The multitone prepare digest supplies policy/retention, budget, level,
+    start/duration, ordered ports/carriers, signed gains, effective phases and
+    envelope fingerprints/offsets. Add the shift and the actual shifted model
+    terms that affect both integrations. Neither input density nor point ID
+    participates; the probe state is determined solely by the model dimension.
+    """
+    model = table.model(context.source, row)
+    digest = sha256(prepare_key)
+    shift = table.shift(row)
+    digest.update(len(shift).to_bytes(1, "little"))
+    digest.update(shift)
+    digest.update(len(model.energies_ghz).to_bytes(8, "little"))
+    for array in (model.energies_ghz, model.rates_per_ns, model.dephasing_per_ns):
+        digest.update(array.tobytes())
+    # The sampled domain excludes explicit collapse operators. The solvers
+    # stay in the model eigenbasis and only read the active drive matrices.
+    for port in table.tone_port[row, : table.tones[row]]:
+        drive = model.drives[port]
+        digest.update(drive.in_phase_ghz.tobytes())
+        digest.update(drive.quadrature_ghz.tobytes())
+    return digest.digest()
 
 
 def probe_density(size: int) -> NDArray[np.complex128]:

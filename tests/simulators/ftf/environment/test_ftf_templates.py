@@ -21,6 +21,7 @@ from zcu_tools.simulate.evolution import (
     Engine,
     EvolutionResult,
     ModelSource,
+    SampledRWAProbeMemo,
     TimelineBatch,
 )
 from zcu_tools.simulators.ftf.environment import (
@@ -565,6 +566,7 @@ class CountingEngine(Engine):
         telemetry: bool = False,
         reuse_key: bytes | None = None,
         capture: CaptureBuffer | None = None,
+        probe_memo: SampledRWAProbeMemo | None = None,
     ) -> EvolutionResult:
         self.calls += 1
         return super().evolve(
@@ -575,6 +577,7 @@ class CountingEngine(Engine):
             telemetry=telemetry,
             reuse_key=reuse_key,
             capture=capture,
+            probe_memo=probe_memo,
         )
 
 
@@ -623,6 +626,7 @@ class ResidualEngine(Engine):
         telemetry: bool = False,
         reuse_key: bytes | None = None,
         capture: CaptureBuffer | None = None,
+        probe_memo: SampledRWAProbeMemo | None = None,
     ) -> EvolutionResult:
         from zcu_tools.simulate.evolution import PathDiagnostics
 

@@ -1,6 +1,6 @@
 # FTF environment composition
 
-**Last updated:** 2026-11-23, acquisition routing, control and projective readout
+**Last updated:** 2026-11-23, sampled RWA probe lifetime
 
 **讀者：** framework-dev、agent。FTF 環境的組裝接縫、數值接線與 acquisition 契約。
 
@@ -393,6 +393,11 @@ Projection continuation densities exist only during span preparation. A later sh
 outcome's terminal state or sampled herald result. Immutable outcome weights,
 event populations and conditional sums follow the complete-preparation reuse
 rules below. See [ADR-0078](../../../../../docs/adr/0078-evolution-module-boundary.md#損耗漂移下的結構與-preparation-lifetime).
+On a preparation build or refresh, FTF lends the same [sampled RWA probe memo](../../../simulate/evolution/README.md#workplan-and-cache-ownership)
+to every evolve, including any dimension pilot and projective continuations.
+Each evolve still records its own routing usage and capture. FTF closes the
+memo when preparation returns, raises, or is cancelled. Neither the complete
+preparation nor the acquire session retains it.
 A source-owned 4 MiB LRU retains owned, read-only probabilities, conditional sums,
 content mappings, path diagnostics and deferred raw inputs across acquires.
 The acquire session owns the [ADC raw plan memo](../../../simulate/adc/README.md#integrated-raw-shots).

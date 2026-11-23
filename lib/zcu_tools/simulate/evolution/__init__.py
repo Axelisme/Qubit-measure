@@ -23,6 +23,7 @@ from ._capture import (
     read_capture_metadata,
 )
 from ._inspection import DispatchCandidate, DispatchInspection, DispatchRow, RowKey
+from ._probe_memo import SampledRWAProbeMemo
 from .capture_writer import capture_directory, write_capture
 from .controls import ControlPulse, ControlSequence, Envelope, PhaseEvent, quantize_ns
 from .engine import (
