@@ -26,7 +26,7 @@ def make_form(ctx: FormContext) -> Form[AccPhaseCfg]:
                 Template("readout", bindings={"resonator": "$resonator"}),
             ),
             "length": Range(0.0, 2.0, expts=101),
-            "phase": Range(0.0, 360.0, expts=21),
+            "phase": Range(0.0, 360.0, expts=31),
             "readout_t": 2.0,
             "relax_delay": t1_initial_time(ctx.parameters, multiplier=5),
             "reps": 1000,

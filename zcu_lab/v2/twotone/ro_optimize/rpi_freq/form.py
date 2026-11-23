@@ -14,7 +14,7 @@ def make_form(ctx: FormContext) -> Form[RPiFreqCfg]:
     """Use the captured readout and x180 slots, or fresh templates when absent.
 
     The pi pulse is an operator-calibrated input: this Form does not check it.
-    The frequency sweep starts at 11 points around $resonator.freq with half
+    The frequency sweep starts at 31 points around $resonator.freq with half
     width $resonator.kappa. Reps defaults to 250 cycles of 64 R-pi pairs;
     rounds defaults to 20.
     """
@@ -41,6 +41,6 @@ def make_form(ctx: FormContext) -> Form[RPiFreqCfg]:
                 "$qubit.module.x180",
                 Template("pi_pulse", bindings={"qubit": "$qubit"}),
             ),
-            "freq": Range.around("$resonator.freq", "$resonator.kappa", expts=11),
+            "freq": Range.around("$resonator.freq", "$resonator.kappa", expts=31),
         },
     )

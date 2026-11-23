@@ -34,6 +34,6 @@ def make_form(ctx: FormContext) -> Form[RPiPowerCfg]:
                 "$qubit.module.x180",
                 Template("pi_pulse", bindings={"qubit": "$qubit"}),
             ),
-            "gain": Range(0.02, 0.2, expts=10),
+            "gain": Range(0.02, 0.2, expts=31),
         },
     )
