@@ -14,17 +14,6 @@ import matplotlib
 
 matplotlib.use("Agg")
 
-from qtpy.QtWidgets import QApplication
-
-
-@pytest.fixture(scope="session")
-def qapp():
-    """A single offscreen QApplication for the test session."""
-    app = QApplication.instance()
-    if app is None:
-        app = QApplication([])
-    return app
-
 
 @pytest.fixture(autouse=True, name="_drain_qt_events")
 def fixture_drain_qt_events(qapp):

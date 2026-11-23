@@ -196,3 +196,30 @@ def test_leaked_window(leaked_window):
             if window.objectName().startswith("guard.synthetic."):
                 window.close()
                 window.deleteLater()
+
+
+def test_gui_qapp_rejects_non_qapplication_instance(
+    pytester: pytest.Pytester, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """GUI qapp fast-fails instead of letting Qt abort on a bare QCoreApplication."""
+
+    class BareCoreApp:
+        pass
+
+    repo = Path(__file__).resolve().parents[1]
+    gui = pytester.path / "gui"
+    gui.mkdir()
+    shutil.copyfile(repo / "tests/gui/conftest.py", gui / "conftest.py")
+    pytester.makeini("[pytest]\naddopts = --import-mode=importlib\n")
+    monkeypatch.delenv("PYTEST_ADDOPTS", raising=False)
+    monkeypatch.setattr(QApplication, "instance", staticmethod(BareCoreApp))
+    (gui / "test_qapp_guard.py").write_text(
+        """
+def test_needs_qapp(qapp):
+    assert qapp is not None
+""",
+        encoding="utf-8",
+    )
+    result = pytester.runpytest_inprocess("-q")
+    result.assert_outcomes(errors=1)
+    assert "GUI tests require a QApplication, got BareCoreApp" in result.stdout.str()
