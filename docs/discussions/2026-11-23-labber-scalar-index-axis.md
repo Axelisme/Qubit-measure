@@ -1,7 +1,7 @@
 ---
 date: 2026-11-23
-status: active
-superseded_by: null
+status: superseded
+superseded_by: 2026-11-23-cz-optimize-labber-selection.md
 related:
   - 2026-10-14-artifact-persistence.md
 basis:
@@ -34,3 +34,7 @@ CZ 最佳化的 `duration` 是 scalar。Save All 寫出 `data.h5` 後，Labber w
 ## 依據
 
 沿用 [ADR-0063](../adr/0063-persistence-ownership.md#設定快照與-acquired-事實) 的 native 正本／Labber 衍生輸出分工，及 [ADR-0080](../adr/0080-datafile-generic-container.md#介面) 的 codec 邊界。索引軸只在 [Labber 匯出](../../lib/zcu_tools/datafile/README.md#labber) 加入，不寫進原容器。
+
+## 後記
+
+2026-11-23，使用者改採 [CZ 最佳化的 Labber 選集](2026-11-23-cz-optimize-labber-selection.md)。`duration` 留在 Native，Labber 只匯出 `params` 與 `peak`。Writer 恢復拒絕無軸變數，不加索引軸。

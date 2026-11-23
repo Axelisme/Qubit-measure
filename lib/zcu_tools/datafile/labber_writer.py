@@ -1,6 +1,5 @@
 """Labber export, separate from generic container serialization."""
 
-import logging
 from pathlib import Path
 from typing import Literal
 
@@ -12,8 +11,6 @@ from .container_nodes import validate_variable
 from .grouped import write_grouped_labber_data_file
 from .labber import write_labber_data_file
 from .models import GroupedLabberData, LabberData, LabberMetadata, LabberPayload
-
-logger = logging.getLogger(__name__)
 
 
 def write_labber(
@@ -27,19 +24,17 @@ def write_labber(
 
     NumPy-ordered axes convert to Labber's inner-first order. Variable keys become
     channel names and grouped identities; grouped names obey Labber's lowercase
-    snake-case identity contract. Each scalar is exported as one sample on a
-    unitless index axis at 0, with one warning naming the variable. The axis is
-    named point, with trailing underscores added to avoid channel names. This
-    does not change the source variable.
+    snake-case identity contract. A variable without a step axis raises
+    ValueError before file creation.
     Caller explicitly supplies comment/tags/project/user/creation_time through
     metadata; no JSON documents are interpreted. Use encode_labber_comment at
     the caller when a cfg comment envelope is wanted.
 
     common requires identical grids for multiple variables; one variable writes
-    a single log. independent writes each scalar or rank-1/2 variable to its own
-    root/Log_N log. Rank-three variables split on the NumPy first axis into
-    two-dimensional logs with identities <variable>_<zero-based index>. Their
-    log labels are "<destination stem> - <variable> <first axis name>=<coordinate>". Readers
+    a single log. independent writes each rank-1/2 variable to its own root/Log_N
+    log. Rank-three variables split on the NumPy first axis into two-dimensional
+    logs with identities <variable>_<zero-based index>. Their log labels are
+    "<destination stem> - <variable> <first axis name>=<coordinate>". Readers
     return the slices separately, without reassembling the original array.
     An empty first axis in rank three, slice identities colliding with input
     variable names, and ranks above three raise ValueError before file creation.
@@ -51,23 +46,11 @@ def write_labber(
         raise ValueError("grouped_layout must be common or independent")
     if not container.vars:
         raise ValueError("container vars must not be empty for Labber export")
-    index_axis_name = "point"
-    while index_axis_name in container.vars:
-        index_axis_name += "_"
     payloads: dict[str, LabberPayload] = {}
     for name, variable in container.vars.items():
         validate_variable(variable)
         if not variable.axes:
-            logger.warning(
-                "%s: added length-1 index axis %r for Labber export",
-                name,
-                index_axis_name,
-            )
-            payloads[name] = LabberPayload(
-                (name, variable.unit, variable.values.reshape(1)),
-                [(index_axis_name, "", np.array([0]))],
-            )
-            continue
+            raise ValueError(f"{name}: Labber requires at least one step axis")
         axes = []
         for axis in reversed(variable.axes):
             if np.iscomplexobj(axis.values) and np.any(np.imag(axis.values) != 0):

@@ -660,7 +660,9 @@ def test_prepare_rejects_non_text_comment(comment: str) -> None:
         prepare_run_data(single_record(), spec=SINGLE, comment=comment)
 
 
-def test_native_round_trip_preserves_scalar_without_axes(tmp_path: Path) -> None:
+def test_scalar_round_trips_in_native_but_cannot_export_to_labber(
+    tmp_path: Path,
+) -> None:
     @dataclass
     class ScalarResult:
         signal: np.ndarray
@@ -676,6 +678,10 @@ def test_native_round_trip_preserves_scalar_without_axes(tmp_path: Path) -> None
     loaded = load_run_with_metadata(path, spec=spec)
     assert loaded.result.signal.shape == ()
     np.testing.assert_allclose(loaded.result.signal, 1j)
+    with pytest.raises(
+        ValueError, match="data: Labber requires at least one step axis"
+    ):
+        save_labber(record, tmp_path / "scalar.hdf5", spec=spec)
 
 
 @pytest.mark.parametrize("started_at", [None, "2026-10-06T01:00:00Z"])
