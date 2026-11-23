@@ -8,7 +8,7 @@ from matplotlib.artist import Artist
 from numpy.typing import NDArray
 from pydantic import Field
 from pydantic.dataclasses import dataclass as pydantic_dataclass
-from zcu_tools.analysis.readout_metrics import readout_metrics
+from zcu_tools.analysis.readout_metrics import first_read_contrast, readout_metrics
 from zcu_tools.cfg_model import ConfigBase, FieldMeta
 from zcu_tools.experiment import (
     Experiment,
@@ -34,7 +34,7 @@ from zcu_tools.program.v2 import (
     shot_sums,
 )
 
-from zcu_lab.v2.support import live_line
+from zcu_lab.v2.support import live_errorbar
 
 
 @dataclass(frozen=True)
@@ -149,14 +149,6 @@ def restore_result(data: GroupedLoadData[PowerCfg]) -> PowerResult:
     )
 
 
-def _r1_contrast(sums: NDArray[np.float64]) -> NDArray[np.float64]:
-    """Return |mean IQ(π) − mean IQ(I)| for R1 on, middle I, across gains."""
-    counts = sums[:, :, 0, 0]
-    counts = np.where(counts == 0, np.nan, counts)
-    means = sums[:, :, 1:3, 0] / counts[..., None]
-    return np.linalg.norm(means[:, 6] - means[:, 2], axis=-1)
-
-
 class PowerExp(Experiment[PowerResult, PowerCfg]):
     """Measure eight preparation/R1/middle-pi branches at each readout gain."""
 
@@ -204,8 +196,9 @@ class PowerExp(Experiment[PowerResult, PowerCfg]):
         Identity plays the same qubit pulse at zero gain, preserving its native
         slot. All eight branches share reset, preparation, R1, wait, middle and
         R2 positions, including the same R1-to-R2 trigger interval.
-        Live shows the R1-on, middle-I preparation mean-IQ difference magnitude.
-        cfg is not mutated. acquire_kwargs is forwarded to summed acquisition.
+        Live shows the R1-on, middle-I preparation mean-IQ difference magnitude
+        with first-order shot SEM bars where available. cfg is not mutated.
+        acquire_kwargs is forwarded to summed acquisition.
         """
         # 1. Quantize readout gains for paired-read separation and QND characterization.
         gains = sweep2array(
@@ -215,7 +208,7 @@ class PowerExp(Experiment[PowerResult, PowerCfg]):
         fig, ax = context.plots.subplots(num="measurement")
         fig.suptitle("Paired-read gain sweep · Resonator · First-read contrast")
         ax.set(xlabel="Readout gain (a.u.)", ylabel="R1 mean IQ difference (a.u.)")
-        viewer = live_line(ax)
+        viewer = live_errorbar(ax)
         ax.lines[0].set_marker("o")
 
         @context.plots.on_plot_thread
@@ -225,12 +218,12 @@ class PowerExp(Experiment[PowerResult, PowerCfg]):
             sums is float64 with shape (gain, 8, 6, 6); zero counts display as NaN.
             Return the changed artists without modifying the input array.
             """
-            contrast = _r1_contrast(sums)
+            contrast = first_read_contrast(sums)
             count = int(np.nansum(sums[0, 2, 0, 0]))
             status = ax.set_title(
                 f"Accumulated shots per branch and gain: {count} count"
             )
-            return (*viewer.set(gains, contrast), status)
+            return (*viewer.set(gains, contrast.values, contrast.sem), status)
 
         fig.show()
         buffer = SignalBuffer((len(gains), 8, 6, 6), dtype=np.float64, on_update=update)
@@ -321,7 +314,11 @@ class PowerExp(Experiment[PowerResult, PowerCfg]):
         # 2. Compare the live first-read contrast with the manual selection.
         fig, ax = plots.subplots(num="contrast")
         fig.suptitle("Paired-read gain sweep · Resonator · First-read contrast")
-        ax.plot(result.gains, _r1_contrast(result.sums), "o-", color="C0")
+        contrast = first_read_contrast(result.sums)
+        ax.plot(result.gains, contrast.values, "o-", color="C0")
+        ax.errorbar(
+            result.gains, contrast.values, yerr=contrast.sem, fmt="none", ecolor="C0"
+        )
         ax.set(xlabel="Readout gain (a.u.)", ylabel="R1 mean IQ difference (a.u.)")
         if options.gain is not None:
             ax.axvline(options.gain, color="C3", ls="--")
