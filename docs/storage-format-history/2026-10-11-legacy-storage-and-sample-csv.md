@@ -92,6 +92,8 @@ Native `data.h5` 保存實驗的全部 Data Variables 與 cfg／metadata，Labbe
 
 ## 遷移
 
+以下保留原文。執行遷移前，請先讀[後記](#後記2026-11-23)與現行操作指南。
+
 整棵來源使用 `python -m migrations.migrate_storage`。依 [操作指南](../storage-migration.md) 指定 repo、舊 result／Database、新 entry result root、chip／qubit、entry 名稱、component kind 與 repo 外備份根，先加 `--dry-run`。Legacy CSV 另給 `--sample-value-column` 與 `--sample-source-unit`。Native 轉換需要的歷史 cfg、tag、variable／axis 名稱、單位、dtype 與 shape 由 `--run-evidence` 提供，不從檔名或目前裝置補造。
 
 只有 CSV 時，使用 [migrations.sample_csv](../../migrations/README.md#sample-csv--jsonl) 的 `convert_sample_csv`，或 `python -m migrations`，明填 entry 與 component。Legacy CSV 必須給 `dev_value_column`／`source_unit`，v2 CSV 不需這兩個 legacy 宣告。Converter 不改來源 bytes。同 synthetic run_id 且內容相同的列重跑時略過，不同則拒絕，不重複追加。
@@ -105,3 +107,7 @@ Native `data.h5` 保存實驗的全部 Data Variables 與 cfg／metadata，Labbe
 - [ADR-0063](../adr/0063-persistence-ownership.md) 區分 entry、實驗資料、record history 與 ledger 的保存權威，以及離線遷移邊界。
 - [ADR-0080](../adr/0080-datafile-generic-container.md) 定義現行 native Container 3 的表示法與 major 版本辨識。
 - [ADR-0072](../adr/0072-module-boundaries.md) 將離線遷移程式隔離於根 migrations，不接入 runtime。
+
+## 後記（2026-11-23）
+
+〈遷移〉原文把變數與軸的名稱、單位、dtype 與 shape 誤列為 `--run-evidence` 的內容。請依[操作指南〈先執行 dry-run〉](../storage-migration.md#先執行-dry-run)準備 run evidence，並查閱歷史資料 schema 的來源。
