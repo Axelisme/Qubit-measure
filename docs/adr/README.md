@@ -41,7 +41,7 @@ ADR 宣告 package 之間的依賴方向時，同時在 `.importlinter` 建立�
 
 - [0064 — GUI process startup 與 app composition](0064-process-startup.md)：Launcher、runtime、composition 與 startup／on_close 的資源和 session 交接。
 - [0067 — GUI 應用核心與前端邊界](0067-gui-application.md)：Shared session、應用核心、前端反應與各 GUI pane 的 owner。
-- [0076 — Device 活動快照與 run 後讀回](0076-device-activity-and-readback.md)：Driver 活動狀態、DeviceManager 快照與 run 後 cache 讀回。
+- [0076 — Device 活動快照與 run 後讀回](0076-device-activity-and-readback.md)：Driver 活動狀態、DeviceManager 快照、單名稱 registry 與 run 後 cache 讀回。局部規則見 [FakeDevice 的 address 身分](../../lib/zcu_tools/device/README.md#fakedevice-的-address-身分)與[裝置活動標記](../../lib/zcu_tools/gui/session/ui/README.md#裝置活動標記)。
 
 ## Cfg / Value Model
 
@@ -65,9 +65,9 @@ ADR 宣告 package 之間的依賴方向時，同時在 `.importlinter` 建立�
 
 原則：guide 寫給懂物理、沒看過實作的讀者，只介紹實驗與它的行為；板子限制與底層報錯的判讀放知識庫的 judge 條目，見 [ADR-0075](0075-agent-interface-layers.md#判讀依據放知識庫)。
 
-- [0068 — 遠端前端、傳輸與 agent 介面](0068-remote-transport.md)：共用傳輸、holder dispatch、RPC／MCP 與事件錯誤投影。
-- [0070 — GUI 與 agent 的控制身份](0070-control-identity.md)：Measure／fluxdep 單一 holder、固定連線身份、控制權交接與 Measure 診斷呈現。
-- [0075 — Agent 介面分層](0075-agent-interface-layers.md)：Agent 介面分層、共用 async host、顯式 Scope 與跨層 writeback。
+- [0068 — 遠端前端、傳輸與 agent 介面](0068-remote-transport.md)：共用傳輸、holder dispatch、RPC／MCP 與事件錯誤投影。局部等待策略見 [Fluxdep Auto Align／search](../../lib/zcu_tools/gui/app/fluxdep/README.md#auto-align-與-search-的等待)與 [Measure MCP `device_setup`](../../lib/zcu_tools/mcp/measure/README.md#device-setup-的等待)。
+- [0070 — GUI 與 agent 的控制身份](0070-control-identity.md)：Measure／fluxdep 單一 holder、固定連線身份、控制權交接與 GUI 寫入保護。Measure 的局部呈現見[錯誤通知](../../lib/zcu_tools/gui/app/measure/ui/README.md#錯誤通知)。
+- [0075 — Agent 介面分層](0075-agent-interface-layers.md)：Agent 介面分層、共用 async host、顯式 Scope 與跨層 writeback。局部規則見 [Fluxdep 的流程依賴](../../lib/zcu_tools/gui/app/fluxdep/README.md#fluxdep-的依賴模型不是跨-app-原則)。
 
 ## Persistence
 
@@ -99,7 +99,7 @@ ADR 宣告 package 之間的依賴方向時，同時在 `.importlinter` 建立�
 原則：模擬的零輪中斷由 Program 的 `EarlyStopMixin` 統一判定；simulation mixin 只回報中斷，見 [ADR-0083](0083-program-macros-and-timelines.md#compiled-snapshot-與-simulation-入口)。
 
 - [0062 — 實驗執行與 workflow 編排](0062-experiment-workflow.md)：Async workflow、operation、Ask、停止、live tunables 與作者保存責任。
-- [0069 — 實驗核心、前端包裝與具名圖形產物](0069-experiment-core-and-frontends.md)：實驗 core 黑箱、前端包裝、Run／AnalysisRecord 與具名圖形產物。
+- [0069 — 實驗核心、前端包裝與具名圖形產物](0069-experiment-core-and-frontends.md)：實驗 core 黑箱、前端包裝、Run／AnalysisRecord 與具名圖形產物。局部規則見 [`notebook/adapter.py`](../../lib/zcu_tools/notebook/adapter.py) 的「Notebook 互動前端」註解。
 - [0074 — 獨立的平鋪 Readout module](0074-flat-readout-module.md)：Readout 配置、classifier、逐 shot sums、選用校正 IQ 矩、herald reset 與逐 shot 遮罩、雙 qubit heralded 分類、單 qubit cov 自校準與 QICK projection。
 - [0083 — Program macro 與具名 timeline](0083-program-macros-and-timelines.md)：Program macro、具名 timeline、往後跳轉與 label 合併、查表掃描、compiled snapshot 與全面 Timeline 遷移。
 
@@ -131,8 +131,8 @@ ADR 宣告 package 之間的依賴方向時，同時在 `.importlinter` 建立�
 - [0085 — 實驗數值工具的 fitting owner](0085-numerical-fitting-owners.md)：六組純數值工具由 fitting 持有，lab 保留選資料、herald、維度換算、live 與畫圖。
 
 - [0071 — Coherence 頻率與時間單位](0071-coherence-units.md)：頻率、時間、loss parameters 與 lifetime 的單位和換算契約。
-- [0078 — Evolution 黑盒邊界與算法內聚](0078-evolution-module-boundary.md)：Evolution 的 dispatch／kernel 分工、公開黑箱、[數值 preparation 壽命與 FTF 探針例外](0078-evolution-module-boundary.md#損耗漂移下的結構與-preparation-lifetime)，以及 t6 只保留 direct 的決定。
-- [0084 — 模擬 request 的公共整數時基](0084-simulation-integer-time-base.md)：公共有理數時基、整數 request 與 compiled frontend。
+- [0078 — Evolution 黑盒邊界與算法內聚](0078-evolution-module-boundary.md)：Evolution 的 dispatch／kernel 分工、公開黑箱、[數值 preparation 壽命與 FTF 探針例外](0078-evolution-module-boundary.md#損耗漂移下的結構與-preparation-lifetime)。局部選路見 [t6 只保留 direct](../../lib/zcu_tools/simulate/evolution/README.md#t6-只保留-direct)。
+- [0084 — 模擬 request 的公共整數時基](0084-simulation-integer-time-base.md)：公共有理數時基、整數 request 與 compiled frontend。固定測試數值見 [Mock clock example](../../lib/zcu_tools/program/v2/simulation/README.md#mock-clock-example)。
 
 改模擬器時的流程與自查見 [模擬器維護規則](../../lib/zcu_tools/simulate/maintenance.md)。
 

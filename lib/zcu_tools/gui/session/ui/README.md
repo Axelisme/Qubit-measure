@@ -1,6 +1,6 @@
 # Shared session UI
 
-**Last updated:** 2026-11-17，global／point 文件選擇
+**Last updated:** 2026-11-23，裝置活動標記
 
 **讀者：** framework-dev、agent。查找共用 dialog 的 owner，以及 UI 命令交給 session 的接縫。
 
@@ -25,6 +25,14 @@ Global 讀 owner 已安裝的 global cache，選了 point 也不讀磁碟候選�
 乾淨頁面更新顯示，dirty draft 保留原值與原 revision。
 Modules New 固定 capture 與 Create 的 scope，不能從 point 取 alias 卻寫 entry。
 各 port 與組合 facet 的完整責任見 [session README](../README.md)。
+
+## 裝置活動標記
+
+GUI 在主 thread 定時讀取活動快照，初始約每 200 ms。Device dialog 擁有「運作中」標記的呈現與時序。初始做法在操作中或最後結束後約 1 秒保持標記，合併後更新。連續快速操作保持穩定標記，停手後熄滅。後續 UI/UX 打磨由 GUI 負責，不改變 device 的狀態來源。
+
+使用者 2026-11-18 過目此條：「我大概看了一遍，基本上是没问题」，並說明這類規則「并不算是裁决，而算是建议」；它是 agent 的選擇，引用時視為僅供參考的先例。
+
+標記只呈現活動，不參與操作授權。共用活動來源與 admission 邊界見 [ADR-0076](../../../../../docs/adr/0076-device-activity-and-readback.md#gui-觀察與標記)。
 
 ## Predictor 與生命週期
 
