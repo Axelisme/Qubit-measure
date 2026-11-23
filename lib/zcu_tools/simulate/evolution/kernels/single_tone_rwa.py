@@ -165,12 +165,15 @@ def single_tone_rwa_diagnostic(
     availability and the 0.08 kappa2 cap, calibrated with full-density margin
     on the fixed candidate acceptance set. This does not establish a maximum
     usable threshold or arbitrary-input accuracy. Raises ValueError for an
-    unknown port, nonfinite inputs, negative duration or invalid budget.
+    unknown port, explicit collapse operators, nonfinite inputs, negative
+    duration or invalid budget.
     Numerical construction failures propagate.
     No evolution, routing, history or preparation is changed;
     temporary model-only facts are released before return. This query does not
     diagnose shaped, multitone or moving-flux rows and does not select a family.
     """
+    if model.collapse_operators:
+        raise ValueError("single_tone_rwa does not support explicit collapse operators")
     tolerances(budget)
     if (
         not np.isfinite(frequency_ghz)

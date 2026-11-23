@@ -240,6 +240,22 @@ def test_shaped_multitone_sequence_matches_lab_frame(
     _assert_lab_parity(case.source, batch, "shaped_multitone_sequence", request)
 
 
+def test_interaction_density_rejects_explicit_collapse_at_active_level() -> None:
+    case = accuracy_case("linear_plateau")
+    jump = np.array([[0, 0.2j], [0, 0]], complex)
+    batch = replace(case.batch, flux=replace(case.batch.flux, level=np.full((2, 1), 2)))
+    with closing(case.source):
+        dc = case.source.model((0,))
+        active = replace(dc, level=(2,), collapse_operators=(jump,))
+        models = {dc.level: dc, active.level: active}
+        source = ModelSource(case.source.initial_density, models.__getitem__)
+    with (
+        closing(source),
+        pytest.raises(ValueError, match="explicit collapse operators"),
+    ):
+        solver.interaction_density(source, batch, SolverTolerances(2e-12, 2e-14))
+
+
 def test_rejects_schedule_level_changes_within_shot() -> None:
     case = accuracy_case("weak_plateau")
     flux = FluxSchedule(

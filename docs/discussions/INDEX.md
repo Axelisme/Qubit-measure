@@ -103,6 +103,8 @@
 - 2026-11-16 [Family 量表改為整批 cache-only](2026-11-16-family-pareto-cache-only.md)：介面退休。Consumer 整批載入後才量測，check 不求解；公開接縫提供穩定的每筆 record 身份，存放已遷移到共用快取與小清單。
 
 - 2026-11-16 [模擬器場景凍結與參考解數值交接](2026-11-16-frozen-simulator-inputs.md)：資料交接。場景 producer 自持控制與模型，通用 codec 保留既有 key，獨立 solver 留在 tests 側。
+- 2026-11-23 [Evolution 保留完整 collapse operators](2026-11-23-evolution-full-collapse-operators.md)：數值能力擴充。固定 H 的 CPU `dop853` 保留同一 jump 的相干轉移，不增加 FTF 專用介面。
+- 2026-11-23 [凍結數值升到 physical v2](2026-11-23-frozen-physical-v2.md)：資料格式版本。保留無 jump 身份，另設場景與 capture 根。不支援完整 jump 的 solver 不得在 cache miss 時發布參考解。
 
 - 2026-11-14 [single_tone_rwa 以 endpoint kick 保留，guard 改用 κ2](2026-11-14-single-tone-rwa-kick.md)：保留或刪除。隨機相位序列從最大 1.07e-2 降到 ≤2e-3；價格計入 kick 延後，L、I 的預設選路暫時比 floquet_period 慢超過 10%。
 

@@ -98,11 +98,13 @@ def multitone_rwa_diagnostic(
     Returns the guard's computed final-mask comparisons, including failed
     metrics on rejected rows, and RWAUncomputed for skipped work. Same-port,
     low/zero carrier and positive budget below 1e-3 return accepted=False.
-    Raises ValueError for unknown ports, wrong tuple lengths, nonfinite inputs,
-    negative duration or invalid budget. Numerical construction failures
+    Raises ValueError for explicit collapse operators, unknown ports, wrong
+    tuple lengths, nonfinite inputs, negative duration or invalid budget. Numerical construction failures
     propagate. The query does not evolve density, select a family, mutate inputs
     or history, or retain facts across calls. Temporary facts close before return.
     """
+    if model.collapse_operators:
+        raise ValueError("multitone_rwa does not support explicit collapse operators")
     tolerances(budget)
     if len(ports) != 2 or len(frequencies_ghz) != 2 or len(amplitudes) != 2:
         raise ValueError("constant multitone RWA requires two aligned tones")

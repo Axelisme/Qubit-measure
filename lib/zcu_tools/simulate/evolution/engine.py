@@ -43,7 +43,7 @@ from .telemetry import (
 )
 
 # Numerical algorithm revision used by capture, reporting, and simulator caches.
-SEGMENT_NUMERIC_VERSION = "segment-engine-v14"
+SEGMENT_NUMERIC_VERSION = "segment-engine-v15"
 
 
 @dataclass(frozen=True)
@@ -610,7 +610,8 @@ class Engine:
         with cl_khr_fp64 that passes the build and endpoint probe at construction.
         Unavailable dependencies or a failed probe raise RuntimeError. Forced
         mode bypasses batch pricing and automatic CPU fallback.
-        A selected dop853 segment can use the GPU when it is an independent
+        Explicit collapse operators always use CPU DOP853. A secular-only
+        dop853 segment can use the GPU when it is an independent
         interaction-frame row at DC without a flux waveform or segment shift,
         its dimension is at most 32, and two sampled tones both cover the whole
         100–10000 ns segment with at most 960 distinct knots across their grids.
@@ -623,8 +624,8 @@ class Engine:
         timeline batching from the complete acquire inventory and keeps six
         prepare chunks per worker. Scheduling does not change numerical admission.
 
-    The zero-level model identity names the entire ModelSource, including all
-    physical parameters and absolute DC flux. Calls sharing a source serialize,
+    The zero-level model identity names the whole source, including absolute DC
+    flux. Every used model's explicit collapse operators also enter by content. Calls sharing a source serialize,
     including across Engines. Caller-owned preparations must invalidate on any
     input, source, budget or Engine change before asking reuse() to reprice
     retained routing facts. No density, propagator, ADC or noisy output is kept
@@ -818,11 +819,11 @@ class Engine:
                     np.empty((0, size, size), dtype=np.complex128),
                     PathDiagnostics(),
                 )
-            content_key = input_key(source, batches, budget)
             frontend_started = time.thread_time() if telemetry else 0.0
             geometry = plan(source, batches, cancel=cancel)
             if cancel.is_set():
                 raise Cancelled()
+            content_key = input_key(source, batches, budget, geometry.table)
             inversions = geometry.stark_order_inversions
             capture_run = (
                 None if captured is None else CaptureRun(geometry, batches, captured)
@@ -948,7 +949,7 @@ class Engine:
             with closing(
                 WorkPlan(
                     complete_table=geometry.table,
-                    content_key=input_key(source, batches, budget),
+                    content_key=input_key(source, batches, budget, geometry.table),
                     history_mode="project",
                 )
             ) as work_plan:
