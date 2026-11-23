@@ -4,14 +4,15 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Annotated, ClassVar
+from typing import Annotated, ClassVar, Literal, Self
 
 import numpy as np
 from matplotlib.colors import Normalize
 from matplotlib.figure import Figure
 from matplotlib.ticker import MaxNLocator, PercentFormatter
 from numpy.typing import NDArray
-from zcu_tools.cfg_model import FieldMeta
+from pydantic import Field, model_validator
+from zcu_tools.cfg_model import ConfigBase, DeviceName, FieldMeta
 from zcu_tools.experiment import (
     Experiment,
     GroupedAxesSpec,
@@ -25,18 +26,26 @@ from zcu_tools.experiment.records import RunRecord
 from zcu_tools.experiment.v2.runtime import RunOptions, Schedule, SignalBuffer
 from zcu_tools.experiment.v2.utils.round_zcu import sweep2array
 from zcu_tools.plotting.plots import Plots
-from zcu_tools.program.v2 import Classify, Reset, shot_sums
+from zcu_tools.program.v2 import (
+    Classify,
+    Pulse,
+    Reset,
+    SweepCfg,
+    TimelineBuilder,
+    shot_sums,
+)
 from zcu_tools.program.v2.modules import MuxReadout
 
 from zcu_lab.v2.support import live_errorbar
 from zcu_lab.v2.support.device import set_flux
 
-from .._sums import joint_probabilities
-from ._common import SpectroscopyScanCfg, build_spectroscopy_program, excitation_sem
+from .._drive import QubitDriveCfg
+from .._sums import joint_probabilities, validate_qubit_tones
+from ._common import excitation_sem
 from .core import summarize_spectra
 
 
-class HeraldedSpectroscopyCfg(SpectroscopyScanCfg[Reset.Cfg]):
+class HeraldedSpectroscopyCfg(ConfigBase):
     """Ordinary reset → nominal Xπ preparation → mux herald → probe → contrast → mux.
 
     Xπ preparation precedes the herald. Both reads use readout with the same
@@ -52,6 +61,20 @@ class HeraldedSpectroscopyCfg(SpectroscopyScanCfg[Reset.Cfg]):
             description="Select an ordinary reset before nominal preparation, or leave blank.",
         ),
     ] = None
+    x180_qubit1: Annotated[
+        Pulse.Cfg,
+        FieldMeta(
+            label="Qubit1 Xπ",
+            description="Enter the Rabi-calibrated Qubit1 flip for nominal preparation and readout contrast.",
+        ),
+    ]
+    x180_qubit2: Annotated[
+        Pulse.Cfg,
+        FieldMeta(
+            label="Qubit2 Xπ",
+            description="Enter the Rabi-calibrated Qubit2 flip for nominal preparation and readout contrast.",
+        ),
+    ]
     readout: Annotated[
         MuxReadout.Cfg,
         FieldMeta(
@@ -59,6 +82,107 @@ class HeraldedSpectroscopyCfg(SpectroscopyScanCfg[Reset.Cfg]):
             description="Set the shared herald and terminal readout with GE Post radii and the wait after the herald pulse.",
         ),
     ]
+    drive: Annotated[
+        QubitDriveCfg,
+        FieldMeta(
+            label="Two-qubit spectroscopy probe",
+            description="Enter the two weak pulses applied together on the respective qubit drive lines at the shared RF sweep frequency.",
+        ),
+    ]
+    qubit1_tone: Annotated[
+        int,
+        FieldMeta(
+            label="Qubit1 tone index",
+            description="Zero-based Qubit1 position in the full mux readout.",
+        ),
+    ]
+    qubit2_tone: Annotated[
+        int,
+        FieldMeta(
+            label="Qubit2 tone index",
+            description="Zero-based Qubit2 position in the full mux readout.",
+        ),
+    ]
+    contrast: Annotated[
+        bool,
+        FieldMeta(
+            label="Double Xπ contrast",
+            description="Enable an Xπ on each qubit after the probe, immediately before readout.",
+        ),
+    ] = True
+    dc_device: Annotated[
+        DeviceName | None,
+        FieldMeta(
+            label="Coupler DC source",
+            description="Select the connected coupler-bias source by name; leave blank to keep all sources unchanged.",
+        ),
+    ] = None
+    dc_unit: Annotated[
+        Literal["A", "V", "native"],
+        FieldMeta(
+            label="DC source unit",
+            description="Select amperes, volts or the selected source's native unit for the bias sweep.",
+        ),
+    ] = "native"
+    dc: Annotated[
+        SweepCfg,
+        FieldMeta(
+            label="Coupler DC bias sweep",
+            description="Enter the sweep in DC source unit (A, V or native); leave the source blank to ignore this sweep.",
+        ),
+    ] = Field(default_factory=lambda: SweepCfg(start=0, stop=0, step=0, expts=1))
+    frequency: Annotated[
+        SweepCfg,
+        FieldMeta(
+            unit="MHz",
+            label="Common probe RF frequency",
+            description="Enter the RF sweep (MHz); each point replaces the frequency of both probe pulses.",
+        ),
+    ]
+    reps: Annotated[
+        int,
+        FieldMeta(
+            label="Reps",
+            unit="count",
+            description="Enter attempted shots per preparation and frequency per round.",
+        ),
+    ] = Field(gt=0)
+    rounds: Annotated[
+        int,
+        FieldMeta(
+            label="Rounds",
+            unit="count",
+            description="Enter repeated frequency scans at each DC bias point.",
+        ),
+    ] = Field(default=1, gt=0)
+    initial_delay: Annotated[
+        float,
+        FieldMeta(
+            label="Initial wait",
+            unit="µs",
+            description="Enter the wait before the first shot of each round.",
+        ),
+    ] = 1.0
+    relax_delay: Annotated[
+        float,
+        FieldMeta(
+            label="Relaxation wait",
+            unit="µs",
+            decimals=3,
+            description="Enter the wait after each shot before the next preparation.",
+        ),
+    ]
+
+    @model_validator(mode="after")
+    def validate_pair(self) -> Self:
+        """Reject missing calibrated tones or probes on the wrong Xπ generators."""
+        validate_qubit_tones(self.readout, self.qubit1_tone, self.qubit2_tone)
+        if (
+            self.drive.qubit1.ch != self.x180_qubit1.ch
+            or self.drive.qubit2.ch != self.x180_qubit2.ch
+        ):
+            raise ValueError("Each probe must use its qubit's calibrated Xπ generator")
+        return self
 
 
 @dataclass(frozen=True)
@@ -135,7 +259,7 @@ class HeraldedSpectroscopyExp(
         ),
         result_type=HeraldedSpectroscopyResult,
         cfg_type=HeraldedSpectroscopyCfg,
-        cfg_schema_version="1.0",
+        cfg_schema_version="3.0",
         tag="two_qubit/conditional_spectroscopy_heralded",
         result_builder=restore_result,
     )
@@ -149,6 +273,7 @@ class HeraldedSpectroscopyExp(
         counts; unmeasured points remain NaN after Stop. Acquisition failures
         propagate. Live spectra already pool by herald class.
         """
+        # 1. Set up the sweep, live plots and count buffer.
         dc, frequencies = _scan_axes(config)
         update = _live_spectra(context.plots, config, dc, frequencies)
         buffer = SignalBuffer(
@@ -157,6 +282,7 @@ class HeraldedSpectroscopyExp(
             on_update=update,
         )
         with Schedule(buffer, scope=context.scope) as sched:
+            # 2. Set the host bias and declare the preparation × RF loops.
             for dc_value, step in sched.scan("dc", dc.tolist()):
                 if config.dc_device is not None:
                     set_flux(
@@ -165,9 +291,59 @@ class HeraldedSpectroscopyExp(
                         unit=config.dc_unit,
                         stop=context.scope.stop,
                     )
-                prog = build_spectroscopy_program(
-                    config, soccfg=context.soccfg, herald=True
+                builder = TimelineBuilder(
+                    context.soccfg,
+                    reps=config.reps,
+                    initial_delay=config.initial_delay,
+                    relax_delay=config.relax_delay,
                 )
+                builder.add_loop("prepared_qubit1", 2)  # 0 = g, 1 = e (outer)
+                builder.add_loop("prepared_qubit2", 2)  # 0 = g, 1 = e (inner)
+                frequency = builder.add_sweep("frequency", config.frequency)
+                x180_qubit1 = Pulse("x180_qubit1", config.x180_qubit1)
+                x180_qubit2 = Pulse("x180_qubit2", config.x180_qubit2)
+                readout = MuxReadout("readout", config.readout)
+                # 3. Reset and apply the selected nominal Xπ preparation.
+                if config.reset is not None:
+                    builder.emit(Reset("reset", config.reset, terminal=readout))
+                builder.fork("default", into=["qubit1", "qubit2"])
+                with (
+                    builder.branch(
+                        by="prepared_qubit1", align_timeline=True, timeline="qubit1"
+                    ) as cases,
+                    cases.case(1),
+                ):
+                    builder.emit(x180_qubit1)
+                with (
+                    builder.branch(
+                        by="prepared_qubit2", align_timeline=True, timeline="qubit2"
+                    ) as cases,
+                    cases.case(1),
+                ):
+                    builder.emit(x180_qubit2)
+                builder.join("qubit1", "qubit2", into="default")
+
+                # 4. Herald and wait the readout post-delay before the simultaneous probe.
+                builder.emit(readout, tag="herald")
+                builder.fork("default", into=["probe_qubit1_time", "probe_qubit2_time"])
+                builder.emit(
+                    Pulse("drive.qubit1", config.drive.qubit1, freq=frequency),
+                    timeline="probe_qubit1_time",
+                )
+                builder.emit(
+                    Pulse("drive.qubit2", config.drive.qubit2, freq=frequency),
+                    timeline="probe_qubit2_time",
+                )
+                builder.join("probe_qubit1_time", "probe_qubit2_time", into="default")
+
+                # 5. Apply optional sequential contrast and read the terminal state.
+                if config.contrast:
+                    builder.emit(x180_qubit1)
+                    builder.emit(x180_qubit2)
+                builder.emit(readout, tag="terminal")
+                prog = builder.build()
+
+                # 6. Count each measured herald and terminal class combination.
                 reducer = shot_sums(
                     prog,
                     [
@@ -199,15 +375,20 @@ class HeraldedSpectroscopyExp(
         No analysis options, fit or writeback. Missing cfg, inconsistent scan axes
         or invalid/partially missing count rows raise ValueError.
         """
+        # 1. Check the saved scan and count layout before interpreting it.
         del options
         cfg, data = source.cfg, source.result
         if cfg is None:
             raise ValueError("Heralded spectroscopy analysis requires saved cfg")
         dc, frequencies = _scan_axes(cfg)
         _validate_counts(data, dc, frequencies)
+
+        # 2. Pool preparations by measured herald before computing terminal P(e).
         pooled = _pool_by_herald(data.sums)
         spectra = summarize_spectra(pooled)
         sem = excitation_sem(pooled)
+
+        # 3. Plot spectra, retained shots and preparation diagnostics per bias.
         for index, bias in enumerate(dc):
             title = _title(cfg, float(bias))
             _plot_spectra(
@@ -222,6 +403,8 @@ class HeraldedSpectroscopyExp(
                 plots, index, title, data.frequencies, spectra.acquired_shots[index]
             )
             _plot_herald_matrix(plots, index, title, data.sums[index])
+
+        # 4. Show continuous RF × DC maps for a multi-bias scan.
         if cfg.dc_device is not None and len(dc) > 1:
             _plot_bias_maps(plots, cfg, data, spectra.excitation)
 
@@ -235,6 +418,7 @@ _RF_LABEL = "Common probe RF frequency (MHz)"
 def _scan_axes(
     cfg: HeraldedSpectroscopyCfg,
 ) -> tuple[NDArray[np.float64], NDArray[np.float64]]:
+    """Return the configured DC coordinates (or one inactive point) and RF MHz."""
     dc = np.array([0.0]) if cfg.dc_device is None else sweep2array(cfg.dc)
     return dc, sweep2array(cfg.frequency)
 
@@ -244,6 +428,7 @@ def _validate_counts(
     dc: NDArray[np.float64],
     frequencies: NDArray[np.float64],
 ) -> None:
+    """Reject mismatched scan axes, invalid counts or partially missing count rows."""
     if (
         not np.array_equal(data.dc_values, dc)
         or data.frequencies.shape != frequencies.shape
@@ -264,8 +449,10 @@ def _validate_counts(
 
 
 def _pool_by_herald(sums: NDArray[np.float64]) -> NDArray[np.float64]:
-    # (DC, preparation1, preparation2, RF, h1, h2, t1, t2) → (DC, h1, h2, RF, t1, t2).
-    # A missing preparation contributes no shots; an entirely unmeasured RF bin stays NaN.
+    """Sum preparation counts per g/e herald; leave entirely missing RF bins NaN.
+
+    Move RF after the two herald axes, so each branch ends in (RF, t1, t2).
+    """
     counts = sums[..., :2, :2, :, :]
     measured = np.isfinite(sums[..., 0, 0, 0, 0]).any(axis=(1, 2))
     pooled = np.nansum(counts, axis=(1, 2))
@@ -273,15 +460,21 @@ def _pool_by_herald(sums: NDArray[np.float64]) -> NDArray[np.float64]:
     return np.moveaxis(pooled, 1, 3)
 
 
+def _dc_display_unit(cfg: HeraldedSpectroscopyCfg) -> str:
+    """Spell out the device-native unit in figure labels."""
+    return "native unit" if cfg.dc_unit == "native" else cfg.dc_unit
+
+
 def _title(cfg: HeraldedSpectroscopyCfg, bias: float) -> str:
+    """Name the experiment and active bias without showing an inactive coordinate."""
     title = "Heralded conditional spectroscopy"
     if cfg.dc_device is not None:
-        unit = "native unit" if cfg.dc_unit == "native" else cfg.dc_unit
-        title += f" · {cfg.dc_device} bias {bias:.7g} {unit}"
+        title += f" · {cfg.dc_device} bias {bias:.7g} {_dc_display_unit(cfg)}"
     return title
 
 
 def _contrast(cfg: HeraldedSpectroscopyCfg) -> str:
+    """Name the contrast pulse choice in figure titles."""
     return "Double Xπ contrast" if cfg.contrast else "No contrast pulses"
 
 
@@ -293,6 +486,7 @@ def _branch_figure(
     ylabel: str,
     sharey: bool = False,
 ) -> Figure:
+    """Create a four-herald figure, keeping the planned RF range when supplied."""
     fig, _ = plots.subplots(
         num=name, nrows=2, ncols=2, sharey=sharey, figsize=(12, 9), layout="constrained"
     )
@@ -313,6 +507,7 @@ def _live_spectra(
     dc: NDArray[np.float64],
     frequencies: NDArray[np.float64],
 ) -> Callable[[NDArray[np.float64]], None]:
+    """Show live spectra and return the plot-thread updater for counts and progress."""
     views = []
     for index, bias in enumerate(dc):
         fig = _branch_figure(
@@ -321,11 +516,10 @@ def _live_spectra(
         panels = [live_errorbar(ax, num_lines=2) for ax in fig.axes]
         title = f"{_title(cfg, float(bias))} · {_contrast(cfg)}"
         fig.suptitle(
-            f"{title}\n0/{4 * len(frequencies)} preparation-frequency points sampled"
+            f"{title}\n0 acquired shots · 0/{4 * len(frequencies)} preparation-frequency points sampled"
         )
-        fig.legend(
-            fig.axes[0].get_lines(), _QUBITS, loc="outside lower center", ncols=2
-        )
+        for ax in fig.axes:
+            ax.legend(ax.get_lines(), _QUBITS, loc="upper left", bbox_to_anchor=(1, 1))
         views.append((fig, panels, title))
         fig.show()
 
@@ -341,8 +535,10 @@ def _live_spectra(
                     sem[index, q1, q2].T,
                 )
             measured = np.count_nonzero(np.isfinite(sums[index, ..., 0, 0, 0, 0]))
+            shots = int(np.nansum(sums[index]))
             fig.suptitle(
-                f"{title}\n{measured}/{4 * len(frequencies)} preparation-frequency points sampled"
+                f"{title}\n{shots:,} acquired shots · "
+                f"{measured}/{4 * len(frequencies)} preparation-frequency points sampled"
             )
         return tuple(fig for fig, _, _ in views)
 
@@ -357,6 +553,7 @@ def _plot_spectra(
     excitation: NDArray[np.float64],
     sem: NDArray[np.float64],
 ) -> None:
+    """Draw terminal P(e) and shot SEM for both qubits in every herald panel."""
     fig = _branch_figure(plots, f"spectra_{index}", frequencies, ylabel="Terminal P(e)")
     fig.suptitle(title)
     for ax, (q1, q2) in zip(fig.axes, np.ndindex(2, 2), strict=True):
@@ -364,9 +561,7 @@ def _plot_spectra(
             excitation[q1, q2].T, sem[q1, q2].T, _QUBITS, strict=True
         ):
             ax.errorbar(frequencies, values, yerr=errors, fmt=".-", label=label)
-    fig.legend(
-        *fig.axes[0].get_legend_handles_labels(), loc="outside lower center", ncols=2
-    )
+        ax.legend(loc="upper left", bbox_to_anchor=(1, 1))
 
 
 def _plot_coverage(
@@ -376,6 +571,7 @@ def _plot_coverage(
     frequencies: NDArray[np.float64],
     shots: NDArray[np.float64],
 ) -> None:
+    """Draw each herald's retained shot counts without filling unmeasured RF bins."""
     fig = _branch_figure(
         plots,
         f"coverage_{index}",
@@ -392,37 +588,41 @@ def _plot_coverage(
 def _plot_herald_matrix(
     plots: Plots, index: int, title: str, sums: NDArray[np.float64]
 ) -> None:
-    # Pool shot counts over terminal class and RF before normalizing each preparation row.
+    """Plot nine pooled herald fractions per preparation, marking undefined rows."""
     rates = joint_probabilities(np.nansum(sums, axis=(2, 5, 6))).reshape(4, 9)
-    fig, ax = plots.subplots(
-        num=f"herald_{index}", figsize=(12, 9), layout="constrained"
+    fig, _ = plots.subplots(
+        num=f"herald_{index}",
+        nrows=4,
+        sharex=True,
+        figsize=(12, 9),
+        layout="constrained",
     )
     fig.suptitle(f"{title} · Herald class fractions")
-    mesh = ax.imshow(
-        np.ma.masked_invalid(rates), vmin=0, vmax=1, cmap="Blues", aspect="auto"
-    )
-    ax.set_xticks(range(9), [f"{q1}, {q2}" for q1 in _STATES for q2 in _STATES])
-    ax.set_yticks(range(4), _HERALDS)
-    ax.set(
-        xlabel="Herald class (Qubit1, Qubit2)",
-        ylabel="Nominal preparation (Qubit1, Qubit2)",
-    )
-    ax.grid(False)
-    ax.set_facecolor("0.9")
-    for row, col in np.ndindex(rates.shape):
-        probability = rates[row, col]
-        if np.isfinite(probability):
+    fig.supylabel("Fraction of acquired shots by nominal preparation (Qubit1, Qubit2)")
+    positions = range(rates.shape[1])
+    for ax, preparation, row in zip(fig.axes, _HERALDS, rates, strict=True):
+        ax.set(ylabel=preparation, ylim=(0, 1.16), xlim=(-0.5, 8.5))
+        ax.set_yticks((0, 0.5, 1))
+        ax.yaxis.set_major_formatter(PercentFormatter(xmax=1))
+        if np.all(np.isnan(row)):
             ax.text(
-                col,
-                row,
-                f"{probability:.1%}",
-                ha="center",
-                va="center",
-                color="white" if probability > 0.5 else "black",
+                0.5, 0.5, "No shots", ha="center", va="center", transform=ax.transAxes
             )
-    fig.colorbar(
-        mesh, ax=ax, label="Fraction of acquired shots", format=PercentFormatter(xmax=1)
+            continue
+        ax.bar(positions, row)
+        for position, fraction in zip(positions, row, strict=True):
+            ax.annotate(
+                "0%" if fraction == 0 else f"{fraction:.1%}",
+                (position, fraction),
+                xytext=(0, 2),
+                textcoords="offset points",
+                ha="center",
+                va="bottom",
+            )
+    fig.axes[-1].set_xticks(
+        positions, [f"{q1}, {q2}" for q1 in _STATES for q2 in _STATES]
     )
+    fig.axes[-1].set_xlabel("Herald class (Qubit1, Qubit2)")
 
 
 def _plot_bias_maps(
@@ -431,12 +631,12 @@ def _plot_bias_maps(
     data: HeraldedSpectroscopyResult,
     excitation: NDArray[np.float64],
 ) -> None:
-    unit = "native unit" if cfg.dc_unit == "native" else cfg.dc_unit
+    """Draw one RF × DC heatmap figure per qubit, sharing the scale across its branches."""
     for target, role in enumerate(_QUBITS):
         fig = _branch_figure(
             plots,
             f"map_{role.lower()}",
-            ylabel=f"Coupler DC bias · {cfg.dc_device} ({unit})",
+            ylabel=f"Coupler DC bias · {cfg.dc_device} ({_dc_display_unit(cfg)})",
         )
         fig.suptitle(
             f"Heralded conditional spectroscopy · {role} terminal P(e) map\n{_contrast(cfg)}"

@@ -3,14 +3,15 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Annotated, ClassVar
+from typing import Annotated, ClassVar, Literal, Self
 
 import numpy as np
 from matplotlib.colors import Normalize
 from matplotlib.figure import Figure
 from matplotlib.ticker import MaxNLocator
 from numpy.typing import NDArray
-from zcu_tools.cfg_model import FieldMeta
+from pydantic import Field, model_validator
+from zcu_tools.cfg_model import ConfigBase, DeviceName, FieldMeta
 from zcu_tools.experiment import (
     Experiment,
     GroupedAxesSpec,
@@ -26,15 +27,21 @@ from zcu_tools.experiment.v2.utils.round_zcu import sweep2array
 from zcu_tools.plotting.plots import Plots
 from zcu_tools.program.v2 import (
     Classify,
+    Pulse,
+    Reset,
+    SweepCfg,
+    TimelineBuilder,
     shot_sums,
 )
+from zcu_tools.program.v2.modules import MuxReadout
 
 from zcu_lab.v2.support import live_errorbar
 from zcu_lab.v2.support.device import set_flux
 
+from .._drive import QubitDriveCfg
 from .._readout import MuxResetCfg
-from .._sums import qubit_marginal_probabilities
-from ._common import SpectroscopyScanCfg, build_spectroscopy_program, excitation_sem
+from .._sums import qubit_marginal_probabilities, validate_qubit_tones
+from ._common import excitation_sem
 
 
 @dataclass(frozen=True)
@@ -68,7 +75,7 @@ class SpectroscopyAnalysis:
     complete: NDArray[np.bool_]
 
 
-class SpectroscopyCfg(SpectroscopyScanCfg[MuxResetCfg]):
+class SpectroscopyCfg(ConfigBase):
     """Optional reset → B00/01/10/11 → dual probe → optional double Xπ → mux.
 
     Frequency is a common MHz hardware sweep; pulses carry explicit waveforms,
@@ -86,6 +93,130 @@ class SpectroscopyCfg(SpectroscopyScanCfg[MuxResetCfg]):
             description="Select a preparation reset or herald filter before each shot; leave blank to omit it.",
         ),
     ] = None
+    x180_qubit1: Annotated[
+        Pulse.Cfg,
+        FieldMeta(
+            label="Qubit1 Xπ",
+            description="Enter the Rabi-calibrated Qubit1 flip for nominal preparation and readout contrast.",
+        ),
+    ]
+    x180_qubit2: Annotated[
+        Pulse.Cfg,
+        FieldMeta(
+            label="Qubit2 Xπ",
+            description="Enter the Rabi-calibrated Qubit2 flip for nominal preparation and readout contrast.",
+        ),
+    ]
+    drive: Annotated[
+        QubitDriveCfg,
+        FieldMeta(
+            label="Two-qubit spectroscopy probe",
+            description="Enter the two weak pulses applied together on the respective qubit drive lines at the shared RF sweep frequency.",
+        ),
+    ]
+    readout: Annotated[
+        MuxReadout.Cfg,
+        FieldMeta(
+            label="Mux readout",
+            description="Enter the full mux module used after probe and optional contrast, with GE Post circle radii for both qubits.",
+        ),
+    ]
+    qubit1_tone: Annotated[
+        int,
+        FieldMeta(
+            label="Qubit1 tone index",
+            description="Zero-based Qubit1 position in the full mux readout.",
+        ),
+    ]
+    qubit2_tone: Annotated[
+        int,
+        FieldMeta(
+            label="Qubit2 tone index",
+            description="Zero-based Qubit2 position in the full mux readout.",
+        ),
+    ]
+    contrast: Annotated[
+        bool,
+        FieldMeta(
+            label="Double Xπ contrast",
+            description="Enable an Xπ on each qubit after the probe, immediately before readout.",
+        ),
+    ] = True
+    dc_device: Annotated[
+        DeviceName | None,
+        FieldMeta(
+            label="Coupler DC source",
+            description="Select the connected coupler-bias source by name; leave blank to keep all sources unchanged.",
+        ),
+    ] = None
+    dc_unit: Annotated[
+        Literal["A", "V", "native"],
+        FieldMeta(
+            label="DC source unit",
+            description="Select amperes, volts or the selected source's native unit for the bias sweep.",
+        ),
+    ] = "native"
+    dc: Annotated[
+        SweepCfg,
+        FieldMeta(
+            label="Coupler DC bias sweep",
+            description="Enter the sweep in DC source unit (A, V or native); leave the source blank to ignore this sweep.",
+        ),
+    ] = Field(default_factory=lambda: SweepCfg(start=0, stop=0, step=0, expts=1))
+    frequency: Annotated[
+        SweepCfg,
+        FieldMeta(
+            unit="MHz",
+            label="Common probe RF frequency",
+            description="Enter the RF sweep (MHz); each point replaces the frequency of both probe pulses.",
+        ),
+    ]
+    reps: Annotated[
+        int,
+        FieldMeta(
+            label="Reps",
+            unit="count",
+            description="Enter attempted shots per preparation and frequency per round.",
+        ),
+    ] = Field(gt=0)
+    rounds: Annotated[
+        int,
+        FieldMeta(
+            label="Rounds",
+            unit="count",
+            description="Enter repeated frequency scans at each DC bias point.",
+        ),
+    ] = Field(default=1, gt=0)
+    initial_delay: Annotated[
+        float,
+        FieldMeta(
+            label="Initial wait",
+            unit="µs",
+            description="Enter the wait before the first shot of each round.",
+        ),
+    ] = 1.0
+    relax_delay: Annotated[
+        float,
+        FieldMeta(
+            label="Relaxation wait",
+            unit="µs",
+            decimals=3,
+            description="Enter the wait after each shot before the next preparation.",
+        ),
+    ]
+
+    @model_validator(mode="after")
+    def validate_pair(self) -> Self:
+        """Require calibrated qubit tones, matched probe lines and finite scans."""
+        validate_qubit_tones(self.readout, self.qubit1_tone, self.qubit2_tone)
+        if (
+            self.drive.qubit1.ch != self.x180_qubit1.ch
+            or self.drive.qubit2.ch != self.x180_qubit2.ch
+        ):
+            raise ValueError("Each probe must use its qubit's calibrated Xπ generator")
+        if self.dc_device is not None and not self.dc_device.strip():
+            raise ValueError("DC source must name a connected device or be None")
+        return self
 
 
 def summarize_spectra(counts: NDArray[np.float64]) -> SpectroscopyAnalysis:
@@ -285,9 +416,51 @@ class SpectroscopyExp(Experiment[SpectroscopyResult, SpectroscopyCfg]):
                         unit=config.dc_unit,
                         stop=context.scope.stop,
                     )
-                prog = build_spectroscopy_program(
-                    config, soccfg=context.soccfg, herald=False
+                builder = TimelineBuilder(
+                    context.soccfg,
+                    reps=config.reps,
+                    initial_delay=config.initial_delay,
+                    relax_delay=config.relax_delay,
                 )
+                builder.add_loop("prepared_qubit1", 2)  # 0 = g, 1 = e (outer)
+                builder.add_loop("prepared_qubit2", 2)  # 0 = g, 1 = e (inner)
+                frequency = builder.add_sweep("frequency", config.frequency)
+                x180_qubit1 = Pulse("prepare_qubit1", config.x180_qubit1)
+                x180_qubit2 = Pulse("prepare_qubit2", config.x180_qubit2)
+                readout = MuxReadout("readout", config.readout)
+                if config.reset is not None:
+                    builder.emit(Reset("reset", config.reset, terminal=readout))
+                builder.fork("default", into=["qubit1", "qubit2"])
+                with (
+                    builder.branch(
+                        by="prepared_qubit1", align_timeline=True, timeline="qubit1"
+                    ) as cases,
+                    cases.case(1),
+                ):
+                    builder.emit(x180_qubit1)
+                with (
+                    builder.branch(
+                        by="prepared_qubit2", align_timeline=True, timeline="qubit2"
+                    ) as cases,
+                    cases.case(1),
+                ):
+                    builder.emit(x180_qubit2)
+                builder.join("qubit1", "qubit2", into="default")
+                builder.fork("default", into=["probe_qubit1_time", "probe_qubit2_time"])
+                builder.emit(
+                    Pulse("probe_qubit1", config.drive.qubit1, freq=frequency),
+                    timeline="probe_qubit1_time",
+                )
+                builder.emit(
+                    Pulse("probe_qubit2", config.drive.qubit2, freq=frequency),
+                    timeline="probe_qubit2_time",
+                )
+                builder.join("probe_qubit1_time", "probe_qubit2_time", into="default")
+                if config.contrast:
+                    builder.emit(Pulse("contrast_qubit1", config.x180_qubit1))
+                    builder.emit(Pulse("contrast_qubit2", config.x180_qubit2))
+                builder.emit(readout, tag="terminal")
+                prog = builder.build()
                 step.run_acquire_summed(
                     prog,
                     context.soc,
