@@ -493,7 +493,9 @@ class IdleZZExp(Experiment[IdleZZResult, IdleZZCfg]):
                 fits.append(
                     fit_trace(
                         fit,
-                        qubit_sigma_fit_errors(result.sums[dc_index, state], cfg.target),
+                        qubit_sigma_fit_errors(
+                            result.sums[dc_index, state], cfg.target
+                        ),
                         delays=result.delays,
                         detune=cfg.detune,
                     )

@@ -261,6 +261,13 @@ def _summarize_bias(
     )
 
 
+def _show_scan_extent(ax: Axes, low: float, high: float) -> None:
+    # Matplotlib omits x coordinates whose y is NaN when autoscaling.
+    span = high - low if high > low else max(1.0, abs(low))
+    margin = 0.05 * span
+    ax.set_xlim(low - margin, high + margin)
+
+
 def _draw_trace(
     ax: Axes,
     label: str,
@@ -270,18 +277,20 @@ def _draw_trace(
     *,
     color: str,
 ) -> None:
+    model = fit.models.get(label)
     ax.errorbar(
         delays,
         trace.contrast,
         yerr=trace.sem,
-        fmt=".",
+        fmt="." if model is not None else ".-",
         color=color,
         label=f"{label} data",
     )
-    model = fit.models.get(label)
     if model is not None:
         dense = np.linspace(delays[0], delays[-1], max(201, len(delays)))
         ax.plot(dense, model.evaluate(dense), color=color, label=f"{label} fit")
+    if not np.any(np.isfinite(trace.contrast)):
+        _show_scan_extent(ax, float(delays[0]), float(delays[-1]))
     ax.xaxis.set_major_locator(MaxNLocator(nbins=6))
 
 
@@ -311,12 +320,14 @@ def _draw_sweep(
 ) -> None:
     _, ax = plots.subplots(num="zeta", figsize=(8, 5), layout="constrained")
     values = np.array([b.zeta_mhz for b in biases], dtype=np.float64)
+    coordinates = [b.dc_value for b in biases]
     ax.errorbar(
-        [b.dc_value for b in biases],
+        coordinates,
         values,
         yerr=np.array([b.zeta_se_mhz for b in biases], dtype=np.float64),
         fmt="o-",
     )
+    _show_scan_extent(ax, min(coordinates), max(coordinates))
     if not np.any(np.isfinite(values)):
         ax.text(
             0.5,
@@ -391,9 +402,19 @@ def analyze_idle_zz(
                 )
             )
             _draw_primary(
-                (fig.axes[state], fig.axes[2 + state]), main_traces, joint, delays, spectator
+                (fig.axes[state], fig.axes[2 + state]),
+                main_traces,
+                joint,
+                delays,
+                spectator,
             )
-            _draw_diagnostics(diag.axes[3 * state : 3 * state + 3], traces, diagnostic, delays, spectator)
+            _draw_diagnostics(
+                diag.axes[3 * state : 3 * state + 3],
+                traces,
+                diagnostic,
+                delays,
+                spectator,
+            )
         raw = result.sums[index]
         ignored_shots = int(
             np.nansum(raw[..., 2, :, :, :]) + np.nansum(raw[..., :2, 2, :, :])
@@ -408,7 +429,9 @@ def analyze_idle_zz(
         )
     if len(biases) > 1:
         _draw_sweep(plots, cfg, biases)
-    return IdleZZHeraldedAnalysis({f"ramsey_{i}": bias for i, bias in enumerate(biases)})
+    return IdleZZHeraldedAnalysis(
+        {f"ramsey_{i}": bias for i, bias in enumerate(biases)}
+    )
 
 
 def _draw_primary(
@@ -444,7 +467,9 @@ def _draw_diagnostics(
     delays: NDArray[np.float64],
     spectator: str,
 ) -> None:
-    for column, (ax, (label, fit)) in enumerate(zip(panels, diagnostic.items(), strict=True)):
+    for column, (ax, (label, fit)) in enumerate(
+        zip(panels, diagnostic.items(), strict=True)
+    ):
         name = "gg-only" if label == "gg" else f"Herald {label}"
         _draw_trace(ax, label, traces[label], fit, delays, color=f"C{column}")
         ax.set_title(
