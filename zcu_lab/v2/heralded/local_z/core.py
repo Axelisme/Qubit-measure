@@ -424,7 +424,10 @@ class LocalZHeraldedExp(Experiment[LocalZHeraldedResult, LocalZHeraldedCfg]):
             delta = _compare_spectators(main, comparison)
             comparisons.append(delta)
             _plot_target(
-                plots, data.gate_counts, target, groups,
+                plots,
+                data.gate_counts,
+                target,
+                groups,
                 _TargetFit(fitted, main, comparison, delta),
             )
         return LocalZHeraldedAnalysis(
@@ -473,7 +476,9 @@ def _fit_target(
     )
 
 
-def _summarize(fitted: PhaseSlopeFit, target: _Target, spectator: int) -> LocalZJointFit:
+def _summarize(
+    fitted: PhaseSlopeFit, target: _Target, spectator: int
+) -> LocalZJointFit:
     fit = fitted.fits[spectator][0]
     if fit is None:
         g, e = ("".join(herald) for herald in _HERALDS[target][spectator])
