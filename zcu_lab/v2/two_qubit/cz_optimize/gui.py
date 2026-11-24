@@ -21,7 +21,8 @@ from zcu_tools.gui.app.measure.adapter import (
 from zcu_tools.plotting.plots import Plots
 from zcu_tools.program.v2 import ModuleCfgFactory
 
-from ._assets import start_asset_issues, start_asset_paths
+from zcu_lab.v2.support.cz_optimize_assets import start_asset_issues, start_asset_paths
+
 from .core import (
     CZOptimizeAnalysis,
     CZOptimizeCfg,

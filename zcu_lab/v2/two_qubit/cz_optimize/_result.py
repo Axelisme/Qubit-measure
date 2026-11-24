@@ -17,7 +17,12 @@ from zcu_tools.experiment.axes_spec import (
     VariableZSpec,
 )
 
-from ._shape import GAIN_INDEX, KNOTS, StartStyle, render_candidate
+from zcu_lab.v2.support.cz_optimize_waveform import (
+    GAIN_INDEX,
+    KNOTS,
+    StartStyle,
+    render_candidate,
+)
 
 
 class _Parameter(NamedTuple):

@@ -8,7 +8,7 @@ from numpy.typing import NDArray
 from zcu_tools.analysis.shot_uncertainty import class_probability_covariance
 from zcu_tools.core.waveform_format import WaveformSamples
 
-from ._shape import Z1, Z2, render_candidate
+from zcu_lab.v2.support.cz_optimize_waveform import Z1, Z2, render_candidate
 
 
 @dataclass(frozen=True)
