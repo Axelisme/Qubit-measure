@@ -21,7 +21,7 @@ superseded_by: null
 
 在 `13aa91a3c25169d7ed003e0b187e71c1cad5cf85` 跑兩次離線 `twotone/chain`，輸入為 297.742 MHz 單點、12 reps、1 round、每 dwell 48 讀。兩輪都用 core 3、單 worker 和單原生執行緒。首輪完整 Run 用 74.263 process CPU s，其中 46 個非終端 cells 的轉移求解用 42.459 CPU s。第二輪用同一輸入擷取實際轉移矩陣與各來源態的 density；下列比對和時序追查均用這一次擷取，未再跑 FTF。原始輸入清單、profiler 與矩陣擷取檔未入庫。
 
-[FTF 的 `drive_track`](../../lib/zcu_tools/experiment/readout_plan.py) 將 drive 支撐區間的起訖各自對齊到 2 ns，讀出邊界則保留 program 時間。在這次擷取中，event 17 和 44 的相對 probe start 看似差 0.01116071428 ns；映回 [430.08 MHz tProc 模擬時鐘](../../tools/data/experiment_wall_time/board-profile.yaml)，兩者都在各自讀出開始後第 904 tick。按 tProc 與 generator 的原生時鐘整理全部非相位時序後，46 個非終端 cells 只有一個 program schedule key。只改 probe-start 欄位而保留 FTF 的 duration 和 span 邊界時，仍有 46 個 keys。
+這次擷取使用的 [FTF `drive_track`](../../lib/zcu_tools/experiment/readout_plan.py) 將 drive 支撐區間的起訖各自對齊到 2 ns，讀出邊界則保留 program 時間。現行 planner 對 drive 與 readout 都保留編譯後的起訖，見 [ADR-0084](../adr/0084-simulation-integer-time-base.md#時間契約)。在這次擷取中，event 17 和 44 的相對 probe start 看似差 0.01116071428 ns；映回 [430.08 MHz tProc 模擬時鐘](../../tools/data/experiment_wall_time/board-profile.yaml)，兩者都在各自讀出開始後第 904 tick。按 tProc 與 generator 的原生時鐘整理全部非相位時序後，46 個非終端 cells 只有一個 program schedule key。只改 probe-start 欄位而保留 FTF 的 duration 和 span 邊界時，仍有 46 個 keys。
 
 | 同一輪擷取的 46 個非終端 cells | 結果 |
 | --- | ---: |

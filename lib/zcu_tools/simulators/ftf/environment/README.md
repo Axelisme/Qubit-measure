@@ -1,6 +1,6 @@
 # FTF environment composition
 
-**Last updated:** 2026-11-24, sampled RWA probe lifetime and simulator optimization index
+**Last updated:** 2026-11-25, native drive timing
 
 **讀者：** framework-dev、agent。FTF 環境的組裝接縫、數值接線與 acquisition 契約。
 
@@ -472,10 +472,10 @@ inputs; standalone calls build their own facts. `FTFSource.model_facts` supplies
 the source-owned latest facts and rejects calls after close.
 `plan_template` requires the originating request's `time_base` keyword.
 It converts QICK ticks/MHz/degrees into ns/GHz/radians with point arrays.
-`TimeBase.ns` owns exact nearest-2-ns rounding and converts complete integer ADC
-sample grids. Preparation keys include the clock. The shared `drive_track`
-converter preserves signed gains, complex sampled envelopes and the common
-carrier origin for evolution. See the [evolution input contract](../../../simulate/evolution/README.md#public-entry-points)
+`TimeBase.ns` converts compiled drive and readout pulse endpoints without
+resnapping and converts complete integer ADC sample grids. Preparation keys
+include the clock. The shared `drive_track` converter preserves signed gains,
+complex sampled envelopes and the common carrier origin for evolution. See the [evolution input contract](../../../simulate/evolution/README.md#public-entry-points)
 for the signed carrier and pulse support in `DriveTrack`, `EnvelopeSpec.values`
 interpolation, and the I/Q operators in `SecularDrive`.
 Readout converts the program's common-origin phase to ADC's pulse-local phase
@@ -498,7 +498,7 @@ without a cavity response.
 An addressed single carrier retains its previous output bits. Carriers
 in the same channel still superpose, so their finite-window leakage can depend
 on readout start. This ideal selection does not model FIR response, filter
-transients or anti-alias filtering. Pulse supports use absolute nearest-2-ns rounding, ties even.
+transients or anti-alias filtering.
 The model owner supplies a round-DC `ModelSource`. Charge and small-signal flux
 controls evolve to the terminal pulse start, or to the receiver's first trigger
 when the template has no active readout pulse. Each drive line selects full

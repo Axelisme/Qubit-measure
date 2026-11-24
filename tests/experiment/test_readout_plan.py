@@ -473,6 +473,61 @@ def test_readout_block_may_end_at_next_start_but_must_not_cross_it(kind) -> None
         )
 
 
+def test_drive_support_preserves_native_gap_and_carrier_phase_relative_to_readout() -> (
+    None
+):
+    time_base = TimeBase.from_clocks((430.08, 599.04, 307.2))
+    tproc = time_base.period_ticks(430.08)
+    fabric = time_base.period_ticks(599.04)
+    readout_starts = np.array([23126, 59171], dtype=np.int64) * tproc
+    readout = replace(
+        pulse(0),
+        start_ticks=readout_starts,
+        duration_ticks=np.full(2, 1258 * fabric, dtype=np.int64),
+        phase_reference_ticks=0,
+    )
+    probe = replace(
+        pulse(0),
+        gen_ch=2,
+        start_ticks=readout_starts + 904 * tproc,
+        duration_ticks=np.full(2, 599 * fabric, dtype=np.int64),
+        frequency_mhz=np.full(2, 297.7419989),
+        phase_reference_ticks=7 * tproc,
+    )
+    base = template((readout, probe), (0.011,))
+    window = replace(
+        base.readouts[0],
+        trigger_ticks=readout_starts[:, None],
+        sample_period_ticks=time_base.period_ticks(307.2),
+    )
+    contents = readout_plan.readout_contents(
+        replace(
+            base,
+            readouts=(window,),
+            duration_ticks=probe.start_ticks + probe.duration_ticks,
+        ),
+        readout_plan.ReadoutDrive(0, 1.0),
+        window,
+        {},
+        time_base=time_base,
+    )
+    track = readout_plan.drive_track(probe, "qubit", {}, time_base=time_base)
+    readout_ns = np.array([contents.pulses[i][0].start_ns for i in contents.inverse])
+
+    # Translating the readout/probe pair does not change their 904 tProc cycles apart.
+    np.testing.assert_allclose(
+        track.start_ns - readout_ns, 904000 / 430.08, rtol=0, atol=1e-9
+    )
+    np.testing.assert_allclose(track.duration_ns, 599000 / 599.04, rtol=0, atol=1e-9)
+    # At the scheduled probe onset the 30-degree phase has advanced by the
+    # elapsed carrier cycles since the explicit phase reference at tProc tick 7.
+    expected_phase = np.pi / 6 + 2 * np.pi * 297.7419989 * (
+        (np.array([23126, 59171]) + 904 - 7) / 430.08
+    )
+    onset_phase = track.phase_rad + 2 * np.pi * track.frequency_ghz * track.start_ns
+    np.testing.assert_allclose(onset_phase, expected_phase, rtol=0, atol=1e-9)
+
+
 @pytest.mark.parametrize("scale", [1, 4])
 def test_readout_grids_endpoints_and_corners_round_absolute_ticks_once(scale):
     base = TimeBase(Fraction(43008 * scale))

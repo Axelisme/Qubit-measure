@@ -106,6 +106,55 @@ def test_capture_storage_retains_cached_global_context_without_io(
     assert _published_state(entry.result_path) == before
 
 
+def test_symlinked_project_roots_use_the_real_output_and_records_trees(
+    tmp_path: Path,
+) -> None:
+    checkout = tmp_path / "checkout"
+    checkout.mkdir()
+    data = tmp_path / "QubitData" / "alice"
+    result_root, database_root = checkout / "result", checkout / "Database"
+    real_result, real_database = data / "result", data / "Database"
+    real_database.mkdir(parents=True)
+    ResultEntry.create("sample", result_root=real_result, database_root=real_database)
+    (real_result / "sample" / "records").rmdir()
+    symlink_or_skip(result_root, real_result, target_is_directory=True)
+    symlink_or_skip(database_root, real_database, target_is_directory=True)
+
+    entry = ResultEntry.open(
+        "sample", result_root=result_root, database_root=database_root
+    )
+    captured = capture_storage(entry.parameters())
+    binding = bind_run_outputs(
+        result_root=result_root,
+        database_root=database_root,
+        entry_name=captured.entry_name,
+        point=captured.point,
+    )
+    layout = binding.layout(stem="run1", saved_at=datetime.now(UTC))
+    for output in layout.outputs(ArtifactKey("analysis", "fit", "figure", "plot")):
+        output.path.parent.mkdir(parents=True, exist_ok=True)
+        output.path.write_bytes(b"synthetic figure")
+    event = LedgerEvent(
+        id=str(uuid4()),
+        kind="acquired",
+        at=datetime.now(UTC).isoformat(),
+        origin="notebook",
+        payload=AcquiredPayload(
+            run_id="run1", experiment="test/saving", point=None, roles={}
+        ),
+    )
+    binding.prepare_ledger().append(event)
+
+    assert captured.result_path == real_result / "sample"
+    assert captured.database_path == real_database / "sample"
+    assert any((real_database / "sample" / "runs" / "run1" / "figures").glob("*.png"))
+    assert any((real_result / "sample" / "figures").glob("*.png"))
+    assert entry.ledger.get(event.id).event == event
+    assert ResultEntry.read_events_snapshot("sample", result_root=real_result) == (
+        event,
+    )
+
+
 def test_recorded_run_without_point_uses_global_figure_directory(
     tmp_path: Path,
 ) -> None:

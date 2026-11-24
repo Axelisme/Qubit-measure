@@ -156,7 +156,7 @@ GUI 為 writeback 檢查有限值或整理摘要不算分析。發布前 `summar
 4. 使用者空間：`zcu_lab`、`scripts`，內容與結構由使用者決定。
 5. 組合根：GUI 在 `apps/`，agent MCP 在 `mcp_servers/`。兩者同層、不互相 import，可依賴 `zcu_tools`，對 lab 只直接 import `zcu_lab.assembly`。MCP 以注入的 module 字串啟動 GUI，不 import GUI 組合根。
 
-**例子。** `scripts/transfer_results.py` 是獨立使用者入口，只把 checkout 的本地結果根目錄交給 `utils.result_transfer`。Rclone 外部傳輸不屬於量測資料檔格式或實驗容器；可重用實作依[模組定位](#模組定位)放在 lib，不在 `scripts/` 下建其他腳本會依賴的套件。C21 禁止 lib 反向依賴 scripts。
+**例子。** `scripts/sync_data.py` 是獨立使用者入口，只把 checkout 交給 `utils.data_sync`。Rclone 傳輸不解讀量測資料格式或實驗容器，依[模組定位](#模組定位)由 lib 實作。C21 禁止 lib 反向依賴 scripts。
 
 **邊界。** `zcu_tools` 不 import `zcu_lab`；框架也不 import `simulators`，由 `framework-no-simulators` 檢查。`tools/` 對 lab 也只直接 import assembly，固定 Pareto 場景不 import lab。`migrations/` 可直接 import 舊資料所屬的實驗與元件。Tests 不依賴 `zcu_lab`、`scripts`、實驗流程或預設值；`tests/scripts/` 既有的 `main` import 是債務。框架測試用最小合成 workflow／adapter，框架 UI 用 ComponentDriver。Review 檢查 import，必要時 grep，不暫移 lab 跑 pytest、不加 `ZCU_LAB` 環境變數或 import hook。
 

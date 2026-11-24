@@ -103,7 +103,7 @@ def test_template_composition_units_signed_drive_and_dc_readout() -> None:
     [(0.0, -0.2), (180.0, 0.2)],
     ids=["same-phase", "opposite-phase"],
 )
-def test_common_carrier_origin_survives_pulse_start_quantization(
+def test_common_carrier_origin_survives_off_grid_pulse_start(
     phase_deg: float, expected_second: float
 ) -> None:
     from zcu_tools.simulators.ftf.environment import plan_template
@@ -144,7 +144,7 @@ def test_common_carrier_origin_survives_pulse_start_quantization(
             )
 
         assert first.start_ns[0] == 0.0
-        assert second.start_ns[0] == 32.0
+        assert second.start_ns[0] == second_start_us * 1000
         assert amplitude(first, 8.0) == pytest.approx(0.2, abs=1e-12, rel=0)
         assert amplitude(second, 40.0) == pytest.approx(
             expected_second, abs=1e-12, rel=0
