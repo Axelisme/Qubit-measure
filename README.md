@@ -4,7 +4,7 @@
 
 ZCU-Tools 是 ZCU216/QICK 的量子量測工具集。工作站執行量測 GUI、Notebook、分析與模擬；ZCU 板端提供 QICK Pyro server。連接硬體前，先確認板端環境與資產版本。
 
-**Last updated:** 2026-11-18
+**Last updated:** 2026-11-25
 
 ## 執行環境
 
@@ -24,8 +24,7 @@ uv run --directory <worktree> --no-sync -- python -m apps.measure
 ## 操作與量測
 
 - [量測領域詞彙](docs/CONTEXT.md) 說明參數、量測成果與分析交接用語。
-- [結果傳輸](docs/result-transfer.md)：首次以官方 rclone GUI 授權並保存雲端位置，之後使用 `python scripts/transfer_results.py upload/download <name>`，agent 可直接從 Bash 呼叫。
-- [Database 傳輸](docs/result-transfer.md#傳輸-database)：用 `python scripts/transfer_database.py` 上下載 `Database/<name>/`；共用 rclone 帳號，另選雲端父資料夾。
+- [多台電腦的資料同步](docs/data-sync.md)：用 `scripts/sync_data.py` 上傳 checkout 的 `result/` 與 `Database/`，或將外來來源下載到各自的 project root。
 - [Notebook 用途入口](notebook_md/README.md) 指向量測、分析與電路設計主題；執行流程由各 Notebook 說明。
 
 ## 資料遷移與升級

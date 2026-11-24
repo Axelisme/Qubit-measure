@@ -1,14 +1,14 @@
 # zcu_tools.utils
 
-**Last updated:** 2026-11-24
+**Last updated:** 2026-11-25
 
 **讀者：** framework-dev。共用 helper、cache 與原子檔案替換機制。
 
 `utils` 放可被 experiment / GUI 共用、且不反向依賴上層 domain 的 helper。
 資料檔格式、讀寫與 streaming 見 `zcu_tools.datafile`。
 
-`utils.result_transfer` 擁有 rclone 工具準備、桌面授權／位置設定與 CLI 傳輸實作。
-`scripts/transfer_results.py` 與 `scripts/transfer_database.py` 各自注入本地根目錄與設定目錄，實作不依賴 checkout 位置或 scripts。
+[`utils.data_sync`](data_sync/README.md) 管理固定版 rclone、桌面設定和多來源資料樹同步。
+`scripts/sync_data.py` 注入 checkout；套件不從安裝位置推導資料根，也不匯入 scripts。
 
 Package 初始化不載入 QICK。`format_obj` 在 caller 呼叫時才載入 QickParam，保留其
 既有字串轉換；通用數值 helper 與 `deepupdate` 不要求 QICK。
