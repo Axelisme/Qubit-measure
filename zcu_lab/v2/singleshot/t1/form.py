@@ -1,9 +1,9 @@
-"""Starting values for singleshot/t1/t1; sources are captured at Open/Reset."""
+"""Starting values for singleshot/t1; sources are captured at Open/Reset."""
 
 from zcu_tools.cfg_model import Range, Slot, Template
 from zcu_tools.gui.form_adapter import Form, FormContext
 
-from zcu_lab.v2.singleshot.t1.t1.core import T1Cfg
+from zcu_lab.v2.singleshot.t1.core import T1Cfg
 from zcu_lab.v2.support.measure.ctx_helpers import source, t1_initial_time
 
 

@@ -45,4 +45,4 @@ basis:
 
 - [ADR-0069〈呈現規範〉](../adr/0069-experiment-core-and-frontends.md#呈現規範) 與[一維反演量的誤差棒與圖上事實](2026-11-23-inverted-error-bars-and-figure-facts.md)將圖上的擬合事實與 Writeback 建議分開。這次沿用分工，由 core 報兩個時間與品質值，由 tone adapter 提議初值。
 - [作者指南的 T1 初值契約](../../zcu_lab/v2/measure-authoring.md#t1-與等待)與 [ADR-0073](../adr/0073-measure-form-derivation.md#form-的形狀與初值)仍適用。這次未改表單的初值來源或觸發時機。
-- 原始調查與歷史 probe 未入庫。落地以前後同一 post-R11 基底上的合成資料重跑，沒有以歷史數值作為驗收基準。現行讀法見[普通 T1 guide](../../zcu_lab/v2/singleshot/t1/t1/guide.md)與[tone guide](../../zcu_lab/v2/singleshot/t1/t1_with_tone/guide.md)。
+- 原始調查與歷史 probe 未入庫。落地以前後同一 post-R11 基底上的合成資料重跑，沒有以歷史數值作為驗收基準。現行讀法見[普通 T1 guide](../../zcu_lab/v2/singleshot/t1/guide.md)與[tone guide](../../zcu_lab/v2/singleshot/t1_tone/guide.md)。

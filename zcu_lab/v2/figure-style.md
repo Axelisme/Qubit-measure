@@ -186,7 +186,7 @@ Run 身分與採集摘要是呈現資料，不寫進原生結果的 JSON `summar
 - 好例：Rabi 的逐點布居用 shot SEM 畫 error bar。Ding 圖 5-13(a)（頁 157）的 CZ fidelity 對脈衝寬度圖可作逐點誤差棒的版式參考；圖 5-8(b)（頁 151）的二維掃描則用熱圖。
 - 好例：多維取數的一維 fit panel 可以用外層掃描座標當橫軸，而不是擬合用的時間軸。
   [CPMG](twotone/time_domain/cpmg/core.py) 對每個 π 脈衝數沿演化時間擬合衰減，再以脈衝數為橫軸畫 T₂。誤差棒是各次衰減擬合的 T₂ 標準誤（`decay_time_err`）。
-  [`t1_with_tone_sweep`](singleshot/t1/t1_with_tone_sweep/core.py) 對每個外層掃描點沿探測脈衝長度擬合轉移速率。速率圖的橫軸是外層掃描座標（增益或頻率，也可換算成光子數）。速率誤差棒是擬合共變異數矩陣中相應對角元素的平方根。
+  [`t1_tone_sweep`](singleshot/t1_tone_sweep/core.py) 對每個外層掃描點沿探測脈衝長度擬合轉移速率。速率圖的橫軸是外層掃描座標（增益或頻率，也可換算成光子數）。速率誤差棒是擬合共變異數矩陣中相應對角元素的平方根。
   guide 要寫明各 panel 的座標與誤差棒的來源，區分擬合參數的不確定度與逐點 shot SEM。
 
 ### R12：y 軸畫物理 observable

@@ -8,7 +8,7 @@ Optional **Reset** → no drive for g preparation or **g↔e π pulse** for e �
 
 ## Key settings
 
-- Before Run, use Pulse **Readout** (not Mux) with a circle classifier and positive radius under **Advanced**. Obtain a missing radius from [GE Post-Analysis](../../ge/guide.md); linear cannot report Other. Calibrate the π pulse before comparing preparations.
+- Before Run, use Pulse **Readout** (not Mux) with a circle classifier and positive radius under **Advanced**. Obtain a missing radius from [GE Post-Analysis](../ge/guide.md); linear cannot report Other. Calibrate the π pulse before comparing preparations.
 - Set **Free evolution time** to capture the early drop and the late plateau. Its Stop and **Relax delay** start at 5 × stored ordinary T1 (150 µs if absent; blank if invalid). Reset does not shorten the relaxation wait automatically.
 - **Sampling** `decay` (default) concentrates points early; `linear` spaces them evenly. The window and point count stay fixed. Enter a sweep, not a list of delays.
 
@@ -26,4 +26,4 @@ Check the last points of both preparations. If either trace is still changing, e
 
 Older files without class counts cannot be converted on Load; acquire again.
 
-For general operations, see [`zcu_lab/v2/operator-workflow.md`](../../../operator-workflow.md).
+For general operations, see [`zcu_lab/v2/operator-workflow.md`](../../operator-workflow.md).

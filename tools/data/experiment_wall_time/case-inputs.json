@@ -504,7 +504,7 @@
     },
     {
       "scene_id": "singleshot/t1_tone_sweep_freq",
-      "adapter": "singleshot/t1_tone_sweep_freq",
+      "adapter": "singleshot/t1_tone_sweep/freq",
       "metric": {"kind": "scan", "axes": [{"field": "xs"}, {"field": "lengths"}]},
       "basis": "The earlier workload selection retained this adapter to exercise its bounded setup or a named prerequisite.",
       "overrides": [
@@ -522,7 +522,7 @@
     },
     {
       "scene_id": "singleshot/t1_tone_sweep_gain",
-      "adapter": "singleshot/t1_tone_sweep_gain",
+      "adapter": "singleshot/t1_tone_sweep/gain",
       "metric": {"kind": "scan", "axes": [{"field": "xs"}, {"field": "lengths"}]},
       "basis": "The earlier workload selection retained this adapter to exercise its bounded setup or a named prerequisite.",
       "overrides": [
