@@ -27,8 +27,8 @@ The tables use SHA-256 prefixes. All three blocks used FTF settings `127360cb65e
 | --- | ---: | --- | --- | --- | --- | --- | --- |
 | `chain/len_rabi` | 13.6952 | readout | `t4`, `floquet_period` | 1 · `593426c2` / `931fa4f599f4` | 11 cells, 1 Run, warm | `ok` | [ADC readout](#adc-readout) 106.060 → 93.163 core s; [Projective cell phase reuse](#projective-cell-phase-reuse) fewer source solves, no established core speedup |
 | `two_qubit/conditional_spectroscopy_heralded` | 8.2706 | evolve | `t4`, `shaped_sambe`, `single_tone_rwa`, `floquet_period`, `dop853` | 2 · `addd6c8fb` / `c2b6b9e0522e` | 11 cells, 1 Run, cold | `ok` | — |
-| `twotone/ro_optimize/chain_power` | 7.0092 | materialize | `t4` | 1 · `593426c2` / `931fa4f599f4` | 11 cells, 1 Run, warm | `ok` | [ADC flat jump](#adc-flat-jump) 67.333 → 54.952 core s |
-| `twotone/ro_optimize/chain_freq` | 6.9663 | materialize | `t4` | 1 · `593426c2` / `931fa4f599f4` | 11 cells, 1 Run, warm | `ok` | [ADC flat jump](#adc-flat-jump) 67.716 → 55.282 core s |
+| `twotone/ro_optimize/chain_power` | 7.0092 | materialize | `t4` | 1 · `593426c2` / `931fa4f599f4` | 11 cells, 1 Run, warm | `ok` | [ADC flat jump](#adc-flat-jump) 67.333 → 54.952 core s; [ADC chain CDF reuse](#adc-chain-cdf-reuse) 145.716 → 124.472 core s (31 cells) |
+| `twotone/ro_optimize/chain_freq` | 6.9663 | materialize | `t4` | 1 · `593426c2` / `931fa4f599f4` | 11 cells, 1 Run, warm | `ok` | [ADC flat jump](#adc-flat-jump) 67.716 → 55.282 core s; [ADC chain CDF reuse](#adc-chain-cdf-reuse) 154.649 → 128.696 core s (31 cells) |
 | `chain/amp_rabi` | 6.6886 | evolve | `t4`, `shaped_sambe` | 1 · `593426c2` / `931fa4f599f4` | 11 cells, 1 Run, cold | `ok` | [ADC readout](#adc-readout) 67.767 → 66.059 core s; [Banded Sambe](#banded-sambe) 6.294 → 8.912 core s/cell |
 | `twotone/ro_optimize/power` | 4.7089 | evolve | `t4`, `shaped_sambe`, `single_tone_gate` | 1 · `593426c2` / `931fa4f599f4` | 11 cells, 1 Run, warm | `ok` | [Banded Sambe](#banded-sambe) 3.903 → 4.893 core s/cell |
 | `two_qubit/rb` | 4.2249 | evolve | `t4`, `shaped_sambe`, `single_tone_rwa`, `dop853` | 2 · `addd6c8fb` / `c2b6b9e0522e` | 4 cells, 1 Run, cold | `ok` | [Same-carrier fold](#same-carrier-fold) 16.401 → 0.892 process CPU s |
@@ -158,6 +158,10 @@ The pairs show a change tested on fixed inputs. They do not overwrite the histor
 ### Projective cell phase reuse
 
 [The reduced pair](2026-11-24-projective-cell-phase-reuse.md#實測) compares `f7a88acef` → `c22947414` on manifest `589a368693c2`. Each side ran one cold-cache `chain/len_rabi` Run with 11 points, 100 reps, 100 rounds, seed 123 and one CPU worker in the same exclusive slot. The first preparation solved 3,229 → 2,967 source rows; the maps and Result matched. Full Run core was 96.324 → 96.032 s. With one observation per side, this does not establish a whole-Run speedup. The historical survey used a different manifest and a warm Run.
+
+### ADC chain CDF reuse
+
+[The CDF reuse pairs](2026-11-24-adc-chain-cdf-reuse.md#實測) compare `5dbccaffa` → `1d82a507d` on manifest `c255a7fb19c9`. Each side ran each scene once, 31 cells × 2,000 reps × 320 rounds, 16 reads per point, seed 123, one CPU worker and separate cold caches, without instrumentation. Each pair ran in one exclusive slot. Materialize fell 17.47% in `chain_freq` and 15.90% in `chain_power`. These complete 31-cell Runs have a different manifest from the earlier 11-cell survey and flat-jump pairs.
 
 ### Materialize follow-up
 
