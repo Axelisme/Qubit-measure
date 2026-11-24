@@ -67,7 +67,7 @@ from zcu_lab.v2.two_qubit.joint_readout import core as ftf_joint_readout
 from zcu_lab.v2.two_qubit.local_z import core as ftf_local_z
 from zcu_lab.v2.two_qubit.rb import core as ftf_rb
 from zcu_lab.v2.twotone.ac_stark import core as twotone_ac_stark
-from zcu_lab.v2.twotone.ac_stark import ramsey_core as twotone_ac_stark_ramsey
+from zcu_lab.v2.twotone.ac_stark_ramsey import core as twotone_ac_stark_ramsey
 from zcu_lab.v2.twotone.allxy import core as twotone_allxy
 from zcu_lab.v2.twotone.ckp import core as twotone_ckp
 from zcu_lab.v2.twotone.dispersive import core as twotone_dispersive

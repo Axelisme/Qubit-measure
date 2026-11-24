@@ -1,4 +1,4 @@
-"""Measure GUI adapters for AC Stark spectroscopy and Ramsey maps."""
+"""Measure GUI adapter for AC Stark spectroscopy."""
 
 from __future__ import annotations
 
@@ -19,7 +19,6 @@ from zcu_tools.gui.app.measure.adapter import (
     WritebackRequest,
 )
 from zcu_tools.gui.form_adapter import Form, FormContext
-from zcu_tools.gui.session.types import SessionEnv
 from zcu_tools.plotting.plots import Plots
 
 from zcu_lab.v2.support.measure.singleshot_shared import read_chi_kappa
@@ -31,18 +30,9 @@ from .core import (
     AcStarkExp,
     AcStarkResult,
 )
-from .form import make_form, make_ramsey_form
-from .ramsey_core import (
-    AcStarkRamseyAnalyzeOptions,
-    AcStarkRamseyCfg,
-    AcStarkRamseyExp,
-    AcStarkRamseyResult,
-)
+from .form import make_form
 
 AcStarkRunResult: TypeAlias = RunRecord[AcStarkCfg, AcStarkResult]
-
-
-AcStarkRamseyRunResult: TypeAlias = RunRecord[AcStarkRamseyCfg, AcStarkRamseyResult]
 
 
 @dataclass
@@ -84,30 +74,6 @@ def _AcStark_get_writeback_items(
     ]
 
 
-def _AcStarkRamsey_get_analyze_params(
-    result: AcStarkRamseyRunResult, ctx: SessionEnv
-) -> AcStarkRamseyAnalyzeOptions:
-    """Seed the FFT center from the acquired cfg, or zero for cfg-free data."""
-    del ctx
-    return AcStarkRamseyAnalyzeOptions(
-        detune=result.cfg.detune if result.cfg is not None else 0.0
-    )
-
-
-def _AcStarkRamsey_analyze(
-    req: AnalyzeRequest[AcStarkRamseyRunResult, AcStarkRamseyAnalyzeOptions],
-    *,
-    plots: Plots,
-) -> None:
-    """Publish contrast/FFT maps, without fitting or proposing calibration."""
-    AcStarkRamseyExp().analyze(
-        req.run_result,
-        req.analyze_params,
-        plots=plots,
-    )
-    return
-
-
 def _AcStark_make_form(ctx: FormContext) -> Form[AcStarkCfg]:
     """Build the spectroscopy form from captured Open/Reset sources."""
     return make_form(ctx)
@@ -120,24 +86,7 @@ def _run_acstark(
     return RunRecord(cfg=cfg, result=AcStarkExp().run(cfg, context=context))
 
 
-def _run_acstarkramsey(
-    cfg: AcStarkRamseyCfg, *, context: RunContext
-) -> RunRecord[AcStarkRamseyCfg, AcStarkRamseyResult]:
-    """Acquire a trace and retain the experiment configuration with its result."""
-    return RunRecord(cfg=cfg, result=AcStarkRamseyExp().run(cfg, context=context))
-
-
-def _AcStarkRamsey_make_form(ctx: FormContext) -> Form[AcStarkRamseyCfg]:
-    """Build the Ramsey form from captured Open/Reset sources."""
-    return make_ramsey_form(ctx)
-
-
 def _stark_summary_lines(source: AcStarkRunResult) -> tuple[str, ...]:
-    cfg = source.cfg
-    return () if cfg is None else (f"Reps × Rounds: {cfg.reps} × {cfg.rounds}",)
-
-
-def _ramsey_summary_lines(source: AcStarkRamseyRunResult) -> tuple[str, ...]:
     cfg = source.cfg
     return () if cfg is None else (f"Reps × Rounds: {cfg.reps} × {cfg.rounds}",)
 
@@ -152,18 +101,5 @@ DEFINITION = Adapter(
         options=lambda source, env: AcStarkAnalyzeParams(),
         writeback=_AcStark_get_writeback_items,
         summary_lines=_stark_summary_lines,
-    ),
-)
-
-
-RAMSEY_DEFINITION = Adapter(
-    spec=AcStarkRamseyExp.AXES_SPEC,
-    make_form=_AcStarkRamsey_make_form,
-    run=_run_acstarkramsey,
-    guide=Path(__file__).with_name("guide.ramsey.md"),
-    analysis=Analysis(
-        fn=_AcStarkRamsey_analyze,
-        options=_AcStarkRamsey_get_analyze_params,
-        summary_lines=_ramsey_summary_lines,
     ),
 )

@@ -8,7 +8,7 @@ from zcu_lab.v2.twotone.ac_stark.core import (
     AcStarkCfg,
     AcStarkExp,
 )
-from zcu_lab.v2.twotone.ac_stark.ramsey_core import (
+from zcu_lab.v2.twotone.ac_stark_ramsey.core import (
     AcStarkRamseyAnalyzeOptions,
     AcStarkRamseyCfg,
     AcStarkRamseyExp,

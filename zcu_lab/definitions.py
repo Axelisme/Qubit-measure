@@ -110,8 +110,8 @@ from zcu_lab.v2.two_qubit.rb.gui_heralded import (
     DEFINITION as TWO_QUBIT_RB_HERALDED_DEFINITION,
 )
 from zcu_lab.v2.twotone.ac_stark.gui import DEFINITION as AC_STARK_DEFINITION
-from zcu_lab.v2.twotone.ac_stark.gui import (
-    RAMSEY_DEFINITION as AC_STARK_RAMSEY_DEFINITION,
+from zcu_lab.v2.twotone.ac_stark_ramsey.gui import (
+    DEFINITION as AC_STARK_RAMSEY_DEFINITION,
 )
 from zcu_lab.v2.twotone.allxy.gui import DEFINITION as ALL_XY_DEFINITION
 from zcu_lab.v2.twotone.chain.gui import DEFINITION as CHAIN_DEFINITION
