@@ -54,6 +54,13 @@ class Check:
     count_key: str | None = None
 
 
+_REGISTRY_KEY_PATHS: Final = Check(
+    "registry key paths",
+    (sys.executable, str(_TOOLS_DIR / "check_registry_key_paths.py")),
+    "violation_count",
+)
+
+
 # Measured over the whole tree, not against a base. Pyright is opt-in because
 # it adds a full-tree type-checking pass.
 STATUS_CHECKS: Final = (
@@ -68,11 +75,7 @@ STATUS_CHECKS: Final = (
         (sys.executable, str(_TOOLS_DIR / "check_mcp_text_budget.py")),
         "overage_count",
     ),
-    Check(
-        "registry key paths",
-        (sys.executable, str(_TOOLS_DIR / "check_registry_key_paths.py")),
-        "violation_count",
-    ),
+    _REGISTRY_KEY_PATHS,
     Check("ruff", ("ruff", "check", "--output-format", "json", "."), "__len__"),
     Check(
         "docstring",
@@ -190,12 +193,7 @@ def steps(base: str, files: tuple[str, ...], *, fix: bool) -> tuple[Step, ...]:
             (sys.executable, str(_TOOLS_DIR / "check_mcp_text_budget.py")),
         )
     )
-    found.append(
-        Step(
-            "registry key paths",
-            (sys.executable, str(_TOOLS_DIR / "check_registry_key_paths.py")),
-        )
-    )
+    found.append(Step(_REGISTRY_KEY_PATHS.name, _REGISTRY_KEY_PATHS.command))
     found.append(
         Step(
             "ratchet",

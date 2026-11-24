@@ -1615,7 +1615,10 @@ subprocess 邊界替換回覆以驗證 collection errors，不載入 lab 或真 
 
 ## Registry key paths
 
-[`check_registry_key_paths.py`](check_registry_key_paths.py) 在每次 gate 核對完整 lab registry：key 必須等於定義相對 `zcu_lab/v2/` 的目錄，同目錄有多個入口時各加一段 `/變體名`。
+[`check_registry_key_paths.py`](check_registry_key_paths.py) 經 [Lab assembly](../zcu_lab/README.md#lab-組裝與註冊) 把所有 adapters 登錄到真 Registry，不開 GUI 或建立 Form。
+Lab 從同次成功登錄交付每個 key 的直接宣告模組。工具不查 Run、guide 或 Native tag。
+每個 registry key 必須等於宣告模組相對 `zcu_lab/v2/` 的目錄，同目錄有多個入口時各加一段 `/變體名`。
+來源缺漏、重複、額外或無效時，工具先列出有問題的 key 和原因；只在來源完整時比對目錄。違規回傳 1。
 
 ## 品質快照與熱點報表
 

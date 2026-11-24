@@ -124,6 +124,8 @@ def test_main_runs_the_registry_path_check_and_reports_failures(
             command, 0, "" if command[0] == "git" else "{}", ""
         )
 
+    # main has no process-runner injection. Stand in for the external tools so
+    # only the gate interprets their receipts and no Lab process is launched.
     monkeypatch.setattr(subprocess, "run", external_tool)
 
     assert gate.main(argv) == expected_exit

@@ -47,7 +47,8 @@ Templates 發布後不修改其內容；frozen dataclass 不會遞迴凍結範�
 
 各入口的最小 Protocol 與依賴理由見 [ADR-0072](../docs/adr/0072-module-boundaries.md#lab-定義與組合根)。
 
-Measure behavior 先註冊 components，再以 `lab.templates` 建 Registry，呼叫 `lab.register_experiments` 填入 adapters。
+Measure behavior 先註冊 components，再以 `lab.templates` 建 Registry，呼叫 `lab.register_experiments(registry)` 填入 adapters。
+[路徑 gate](../tools/README.md#registry-key-paths) 在同一個註冊呼叫傳入 `record_source`。每次 `Registry.register` 成功後，Lab 把該 key 與直接宣告 Adapter 或 factory 的模組物件交給 callback。來源不存進 Registry，也不從 Run 推定。新增登錄列見 [Measure adapter authoring](v2/measure-authoring.md#目錄佈局)。
 [Two-qubit 實驗清單](v2/README.md#two-qubit-實驗清單)和 [heralded 家族](v2/heralded/README.md) 對應 New Tab 的兩個並列選單。各入口有自己的 registry key 與 guide；開啟舊 Native 檔時，依家族 README 的 tag 對照選新入口。
 [definitions.py](definitions.py) 註冊 AC Stark spectroscopy 的 `twotone/ac_stark` 與 Ramsey 的 `twotone/ac_stark_ramsey`。Ramsey 操作見 [AC Stark Ramsey guide](v2/twotone/ac_stark_ramsey/guide.md#序列與設定)。
 Library 新建直接讀 `registry.templates`。`definitions.register_all` 綁同一份 catalog 給 chain_length 與 rpi_length，供兩張表在沒有擷取模組時取得長度差。

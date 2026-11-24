@@ -37,7 +37,9 @@
 實驗的 leaf layout 見[套件 README](README.md)。`../definitions.py` 明列 adapter catalog，
 `../templates.py` 提供注入 Registry 的持久範本目錄。公開支援套件 `support/measure/` 提供跨 adapter
 共用的 analysis、writeback 與 context mechanics，也可集中已定案且供多個 Form 共用的具名初值政策。
-註冊 adapter 時，key 用定義相對 `zcu_lab/v2/` 的目錄，同目錄有多個入口時各加一段 `/變體名`，[gate 會核對完整 registry](../../tools/README.md#registry-key-paths)。
+在 [`definitions.py`](../definitions.py) 直接匯入宣告 Adapter 常量或 factory 的模組，不透過家族的 re-export。
+同一筆登錄用這個模組取得 Adapter，也把模組物件列為來源。例如：`"twotone/ac_stark_ramsey": (ac_stark_ramsey_gui.DEFINITION, ac_stark_ramsey_gui)`。
+Factory 從接收登錄的 `registry.templates` 取得持久範本。key 用宣告模組相對 `zcu_lab/v2/` 的完整目錄，同目錄有多個入口時各加一段 `/變體名`。[Gate](../../tools/README.md#registry-key-paths) 從成功登錄取得來源，不看 Run 放在哪裡。
 
 每個實驗在 `core.py` 定義 cfg 與 FieldMeta，在 `form.py` 定義 Qt-free Form。框架透過 adapter 的 `make_form(ctx)` 呼叫它。
 core.py 的 Experiment 擁有 run 與 analyze 的計算；gui.py 只接線、解析來源、決定 writeback 與 operator guide。

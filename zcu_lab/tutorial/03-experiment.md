@@ -187,16 +187,16 @@ Writeback callback 提出具體 target 與值，讓 operator 審閱後套用，�
 在 `zcu_lab/definitions.py` 的 imports 加入：
 
 ```python
-from zcu_lab.v2.twotone.power_map.gui import DEFINITION as POWER_MAP
+from zcu_lab.v2.twotone.power_map import gui as power_map_gui
 ```
 
-再在 `register_all` 的 `adapters` 字典加一行，保留原本的 key：
+再在 `register_all` 的 `adapters` 字典加一行，用實驗目錄當 key：
 
 ```python
-"twotone/power_map": POWER_MAP,
+"twotone/power_map": (power_map_gui.DEFINITION, power_map_gui),
 ```
 
-Catalog 明列 Adapter 值，不掃描 class 或目錄自動註冊。完整規則見 [adapter 載入契約](../v2/measure-authoring.md#目錄佈局)。
+Catalog 從同一個模組取出 Adapter 與來源，不掃描 class 或目錄。完整規則見 [adapter 載入契約](../v2/measure-authoring.md#目錄佈局)。
 啟動 GUI 並開啟你自己的 entry／point，讓 alias 指向可供這個表單讀取的元件。
 如果 GUI 已在執行，關閉所有 tabs 並等待操作結束，再用 Reload experiments 載入新 catalog。
 修改 startup-only component 或保留的共用基礎層時，要重啟 GUI。

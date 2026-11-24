@@ -45,3 +45,9 @@ AC Stark 的拆檔方式是 designer 代裁，使用者尚未覆核。公開命�
 ## 依據
 
 命名與 AC Stark 的討論均在 2026-11-24。AC Stark 的靜態比較以本 repo `88e835085` 為基準。原始工作檔未入庫。
+
+## 後記：來源隨成功登錄交付
+
+2026-11-25，designer 檢視候選 `58d052f38` 後代裁：gate 透過同一筆成功登錄取得 Adapter 常量或 factory 的宣告模組。原候選拿 Run callable 的模組代替；當時各葉的 Run 剛好位於同目錄，但 Run 的所在位置不能證明 Adapter 在哪裡宣告。Guide 路徑和 Native tag 也各有用途，不能代替來源。另建一份來源表會要求作者在搬目錄時同步維護兩份登錄資訊。
+
+來源只交給查核工具，不放進 Framework Registry。Adapter 仍自行宣告本地 Run，兩個 factory 仍從接收登錄的 Registry 取範本。契約見 [ADR-0072〈Lab 定義與組合根〉](../adr/0072-module-boundaries.md#lab-定義與組合根)。這項代裁尚待使用者覆核。原始工作檔未入庫。
