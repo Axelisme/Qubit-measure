@@ -178,7 +178,8 @@ Projection diagnostics live in `extras` for the latest solved round. Both
 arrays are indexed by flattened C-order point and then by transition in
 logical-event order, including the transition to the terminal event.
 
-- `ftf.projection_continued_states` counts the DC source states solved for that transition.
+- `ftf.projection_continued_states` counts the DC source states selected by the floor,
+  including states that use an earlier solved row. Family routing counts actual Engine work.
 - `ftf.projection_identity_weight` sums the source marginal assigned to identity
   rows for that transition. FTF does not discard this weight.
 
@@ -391,8 +392,13 @@ populations and conditional response when the snapshot and solve shape match.
 The split pilot round does not supply a preparation for the next full batch.
 Every round draws a new stream.
 Opening another acquire invalidates the old session and drops its references.
-Projection continuation densities exist only during span preparation. A later shot, round or acquire does not inherit a preceding
-outcome's terminal state or sampled herald result. Immutable outcome weights,
+Projection continuation densities exist only during span preparation. At a single
+point, two interior cells can share solved source-state rows: both must start in
+vacuum and have one span, constant flux, no microwave drive, and the same single
+flat cavity tone apart from phase. Span duration and pulse support must match
+exactly. Each cell applies the floor to its own marginal. The terminal cell is
+solved separately to retain its full density. A later shot, round or acquire does
+not inherit a preceding outcome's terminal state or sampled herald result. Immutable outcome weights,
 event populations and conditional sums follow the complete-preparation reuse
 rules below. See [ADR-0078](../../../../../docs/adr/0078-evolution-module-boundary.md#損耗漂移下的結構與-preparation-lifetime).
 On a preparation build or refresh, FTF lends the same [sampled RWA probe memo](../../../simulate/evolution/README.md#workplan-and-cache-ownership)

@@ -25,7 +25,7 @@ The tables use SHA-256 prefixes. All three blocks used FTF settings `127360cb65e
 
 | Scene | Core s/cell | Largest stage | Families | Block · commit / manifest | Scope | Status | Task or attempt |
 | --- | ---: | --- | --- | --- | --- | --- | --- |
-| `chain/len_rabi` | 13.6952 | readout | `t4`, `floquet_period` | 1 · `593426c2` / `931fa4f599f4` | 11 cells, 1 Run, warm | `ok` | [ADC readout](#adc-readout) 106.060 → 93.163 core s |
+| `chain/len_rabi` | 13.6952 | readout | `t4`, `floquet_period` | 1 · `593426c2` / `931fa4f599f4` | 11 cells, 1 Run, warm | `ok` | [ADC readout](#adc-readout) 106.060 → 93.163 core s; [Projective cell phase reuse](#projective-cell-phase-reuse) fewer source solves, no established core speedup |
 | `two_qubit/conditional_spectroscopy_heralded` | 8.2706 | evolve | `t4`, `shaped_sambe`, `single_tone_rwa`, `floquet_period`, `dop853` | 2 · `addd6c8fb` / `c2b6b9e0522e` | 11 cells, 1 Run, cold | `ok` | — |
 | `twotone/ro_optimize/chain_power` | 7.0092 | materialize | `t4` | 1 · `593426c2` / `931fa4f599f4` | 11 cells, 1 Run, warm | `ok` | [ADC flat jump](#adc-flat-jump) 67.333 → 54.952 core s |
 | `twotone/ro_optimize/chain_freq` | 6.9663 | materialize | `t4` | 1 · `593426c2` / `931fa4f599f4` | 11 cells, 1 Run, warm | `ok` | [ADC flat jump](#adc-flat-jump) 67.716 → 55.282 core s |
@@ -154,6 +154,10 @@ The pairs show a change tested on fixed inputs. They do not overwrite the histor
 ### Same-carrier fold
 
 [Same-carrier folding](2026-11-23-same-carrier-merge.md#實測) compares `2b8f628c3` → `0d851985`. The record identifies workloads, not a manifest hash. Every workload ran once per side after one warmup, on CPU with one worker. Plain RB used depths `[0,4,8]`, sequence seed 701, sim seed 123, two reps and one round. CZ optimize used only E0, with 24 retained states and raw gain. Chevron used 2 × 2 cells, gg herald, 100 reps and one round. The CPU totals are for these workloads only, not the survey grids.
+
+### Projective cell phase reuse
+
+[The reduced pair](2026-11-24-projective-cell-phase-reuse.md#實測) compares `f7a88acef` → `c22947414` on manifest `589a368693c2`. Each side ran one cold-cache `chain/len_rabi` Run with 11 points, 100 reps, 100 rounds, seed 123 and one CPU worker in the same exclusive slot. The first preparation solved 3,229 → 2,967 source rows; the maps and Result matched. Full Run core was 96.324 → 96.032 s. With one observation per side, this does not establish a whole-Run speedup. The historical survey used a different manifest and a warm Run.
 
 ### Materialize follow-up
 
