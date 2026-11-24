@@ -101,10 +101,9 @@ Raman／STIRAP 共用已分類 counts 的[可選校正](support/singleshot/centr
 Mux IQ 平均轉換在 [support/mux.py](support/mux.py)，
 AC Stark／CKP 的連續共振中心擷取在 [support/resonance.py](support/resonance.py)。
 兩個 GE core 各自排 Post 版面，並用 [support/singleshot/classification_plot.py](support/singleshot/classification_plot.py) 畫分類色的密度、疊分類線與中心，再將兩格準備圖的 I/Q 範圍對齊。
-Two-qubit chevron／constructive phase 各自在 `run()` 寫出序列，
-共用型別在 [\_rabi_scan.py](two_qubit/_rabi_scan.py)，數值擬合在
-[\_rabi_analysis.py](two_qubit/_rabi_analysis.py)。兩個實驗各自在 `analyze()` 畫自己的圖，
-[paired_counts.py](support/paired_counts.py) 檢查分類校準並換算計數，不讀 alias 或元件。
+普通 Chevron 與 Constructive Phase 的共用掃描 Result 在 [\_rabi_scan.py](two_qubit/_rabi_scan.py)。
+[Duration fit](support/rabi_duration.py) 擁有普通 Chevron、Constructive Phase 與 heralded Chevron 的加權餘弦擬合，普通 CZ amplitude 只用該餘弦畫首週擬合線。
+各實驗保留自己的序列和圖。[paired_counts.py](support/paired_counts.py) 檢查分類校準並換算計數，不讀 alias 或元件。
 Two-qubit 與 heralded RB 共用 [paired RB analysis](support/paired_rb_analysis.py) 的 `RBOptions` 與 `RBEstimate`。Notebook 從該模組 import 這兩個型別。
 Two-qubit 的 conditional phase 與 heralded conditional phase 呼叫 `fit_phase_slopes`；斜率的單位與週期代表值見 [fitting〈Phase regressions〉](../../lib/zcu_tools/analysis/fitting/README.md#phase-regressions)。
 Readout-chain 的 chain_power／chain_freq／chain_length 各自在 `run()` 寫出掃描與 16-read shot，
