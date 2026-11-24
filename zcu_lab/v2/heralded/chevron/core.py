@@ -2,6 +2,7 @@
 
 from collections.abc import Callable
 from dataclasses import dataclass
+from textwrap import fill
 from typing import Annotated, ClassVar, Self
 
 import numpy as np
@@ -12,6 +13,7 @@ from matplotlib.figure import Figure
 from matplotlib.text import Text
 from numpy.typing import NDArray
 from pydantic import Field, model_validator
+from zcu_tools.analysis.shot_uncertainty import class_probability_covariance
 from zcu_tools.cfg_model import ConfigBase, FieldMeta
 from zcu_tools.experiment import (
     Experiment,
@@ -50,6 +52,12 @@ from zcu_lab.v2.support.paired_counts import (
     validate_qubit_tones,
 )
 from zcu_lab.v2.support.paired_drive import SweptQubitDriveCfg
+from zcu_lab.v2.support.rabi_duration import (
+    RabiRate,
+    ReturnData,
+    cosine,
+    fit_duration_rates,
+)
 
 
 class HeraldedChevronCfg(ConfigBase):
@@ -365,9 +373,10 @@ class HeraldedChevronExp(Experiment[HeraldedChevronResult, HeraldedChevronCfg]):
     ) -> None:
         """Plot conditional return from saved joint counts, with no writeback.
 
-        Pool the nominal preparations and select the lowest finite return only
-        for the target (herald ee, terminal gg). A missing saved cfg, mismatched
-        axes or invalid count rows raise ValueError.
+        Pool the nominal preparations and fit duration traces only for the
+        target (herald ee, terminal gg). The lowest finite target return
+        selects a slice; unresolved rates retain their reasons. Missing saved
+        cfg, mismatched axes or invalid count rows raise ValueError.
         """
         del options
         cfg, result = source.cfg, source.result
@@ -384,6 +393,7 @@ class HeraldedChevronExp(Experiment[HeraldedChevronResult, HeraldedChevronCfg]):
 
         # Select a duration slice from the measured target only.
         target = maps[-1]
+        row = len(result.frequencies) // 2
         if np.isfinite(target).any():
             row, col = np.unravel_index(np.nanargmin(target), target.shape)
             fig.axes[3].plot(
@@ -393,6 +403,19 @@ class HeraldedChevronExp(Experiment[HeraldedChevronResult, HeraldedChevronCfg]):
                 "Heralded CZ chevrons · Qubit1 / Qubit2\n"
                 "Gray: no measured probability · + selects the target duration slice"
             )
+
+        # Preserve all nine terminal outcomes for the target's fit weights and SEM.
+        counts = pooled[..., 1, 1, :, :]
+        totals = counts.sum(axis=(-2, -1))
+        data = ReturnData(
+            joint_probabilities(counts).reshape(*target.shape, 9),
+            np.isfinite(totals) & (totals > 0),
+            totals,
+        )
+        rates = fit_duration_rates(result.durations, data)
+        _plot_duration_rates(plots, result.frequencies, rates)
+        indices = sorted({0, int(row), len(result.frequencies) - 1})
+        _plot_duration_traces(plots, result, counts, data, rates, indices)
 
 
 def _class_axes(cfg: HeraldedChevronCfg) -> tuple[Classify, ...]:
@@ -571,3 +594,106 @@ def _draw_returns(
     for (image, missing), values in zip(panels, maps, strict=True):
         image.set_array(values)
         missing.set_visible(not np.isfinite(values).any())
+
+
+_TARGET_TITLE = "Target · Herald ee → |11⟩ → terminal gg"
+
+
+def _plot_duration_rates(
+    plots: Plots,
+    frequencies: NDArray[np.float64],
+    rates: tuple[RabiRate, ...],
+) -> None:
+    """Show target rate estimates and finite fits below the duration-span limit."""
+    fig, ax = plots.subplots(num="rabi_rate", figsize=(7, 5.1), layout="constrained")
+    values = [rate.rate if rate.rate is not None else np.nan for rate in rates]
+    errors = [
+        rate.uncertainty if rate.uncertainty is not None else np.nan for rate in rates
+    ]
+    ax.errorbar(
+        frequencies,
+        values,
+        yerr=errors,
+        fmt=".-",
+        color="C0",
+        label="Selected rates ± fit SE",
+    )
+    rejected = [
+        (freq, abs(rate.parameters[2]), rate.minimum_rate_mhz)
+        for freq, rate in zip(frequencies, rates, strict=True)
+        if rate.parameters is not None and rate.minimum_rate_mhz is not None
+    ]
+    if rejected:
+        x, y, limits = zip(*rejected, strict=True)
+        ax.plot(x, y, "x", color="C3", label="Unresolved fitted rates")
+        floor = limits[0]  # All frequencies share the saved duration span.
+        ax.axhline(
+            floor,
+            color="0.45",
+            ls="--",
+            label=f"Inverse duration span: {floor:.4g} MHz",
+        )
+    missing = sum(rate.rate is None and rate.parameters is None for rate in rates)
+    fig.suptitle(f"{_TARGET_TITLE}\nDuration-fit rates")
+    ax.set(
+        xlabel=_FREQUENCY_LABEL,
+        ylabel="Rabi rate (MHz)",
+        title=f"{missing} scan slices without a usable fit" if missing else "",
+    )
+    ax.legend(loc="upper center", bbox_to_anchor=(0.5, -0.22), ncols=2)
+
+
+def _plot_duration_traces(
+    plots: Plots,
+    result: HeraldedChevronResult,
+    counts: NDArray[np.float64],
+    data: ReturnData,
+    rates: tuple[RabiRate, ...],
+    indices: list[int],
+) -> None:
+    """Show selected target slices, measured shot SEM, and cosine diagnostics."""
+    fig, _ = plots.subplots(
+        num="rabi_traces",
+        nrows=len(indices),
+        sharex=True,
+        figsize=(7, 8),
+        layout="constrained",
+    )
+    fig.suptitle(f"{_TARGET_TITLE}\nDuration slices")
+    durations = result.durations
+    xs = np.linspace(durations[0], durations[-1], 401)
+    for ax, i in zip(fig.axes, indices, strict=True):
+        rate = rates[i]
+        covariance = class_probability_covariance(counts[i].reshape(-1, 9))
+        ax.errorbar(
+            durations,
+            data.populations[i, :, 0],
+            yerr=np.sqrt(covariance[:, 0, 0]),
+            fmt="." if rate.parameters is not None else ".-",
+            color="C0",
+            label="Measured ± shot SEM",
+        )
+        if rate.parameters is not None:
+            ax.plot(xs, cosine(xs, *rate.parameters), "k-", label="Cosine fit")
+        title = f"{result.frequencies[i]:g} MHz · "
+        title += (
+            f"Rabi rate = {rate.rate:.4g} ± {rate.uncertainty:.2g} MHz"
+            if rate.rate is not None
+            else "\n" + fill(rate.reason or "Rate unavailable", width=54)
+        )
+        quality = rate.quality
+        if (
+            quality is not None
+            and quality.r2 is not None
+            and quality.normalized_residual_rms is not None
+        ):
+            title += f"\nR² = {quality.r2:.3g} · Normalized RMS = {quality.normalized_residual_rms:.3g}"
+        ax.set_title(title)
+    entries = {
+        label: handle
+        for ax in fig.axes
+        for handle, label in zip(*ax.get_legend_handles_labels(), strict=True)
+    }
+    fig.legend(entries.values(), entries.keys(), loc="outside lower center", ncols=2)
+    fig.axes[-1].set_xlabel(_DURATION_LABEL)
+    fig.supylabel("P(terminal gg | herald ee)")

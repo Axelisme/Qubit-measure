@@ -25,7 +25,9 @@ def _analyze(req: AnalyzeRequest[HeraldedChevronRun, None], *, plots: Plots) -> 
 
 def _summary_lines(source: HeraldedChevronRun) -> tuple[str, ...]:
     cfg = source.cfg
-    return () if cfg is None else (f"Reps×Rounds {cfg.reps}×{cfg.rounds} per preparation",)
+    return (
+        () if cfg is None else (f"Reps×Rounds {cfg.reps}×{cfg.rounds} per preparation",)
+    )
 
 
 DEFINITION = Adapter(
