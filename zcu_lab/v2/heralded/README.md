@@ -10,7 +10,7 @@
 
 | Registry key／guide | 各類在分析中的用途 |
 | --- | --- |
-| [`heralded/rb`](rb/guide.md) | gg、ge、eg、ee 分別計同類回返。每臂共用衰減 `p`，各類保有自己的振幅與偏移。四類擬合和成對 seed 重抽樣的信賴區間都可用才發布主估計。 |
+| [`heralded/rb`](rb/guide.md) | gg、ge、eg、ee 分別計同類回返。各類有自己的振幅；每臂共用衰減 `p`。主估計自由擬合各類偏移，並要求成對 seed 重抽樣的信賴區間。Analyze 並列偏移固定為 1/4 的 CZ fidelity 點估計。 |
 | [`heralded/conditional_phase`](conditional_phase/guide.md) | 對齊四類的實際 spectator 與 X/Y 符號。每個 spectator、每個頻點共用斜率，各類保有自己的 contrast 與偏移。缺類不改用 gg-only。整個掃頻窗的斜率差完整且有唯一 π 交點才提議寫回。 |
 | [`heralded/conditional_spectroscopy`](conditional_spectroscopy/guide.md) | 先做名目 I／Xπ 準備，再依實測 herald 分開畫四支條件頻譜。沒有共用擬合或寫回。 |
 | [`heralded/cz_amplitude`](cz_amplitude/guide.md) | 名目準備和 herald 之後，在 CZ 前後都對兩顆 qubit 打 Xπ。比較四類同類回返，只用 gg 擬合首週 gain，不寫回。 |

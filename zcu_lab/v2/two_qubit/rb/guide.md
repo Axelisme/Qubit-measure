@@ -23,6 +23,8 @@ Each shot runs **optional Reset → random Clifford prefix → inverse recovery 
 
 CZ error is `3/4 × (1 − p_interleaved/p_reference)`; reference error per Clifford is `3/4 × (1 − p_reference)`. The 95% bootstrap CI resamples whole paired seeds, not individual shots (default 1000 draws, bootstrap seed 42). It omits systematic errors such as readout bias and gate-dependent noise. A negative value diagnoses slower interleaved decay; keep its sign but do not report a physical negative error.
 
+The fit caption reports two CZ fidelity estimates, `F_CZ = 1 − CZ error`. **Free B** uses the displayed fit and is the only estimate with a seed CI. **B = 1/4** refits the same equal-seed means with `A p^depth + 1/4` in each arm and reports a point estimate. Read it when the four computational states plausibly mix to equal populations; compare it with free B to see how much the assumed tail changes the estimate. Large leakage breaks the 1/4 asymptote. In particular, fixing the interleaved tail too low can make its decay look slower and inflate the fidelity estimate. Agreement with channel-derived fidelity in simulation does not validate this fit on hardware.
+
 If the first nonzero depth misses the early decay, add shallower depths or check depth 0/1 and the pulse/readout setup. If a resolved 1/e depth of 20 Cliffords lacks tail coverage, extend toward 60 and compare the uncertainty. A broad CI with small shot SEM calls for more independent seeds. The ratio does not specify which CZ knob to change. There is no writeback.
 
 See the [legacy load note](../guide.md#opendefaults-與人工-apply) and [`zcu_lab/v2/operator-workflow.md`](../../operator-workflow.md).

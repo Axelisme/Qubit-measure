@@ -401,6 +401,13 @@ class RBExp(Experiment[RBResult, RBCfg]):
                 f"CZ error estimate = {estimate.gate_error:.3g}; 95% seed CI "
                 f"[{estimate.error_ci_low:.3g}, {estimate.error_ci_high:.3g}]"
             )
+            # Equal errors keep the fit unweighted; a 1 pp scale avoids a small
+            # objective near the minimum when fitting probabilities.
+            report.append(
+                paired_rb_analysis.cz_fidelity_comparison(
+                    estimate, data.depths, means[None], np.full_like(means[None], 0.01)
+                )
+            )
             for label, arm in zip(
                 ("Reference", "CZ interleaved"), fit.arm_fits, strict=True
             ):

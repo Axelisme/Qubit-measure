@@ -148,6 +148,48 @@ def test_shared_decay_recovers_local_parameters_and_full_covariance(
     assert abs(fit.covariance[first, second]) > 1e-11
 
 
+@pytest.mark.parametrize("groups", [1, 4])
+def test_fixed_offset_recovers_decay_with_quarter_asymptote(groups: int) -> None:
+    depths = np.array([0, 4, 9, 16, 25, 40, 60, 80], dtype=np.int64)
+    curves = np.stack([0.25 + 0.55 * 0.98**depths, 0.25 + 0.45 * 0.95**depths])
+    fractions = np.linspace(1.0, 0.7, groups)
+    means = 0.25 + fractions[:, None, None] * (curves[None] - 0.25)
+    errors = np.full_like(means, 0.01)
+
+    result = owner.fit_joint_decay(depths, means, errors, fixed_offset=0.25)
+
+    assert result.fit.values["p_0"] == pytest.approx(0.98, abs=3e-5)
+    assert result.fit.values["p_1"] == pytest.approx(0.95, abs=3e-5)
+    np.testing.assert_allclose(result.curves, means, atol=0.0003)
+
+
+def test_fixed_offset_below_interleaved_tail_increases_decay_ratio() -> None:
+    depths = np.array([0, 4, 9, 16, 25, 40, 60, 80], dtype=np.int64)
+    means = np.array(
+        [
+            [0.25 + 0.55 * 0.98**depths, 0.40 + 0.42 * 0.95**depths],
+            [0.25 + 0.42 * 0.98**depths, 0.40 + 0.35 * 0.95**depths],
+        ]
+    )
+    errors = np.full_like(means, 0.01)
+    free = owner.fit_joint_decay(depths, means, errors).fit.values
+    fixed = owner.fit_joint_decay(depths, means, errors, fixed_offset=0.25).fit.values
+
+    assert free["p_1"] == pytest.approx(0.95, abs=3e-5)
+    assert fixed["p_0"] == pytest.approx(0.98, abs=3e-5)
+    # For this elevated interleaved tail, constraining B forces a slower decay.
+    # The larger p_interleaved / p_reference raises the CZ fidelity estimate.
+    assert fixed["p_1"] / fixed["p_0"] > free["p_1"] / free["p_0"] + 0.01
+
+
+@pytest.mark.parametrize("offset", [-0.01, 1.01, np.nan, np.inf])
+def test_fixed_offset_rejects_values_outside_probability_range(offset: float) -> None:
+    depths = np.array([0, 4, 9, 16], dtype=np.int64)
+    means = np.array([[0.25 + 0.55 * 0.98**depths, 0.25 + 0.45 * 0.95**depths]])
+    with pytest.raises(ValueError, match="fixed_offset"):
+        owner.fit_joint_decay(depths, means, np.ones_like(means), fixed_offset=offset)
+
+
 def test_recovers_two_decays_on_one_iq_axis_and_discards_incomplete_pairs() -> None:
     depths = np.array([1, 4, 9, 16, 25, 40], dtype=np.int64)
     expected = np.array([0.98, 0.96])

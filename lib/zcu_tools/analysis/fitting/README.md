@@ -1,6 +1,6 @@
 # zcu_tools.analysis.fitting
 
-**Last updated:** 2026-11-24，RB 多組共用 decay
+**Last updated:** 2026-11-25，RB 固定漸近值的擬合
 
 **讀者：** lab-author。擬合模型、數值輸入、結果與失敗契約速查。
 
@@ -59,8 +59,10 @@ binomial variance，不改變 seed 的權重。它回傳 `RBSeedStatistics`，�
 使用的 binomial 標準誤。`rb.seed_standard_deviation` 也能從未齊全的 `(seed,arm,depth)`
 實數曲線計算各格 seed 間的樣本標準差。`rb.fit_joint_decay` 接受 depths 與
 `(G,2,depth)` means／errors，回傳 `RBJointDecayFit` 的 global `SharedFitResult` 與曲線。
-第一軸至少有兩組。每臂共用一個 decay，各組各臂有自己的 amplitude／offset。Covariance
-以 reduced chi-square 縮放。結果可把每臂的 p 和 covariance 換成 1/e 衰減長度與變異數。
+每臂共用一個 decay，各組各臂有自己的 amplitude。預設各組各臂各自擬合漸近值 B，
+第一軸至少有兩組。給定 `fixed_offset` 時，各組各臂的 B 都固定為該機率，可以只擬合一組。
+`fixed_offset` 超出 [0, 1] 或非有限時 raise ValueError。Covariance 以 reduced chi-square 縮放。
+結果可把每臂的 p 和 covariance 換成 1/e 衰減長度與變異數。
 Lab 解讀 herald 與 d=4。數值工具的 owner 邊界見
 [ADR-0085](../../../../docs/adr/0085-numerical-fitting-owners.md)。
 

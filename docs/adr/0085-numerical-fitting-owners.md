@@ -19,7 +19,7 @@ date: 2026-11-12
 | --- | --- |
 | ALLXY | Gate-pair sequence、power error、detune error 的模型入口，以及 sequence、實數訊號的擬合入口。擬合一律求 center、contrast 與兩個 coherent errors，g/e 位準可超出量測極值。 |
 | IRB | `depths`、`signals`、`bootstrap_samples`、`bootstrap_seed` 的成對 decay 與 bootstrap 主入口。共同 IQ 投影另有入口，供主 fitter 與即時圖共用。 |
-| 雙比特 RB | `survival`、`totals` 的成對 seed 統計入口，以及 `depths`、`means`、`errors` 的共享 decay 擬合入口，接受至少兩組，每臂共用一個 decay。 |
+| 雙比特 RB | `survival`、`totals` 的成對 seed 統計入口，以及 `depths`、`means`、`errors` 的共享 decay 擬合入口，每臂共用一個 decay。自由擬合各組各臂的漸近值 B 時至少兩組；指定共同的 `fixed_offset` 時至少一組。 |
 | Gate-count quadrature | `n`、`quadratures`、`variances`、`acquired_shots` 的共同 slope 擬合與 alias 判斷入口。 |
 | Phase modulation | `phases`、`squared_rates` 的 sine／cosine 回歸、最大相位與 covariance 傳播入口。 |
 | Phase slope | `n`、`phase_degrees`、`variances` 的 unwrap 與加權直線擬合入口。 |
