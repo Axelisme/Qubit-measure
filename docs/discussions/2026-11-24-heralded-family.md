@@ -41,6 +41,10 @@ basis:
 - 不讓 `heralded` 直接 import 普通實驗，即使其 helper 改成公開名稱也會跨既有 leaf 邊界。不為兩家族增例外，也不複製 mux 驗證與 RB 排程。
 - 本次不加 heralded joint readout 或 constructive phase。前者會重新定義分析量；後者的模型比較未顯示多類能提供新的相位選擇，沒有實機判據支持新增入口。
 - 兩個四類共同擬合不採可用類子集。缺一類時，主估計的組成會改變。保留觀測與原因，不把 gg-only 或部分擬合當作四類結果。這是 designer 代裁，使用者未覆核。
+- CZ amplitude 不採只在 CZ 前補碼、讀出後反標籤。這會讓 herald gg 改看 terminal ee，與普通量測的終端分類不同。若普通和 heralded 兩葉各做首週擬合，就得維護兩份權重、完整前綴與拒絕條件；上提到 lib 則把 Lab 的校準條件變成沒有其他 caller 的公共介面。首週擬合由中立的 [`support/cz_return.py`](../../zcu_lab/v2/support/cz_return.py) 持有。這是 designer 代裁，使用者未覆核。
+- Chevron 不仿 CZ amplitude 在 drive 前後都加雙 Xπ，因為會多一段脈衝與等待。也不省末端 contrast，否則目標會改看 terminal ee。保留四類回返圖，只擬合 herald ee 的目標。這是 designer 代裁，使用者未覆核。
+- CZ optimize 不將缺類填成零、不只平均可用類，也不按各類可用 seed 改權重。這些做法會讓不同候選的分數失去可比性。每候選也不跑多深度 RB，因為它會改變 CMA 的損失並增加取數，且與獨立 RB 驗收重疊。這是 designer 代裁，使用者未覆核。
+- Idle ZZ 不沿用私有 multi-trace helper。直接引用會跨家族，搬其行為也會迫使各 trace 的衰減時間相同。普通和 heralded 兩葉不各寫一份 weighted fit，以免重複維護初值、界限與 covariance。新葉若改用舊 unweighted 入口，就不能用同一估計器與普通版對照。二段擬合會改變目標函式；另寫 profile-frequency solver 則要再驗搜尋與 covariance。這是 designer 代裁，使用者未覆核。
 
 ## 先例與仍適用的邊界
 
