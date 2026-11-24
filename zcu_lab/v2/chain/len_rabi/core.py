@@ -3,7 +3,7 @@
 One cycle is one rep: the thermalisation wait K (relax_delay), then eight
 blocks of (Rabi pulse of length x, read, read). The host reduces each cycle to
 65 numbers and keeps only running sums. Analysis fits all 65 numbers jointly
-with a Rabi curve, seeded by the first-read fit or the saved length sweep.
+with a Rabi curve after scoring trial frequencies on all 65 numbers.
 """
 
 from __future__ import annotations
@@ -71,8 +71,8 @@ class ChainLenRabiAnalysis(JointResidualDiagnostics):
 
     pi_len = 1/(2f) is in µs; f is in MHz. The errors are Wald standard errors,
     and reliability is the inverse phase uncertainty from f_err over the sweep.
-    first_read_pi_len (µs) seeds the joint fit when available; otherwise it is
-    None.
+    first_read_pi_len (µs) supplies one trial for joint f when available;
+    otherwise it is None.
     """
 
     pi_len: float
@@ -227,9 +227,10 @@ class ChainLenRabiExp(Experiment[CycleSums, ChainLenRabiCfg]):
     ) -> ChainLenRabiAnalysis:
         """Fit all 65 numbers jointly, even if the first read gives no estimate.
 
-        Use the first-read damped cosine's π length x_π to seed f = 1/(2 x_π).
-        If that fit cannot estimate π, use 3/(4 max|length|) from the saved axis
-        for the one joint fit. The first-read figure still shows data and SEM.
+        Use the first-read damped cosine's π length x_π for one frequency trial
+        f = 1/(2 x_π), or 3/(4 max|length|) if it cannot estimate π. The fitter
+        scores frequency trials on all 65 features and runs one joint fit.
+        The first-read figure still shows data and SEM.
         Report joint π length, f, Wald errors, R and residual diagnostics without
         a quality threshold. Other input and joint fit errors propagate.
         """
@@ -237,7 +238,7 @@ class ChainLenRabiExp(Experiment[CycleSums, ChainLenRabiCfg]):
         sums = source.result
         lengths = sums.axis
 
-        # 1. Fit the first-read IQ to seed the joint model.
+        # 1. Estimate one trial frequency from the first-read IQ.
         seed_signal, seed_sem = first_read_projection(sums)
         try:
             seed_fit = fit_rabi(lengths, seed_signal, decay=True, init_phase=0.0)

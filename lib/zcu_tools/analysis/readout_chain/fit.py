@@ -9,6 +9,7 @@ from ._cycle_coordinates import NUISANCE_NAMES, endpoints_of, parameter_vector
 from ._cycle_emission import simplex
 from ._cycle_layout import CENTERS, LANDING, RETENTION, THERMAL, VARIANCE
 from ._cycle_solver import solve_joint, starting_nuisance
+from ._rabi_frequency import RabiCycleModel
 from ._rate_solver import solve_rate
 from .cycle import CYCLE_FEATURE_COUNT, CycleSums, validate_cycle_sums
 from .model import Array, CycleModel, CycleNuisances
@@ -79,6 +80,8 @@ def fit_cycle(
     """Fit saved cycle feature means with a three-state curve or rate model.
 
     For CycleModel, init maps every curve name to a finite in-bounds start.
+    The built-in Rabi model scores the supplied frequency and a frequency grid
+    against all 65 features to select one joint start. Other curves use init as is.
     For RateModel, init is exactly {"t1": textbook_time}, a finite time >= 1e-3
     in axis units; all three pair rates start at its inverse. No textbook fit
     runs internally. Nuisances start from moment geometry and physical seeds.
@@ -92,13 +95,13 @@ def fit_cycle(
     Return CycleFit without changing inputs. Raise ValueError for malformed
     sums/model/curve/init, RuntimeError if a joint optimizer stage does not
     converge, and numpy.linalg.LinAlgError for non-positive-definite model
-    covariance. The measured covariance used by cycle_residual_projection
-    is not needed by this fit.
+    covariance. The Rabi frequency scan uses the supported directions of the
+    pooled measured covariance, so rank loss alone does not prevent the fit.
 
     The model assumes independent Gaussian read noise, Markov states,
     independent thermalized cycles and the emission law on CycleNuisances.
-    There is no search across curve-parameter starts, model selection,
-    bootstrap or profile likelihood. Wald errors are local asymptotic
+    There are no joint fits from alternate starts, model selection, bootstrap
+    or profile likelihood. Wald errors are local asymptotic
     approximations; competing minima, active bounds, low contrast and few
     cycles can invalidate coverage. Optimization keeps read-landing coordinates
     one machine epsilon inside bounds to avoid nonregular deterministic jumps.
@@ -115,6 +118,8 @@ def fit_cycle(
         n = 3
     else:
         theta = parameter_vector(model, init)
+        if isinstance(model, RabiCycleModel):
+            theta[0] = model.frequency_start(sums, means, float(theta[0]))
         q0 = np.r_[theta, starting_nuisance(means)]
         solution = solve_joint(model, sums.axis, means, sums.cycle_count, q0)
         n = len(model.parameter_names)
