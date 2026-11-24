@@ -257,19 +257,19 @@ def drive_track(
     event has the aligned per-point arrays defined by simulate.boundary.EventSlot
     in ticks/MHz/degrees, interpreted with the request's time_base. port is a nonempty numeric SecularDrive name, not a
     generator index. memo follows envelope_specs' template-local lifetime.
-    Absolute support endpoints round independently to nearest 2 ns, ties even.
+    Support uses compiled start and end ticks without resnapping (ADR-0084).
     Phase retains the common t=0 carrier origin, including phase_reference_ticks.
     Signed gains and complex samples are unchanged; inactive rows remain masked.
     Returned arrays own read-only copies. No calibration or physics is applied.
     Invalid supports, shapes, sample values or indices raise ValueError through
     DriveTrack/EnvelopeSpec. Inputs are not modified.
     """
-    quantized = time_base.ns(event.start_ticks, quantum_ns=2)
-    end = time_base.ns(event.start_ticks + event.duration_ticks, quantum_ns=2)
+    start = time_base.ns(event.start_ticks)
+    end = time_base.ns(event.start_ticks + event.duration_ticks)
     return DriveTrack(
         port,
-        quantized,
-        end - quantized,
+        start,
+        end - start,
         event.frequency_mhz / 1000,
         np.deg2rad(event.phase_deg)
         - 2
