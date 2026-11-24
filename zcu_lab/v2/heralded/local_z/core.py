@@ -9,6 +9,32 @@ import numpy as np
 from matplotlib.ticker import MaxNLocator
 from numpy.typing import NDArray
 from pydantic import Field, model_validator
+from zcu_tools.analysis.fitting import FitQuality
+from zcu_tools.analysis.fitting.phase_line import fit_phase_line
+from zcu_tools.analysis.fitting.phase_slopes import PhaseSlopeFit
+from zcu_tools.cfg_model import ConfigBase, FieldMeta
+from zcu_tools.experiment import (
+    Experiment,
+    GroupedAxesSpec,
+    GroupedLoadData,
+    VariableAxisSpec,
+    VariableSpec,
+    VariableZSpec,
+)
+from zcu_tools.experiment.context import RunContext
+from zcu_tools.experiment.records import RunRecord
+from zcu_tools.experiment.v2.runtime import Schedule, SignalBuffer
+from zcu_tools.plotting.plots import Plots
+from zcu_tools.program.v2 import (
+    Classify,
+    Pulse,
+    Reset,
+    SweepCfg,
+    TimelineBuilder,
+    shot_sums,
+)
+from zcu_tools.program.v2.modules import MuxReadout
+
 from zcu_lab.v2.support.heralded_projection import align_terminal_counts
 from zcu_lab.v2.support.paired_counts import (
     POINT_ALIAS_DESCRIPTION,
@@ -24,22 +50,6 @@ from zcu_lab.v2.support.paired_ramsey import (
     phase_variance,
     wrap_phase,
 )
-from zcu_tools.analysis.fitting import FitQuality
-from zcu_tools.analysis.fitting.phase_line import fit_phase_line
-from zcu_tools.analysis.fitting.phase_slopes import PhaseSlopeFit
-from zcu_tools.cfg_model import ConfigBase, FieldMeta
-from zcu_tools.experiment import (
-    Experiment,
-    GroupedAxesSpec,
-    GroupedLoadData,
-    VariableAxisSpec,
-    VariableSpec,
-    VariableZSpec,
-)
-from zcu_tools.experiment.records import RunRecord
-from zcu_tools.plotting.plots import Plots
-from zcu_tools.program.v2 import Pulse, Reset
-from zcu_tools.program.v2.modules import MuxReadout
 
 from ..counts import terminal_counts
 
@@ -308,6 +318,75 @@ class LocalZHeraldedExp(Experiment[LocalZHeraldedResult, LocalZHeraldedCfg]):
             result_builder=restore_result,
         )
     )
+
+    def run(
+        self, config: LocalZHeraldedCfg, *, context: RunContext
+    ) -> LocalZHeraldedResult:
+        """Acquire both target projections with a visible herald before preparation.
+
+        Gate count is a host axis; target and projection are hardware axes. Sum
+        rounds into all 81 classes without a herald mask. Config stays unchanged.
+        """
+        ns = np.asarray(config.gate_count, dtype=np.int64)
+        buffer = SignalBuffer((len(ns), 2, 2, 3, 3, 3, 3), dtype=np.float64)
+        x90s = (config.x90_qubit1, config.x90_qubit2)
+        with Schedule(buffer, scope=context.scope) as sched:
+            for n, step in sched.scan("gate_count", config.gate_count):
+                builder = TimelineBuilder(
+                    context.soccfg,
+                    reps=config.reps,
+                    initial_delay=config.initial_delay,
+                    relax_delay=config.relax_delay,
+                )
+                builder.add_loop("target", 2)
+                quadrature = builder.add_sweep(
+                    "quadrature", SweepCfg(start=0, stop=90, expts=2, step=90)
+                )
+                readout = MuxReadout("readout", config.readout)
+                if config.reset is not None:
+                    builder.emit(Reset("reset", config.reset))
+                builder.emit(readout, tag="herald")
+
+                with builder.branch(by="target", align_timeline=True) as cases:
+                    for t, x90 in enumerate(x90s):
+                        with cases.case(t):
+                            builder.emit(Pulse(f"prepare_qubit{t + 1}", x90))
+                drive1 = Pulse("cz_qubit1", config.drive.qubit1)
+                drive2 = Pulse("cz_qubit2", config.drive.qubit2)
+                for gate in range(n):
+                    line1, line2 = f"drive_qubit1_{gate}", f"drive_qubit2_{gate}"
+                    builder.fork("default", into=[line1, line2])
+                    builder.emit(drive1, timeline=line1)
+                    builder.emit(drive2, timeline=line2)
+                    builder.join(line1, line2, into="default")
+                builder.delay_by_timeline()
+                with builder.branch(by="target", align_timeline=True) as cases:
+                    for t, x90 in enumerate(x90s):
+                        with cases.case(t):
+                            builder.emit(
+                                Pulse(
+                                    f"projection_qubit{t + 1}",
+                                    x90,
+                                    phase=x90.phase + quadrature,
+                                )
+                            )
+
+                builder.emit(readout, tag="terminal")
+                prog = builder.build()
+                step.run_acquire_summed(
+                    prog,
+                    context.soc,
+                    reducer=shot_sums(
+                        prog,
+                        [
+                            Classify(read, tone)
+                            for read in ("herald", "terminal")
+                            for tone in (config.qubit1_tone, config.qubit2_tone)
+                        ],
+                    ),
+                    rounds=config.rounds,
+                )
+        return LocalZHeraldedResult(ns, np.moveaxis(buffer.array, 0, 2))
 
     def analyze(
         self,
