@@ -101,7 +101,8 @@ Rπ 的 rpi_power／rpi_freq／rpi_length 各自在 `run()` 寫出掃描與 R→
 三者各自在 core 畫 score 與診斷圖；[\_rpi_common.py](twotone/ro_optimize/_rpi_common.py) 只保留共用的 `rpi_sums` 解碼、選點與格式化。
 
 K-cycle 讀出鏈實驗各自在 `run()` 寫出 (D(x), 讀, 讀) × 8 的 `builder.repeat("cycle", BLOCKS_PER_CYCLE)` 迴圈；
-各 chain core 保留可用的 first-read 起點。第一讀無估計時改用保存軸的單一起點，first-read 圖保留實測點，既有 first-read 估計欄位回傳 null。兩種情況都用完整 sums 聯合擬合 65 個特徵一次。
+各 chain core 將 first-read 估計交給 joint fitter。第一讀無估計時改用保存軸給候選值，first-read 圖保留實測點，first-read 估計欄位回傳 null。
+Amp Rabi 與 len Rabi 依全 65 個特徵比較候選週期再選起點，不只依第一讀。各 core 都用完整 sums 聯合擬合一次。
 `fit_cycle` 的 joint 估計、`J/df` 與 `cycle_residual_projection` 的畫圖契約見 [analysis〈Readout chain K-cycle〉](../../lib/zcu_tools/analysis/README.md#readout-chain-k-cycle)。
 可沿 live 方向投影時，Analyze 畫出實測點、聯合模型曲線與有正負號的逐點殘差。圖與摘要都呈現 `J`、`df`、`J/df`、χ² 期望帶的數值端點與白化殘差的 `|r| > 3` 比例。逐點序列只用於畫圖，這些數值不作為接受或拒絕擬合的門檻。
 五個 core 各自在 `run()` 建立及更新 all-number 與 first-read 的 live 曲線。

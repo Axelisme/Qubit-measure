@@ -1,6 +1,6 @@
 # `zcu_tools.analysis` 模塊重點文檔
 
-**Last updated:** 2026-11-23，逐點 contrast SEM 與 IQ 六矩
+**Last updated:** 2026-11-25，K-cycle Rabi joint 起點
 
 **讀者：** framework-dev。分析核心、純數值工具與前端 adapter 的分工速查。
 
@@ -123,15 +123,17 @@ K 後熱布居與 readout-driven steady state 不等同。稀少遠端第三態�
 ## Readout chain K-cycle
 
 Lab 的 [K-cycle 套件邊界](../../../zcu_lab/v2/README.md#套件邊界) 說明五個 chain core 的分工。
-以 [Amp Rabi 的 `ChainAmpRabiExp.analyze`](../../../zcu_lab/v2/chain/amp_rabi/core.py) 為例，core 從 first-read 估計或保存軸取得起點，再呼叫 `fit_cycle`。
+以 [Amp Rabi 的 `ChainAmpRabiExp.analyze`](../../../zcu_lab/v2/chain/amp_rabi/core.py) 為例，core 從 first-read 估計或保存軸取得一個候選頻率，再呼叫 `fit_cycle`。
 First-read 用到的 `fit_rabi`、`fit_decay_fringe` 等工具及其初猜失敗契約見 [fitting〈fitting helpers〉](fitting/README.md#fitting-helpers)。
 
 `CycleSums` 保存 K-cycle 讀出鏈逐點的 cycle count、65 個 feature sums 與跨點加總的
 product sum。`cycle_curves` 從這份 record 算出 live plot 的全 feature 曲線與第一讀曲線。
 `CycleModel` 持有作者的三態曲線、解析導數、參數名與 bounds。Rabi、T2 echo 與
 T2 Ramsey 使用這個模型。`t1_model()` 回傳 `RateModel`，以 `D₀ exp(Gx)` 表示
-自由 stochastic 初始 drive 與 detailed-balance relaxation。`fit_cycle` 從必填的 init
-以模型共變異數加權的 GMM 聯合擬合 65 個特徵，只跑主擬合，不跑巢狀診斷擬合。
+自由 stochastic 初始 drive 與 detailed-balance relaxation。`fit_cycle` 以模型共變異數加權的 GMM 聯合擬合 65 個特徵，只跑主擬合，不跑巢狀診斷擬合。
+Amp Rabi 和 len Rabi 先在實測座標上逐頻比較固定相位的 cosine。它將 caller 的 init 納入比較，
+用 pooled within-point 共變異數可辨識的方向衡量 65 個特徵的解釋力，再選一個 joint 起點。
+該共變異數不供 GMM 加權。T1、T2 及自訂曲線仍從 caller 的 init 開始。
 它回傳參數、Wald 誤差與共用 nuisances，並用最後一階段的白化殘差 `r` 計算 `J`、
 `df`、`J/df`、期望帶 `1 ± 2√(2/df)` 和 `|r| > 3` 的比例。Analyze 照實顯示數值，
 不據此拒絕擬合或標示模型合不合格。五族目前不提議寫回；日後若新增寫回，

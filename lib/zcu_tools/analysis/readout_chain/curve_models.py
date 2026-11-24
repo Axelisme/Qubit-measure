@@ -9,6 +9,7 @@ from collections.abc import Mapping
 
 import numpy as np
 
+from ._rabi_frequency import RabiCycleModel
 from .model import Array, CycleModel
 from .rate_model import RateModel
 
@@ -23,7 +24,9 @@ def rabi_model() -> CycleModel:
     uses sin²(π f x), and the e row uses cos²(π f x). The third row uses the
     same sin² weight as the g row; it is not fixed as undriven. Identical
     endpoints allow a flat response, but the third row need not be flat.
-    ``oscillation_frequency`` is ``f``, so CycleFit reports reliability.
+    ``fit_cycle`` scores trial frequencies on the full chain before choosing
+    its joint start. ``oscillation_frequency`` is ``f``, so CycleFit reports
+    reliability for the joint frequency estimate.
     """
 
     def curve(x: Array, parameters: Mapping[str, float]) -> Array:
@@ -35,7 +38,7 @@ def rabi_model() -> CycleModel:
         slope = np.pi * x * np.sin(2 * np.pi * parameters["f"] * x)
         return np.column_stack([slope, -slope, slope])[:, :, None]
 
-    return CycleModel(
+    return RabiCycleModel(
         curve, ("f",), [(0.0, np.inf)], oscillation_frequency="f", derivative=derivative
     )
 

@@ -2,8 +2,8 @@
 
 One cycle is one rep: the thermalisation wait K (relax_delay), then eight
 blocks of (Rabi pulse at gain x, read, read). The host reduces each cycle to
-65 numbers and keeps only running sums. Analysis fits all 65 numbers jointly
-with a Rabi curve, using the first-read fit or a start from the saved gains.
+65 numbers and keeps only running sums. Analysis scores trial frequencies
+on all 65 numbers, then fits them jointly with a Rabi curve.
 """
 
 from __future__ import annotations
@@ -66,8 +66,8 @@ class ChainAmpRabiAnalysis(JointResidualDiagnostics):
     f and f_err are the Rabi frequency in cycles per gain unit and its Wald SE.
     An unidentifiable frequency has NaN standard errors and reliability=None.
     Otherwise reliability is R = 1 / (2π × gain span × f_err), without a cutoff.
-    first_read_pi_amp is the π gain of the first-read fit that seeded f,
-    or None if that fit did not give an estimate.
+    first_read_pi_amp is the π gain of the first-read fit, or None if that
+    fit did not give an estimate. Its frequency is one trial for joint f.
     """
 
     pi_amp: float
@@ -207,14 +207,14 @@ class ChainAmpRabiExp(Experiment[CycleSums, ChainAmpRabiCfg]):
         *,
         plots: Plots,
     ) -> ChainAmpRabiAnalysis:
-        """Fit all 65 numbers with a Rabi curve, starting from the first read.
+        """Fit all 65 numbers with a Rabi curve from the best trial frequency.
 
         First project the first read IQ and fit a nondecaying Rabi oscillation.
-        The near-zero gain selects 0° or 180° phase. Its π gain x_π seeds
-        f = 1 / (2 x_π) in the joint fit. If the seed fitter reports no
-        estimate, start from f = 3 / (4 max(abs(gain))) instead. Publish the
-        live-direction projection and residuals as "joint residuals" and
-        first-read data and any seed fit as "fit". First-read moments that
+        The near-zero gain selects 0° or 180° phase. Its π gain x_π supplies
+        one trial f = 1 / (2 x_π), or f = 3 / (4 max(abs(gain))) if there is
+        no first-read estimate. The fitter scores trials on all 65 features.
+        Publish the live-direction projection and residuals as "joint residuals"
+        and the first-read data and any first-read fit as "fit". First-read moments that
         cannot supply a shot SEM leave the measured points without error bars.
         Return π gain and f with Wald errors, R and scalar joint diagnostics.
         The source cfg may be None. Invalid input and joint fit errors
@@ -224,7 +224,7 @@ class ChainAmpRabiExp(Experiment[CycleSums, ChainAmpRabiCfg]):
         sums = source.result
         gains = sums.axis
 
-        # 1. Seed from the first-read IQ using this experiment's fit policy.
+        # 1. Estimate one trial frequency from the first-read IQ.
         seed_iq = first_read_iq(sums)
         seed_real_signals = rotate2real(seed_iq).real
         seed_zero_signal = seed_real_signals[np.argmin(np.abs(gains))]
@@ -370,7 +370,7 @@ def _plot_first_read_fit(
     title = "First-read fit unavailable"
     if fit is not None:
         grid = np.linspace(gains.min(), gains.max(), 400)
-        ax.plot(grid, cosfunc(grid, *fit.params), label="Seed fit", ls="-")
+        ax.plot(grid, cosfunc(grid, *fit.params), label="First-read fit", ls="-")
         for name, gain, error, color in (
             ("π", fit.pi_x, fit.pi_x_err, "C2"),
             ("π/2", fit.pi2_x, fit.pi2_x_err, "C3"),
@@ -384,7 +384,7 @@ def _plot_first_read_fit(
             ax.axvspan(gain - error, gain + error, color=color, alpha=0.2)
         r2 = fit.quality.r2
         fit_quality = "R² unavailable" if r2 is None else f"R² = {r2:.4g}"
-        title = f"First-read seed    {fit_quality}"
+        title = f"First-read fit    {fit_quality}"
     fig.suptitle(f"K-cycle amplitude Rabi · {title}")
     ax.set(xlabel="Pulse gain (a.u.)", ylabel="Projected first-read IQ (a.u.)")
     ax.legend(loc="upper left", bbox_to_anchor=(1.01, 1))
