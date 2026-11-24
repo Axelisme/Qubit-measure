@@ -101,6 +101,8 @@ uv run --directory . --no-sync -- python -m apps.measure \
   --script zcu_lab/simulation_envs/six_fluxonium/startup.py
 ```
 
+On Windows, pass the same `--script` argument to [`run_measure_gui.bat`](../../../scripts/README.md#gui-與板端-server).
+
 For an agent's offline acceptance run, set `QT_QPA_PLATFORM=offscreen` before
 launch. Use
 `--no-control` to disable the remote socket when no MCP session is needed.

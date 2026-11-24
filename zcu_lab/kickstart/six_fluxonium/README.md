@@ -13,6 +13,8 @@ uv run --directory . --no-sync -- python -m apps.measure \
   --script zcu_lab/kickstart/six_fluxonium/startup.py
 ```
 
+Windows 也可將相同的 `--script` 參數傳給 [`run_measure_gui.bat`](../../../scripts/README.md#gui-與板端-server)。
+
 MCP 啟動新 GUI 時也可指定腳本：
 
 ```python

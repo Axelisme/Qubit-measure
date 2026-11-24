@@ -4,6 +4,7 @@
 
 此腳本只建立或重開 FTF entry，不連線 SoC 或 device，也不載入模擬環境。
 在 repo root 執行 `uv run --directory . --no-sync -- python -m apps.measure --script zcu_lab/kickstart/FTF/startup.py`，或在 MCP 呼叫 `connect(launch="new", script="/absolute/path/to/zcu_lab/kickstart/FTF/startup.py")`。
+Windows 也可將相同的 `--script` 參數傳給 [`run_measure_gui.bat`](../../../scripts/README.md#gui-與板端-server)。
 首次執行會按相鄰的 `entry-template.yaml` 建立 Q1、Q2、coupler、R1、R2、MG12 的 global 參數，建立並選取 `initial` point，再保存該 point 的 aliases。
 Component 範本使用 `schema_version: 3`，每顆 qubit 的 `flux` 初始為 `{offset: null, period: {}}`。既有 v1／v2 文件須先經[長期升級入口](../../../docs/parameter-upgrades.md)轉換，startup 不自動升級。
 FTF 已存在時只重開並選取 `initial`，不覆寫元件或 aliases；缺少該 point 或 entry 不完整時會報錯，已完成的操作不會自動回滾。
