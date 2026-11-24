@@ -1,6 +1,6 @@
 # `zcu_tools.experiment` — 實驗層
 
-**Last updated:** 2026-11-24，固定 Run 值的 Native 保存與還原
+**Last updated:** 2026-11-25，drive 與 readout 原生時序
 
 **讀者：** framework-dev。實驗介面、Run 資料、持久化映射與裝置操作邊界。
 
@@ -78,8 +78,10 @@ marginal counts without building a joint model; raw shots retain physical ADC
 sources independently of backend lifetime.
 
 `readout_plan.py` owns shared QICK drive/readout waveform conversion without
-settings or circuit physics. `drive_track` detaches microwave slots with the
-same support, carrier-phase and envelope semantics across the three environments.
+settings or circuit physics. `drive_track` preserves the compiled microwave start
+and end ticks when converting to ns, just as the readout planner does for generator
+pulses. All three environments share this timing, carrier-phase and envelope
+contract. See [ADR-0084](../../../docs/adr/0084-simulation-integer-time-base.md#時間契約).
 `classify_readout` separates terminal blocks, triggered nonterminal projective
 reads and untriggered cavity drives at each point. Projective reads group the
 coherent tones and bound receiver triggers at one projection time. The planner
