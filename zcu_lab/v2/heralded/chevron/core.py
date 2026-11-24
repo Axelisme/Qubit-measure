@@ -1,5 +1,6 @@
 """Two-line CZ chevrons conditioned on the measured preparation."""
 
+from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Annotated, ClassVar, Self
 
@@ -278,56 +279,82 @@ class HeraldedChevronExp(Experiment[HeraldedChevronResult, HeraldedChevronCfg]):
         """
         frequencies = sweep2array(config.frequency)
         durations = sweep2array(config.duration)
-        host_duration = any(
-            not isinstance(pulse.waveform, (ConstWaveformCfg, FlatTopWaveformCfg))
-            for pulse in (config.drive.qubit1, config.drive.qubit2)
-        )
-
         # Compare the four measured herald branches as completed rounds arrive.
-        fig, panels = _chevron_figure(context.plots, "measurement", frequencies, durations)
+        fig, panels = _chevron_figure(
+            context.plots, "measurement", frequencies, durations
+        )
         fig.show()
 
         @context.plots.on_plot_thread
         def update_view(sums: NDArray[np.float64]) -> tuple[Artist, ...]:
-            joint = np.moveaxis(sums, 0, 3) if host_duration else sums
-            _draw_returns(panels, _return_maps(_pool_preparations(joint)))
+            _draw_returns(panels, _return_maps(_pool_preparations(sums)))
             return tuple(artist for panel in panels for artist in panel)
 
-        # Read-axis order also defines the last four Result axes (Qubit1 first).
-        classes = [
-            Classify("herald", config.qubit1_tone),
-            Classify("herald", config.qubit2_tone),
-            Classify("terminal", config.qubit1_tone),
-            Classify("terminal", config.qubit2_tone),
-        ]
-        shape = (2, 2, len(frequencies), len(durations), 3, 3, 3, 3)
-        if host_duration:  # Schedule.scan writes slots along the leading axis.
-            shape = (len(durations), 2, 2, len(frequencies), 3, 3, 3, 3)
-        buffer = SignalBuffer(shape, dtype=np.float64, on_update=update_view)
+        if all(
+            isinstance(pulse.waveform, (ConstWaveformCfg, FlatTopWaveformCfg))
+            for pulse in (config.drive.qubit1, config.drive.qubit2)
+        ):
+            return self._run_fpga_duration(
+                config, context, frequencies, durations, update_view
+            )
+        return self._run_host_duration(
+            config, context, frequencies, durations, update_view
+        )
 
+    def _run_fpga_duration(
+        self,
+        cfg: HeraldedChevronCfg,
+        context: RunContext,
+        frequencies: NDArray[np.float64],
+        durations: NDArray[np.float64],
+        update_view: Callable[[NDArray[np.float64]], None],
+    ) -> HeraldedChevronResult:
+        """Acquire all nominal preparations and both sweeps in one program."""
+        shape = (2, 2, len(frequencies), len(durations), 3, 3, 3, 3)
+        buffer = SignalBuffer(shape, dtype=np.float64, on_update=update_view)
         with Schedule(buffer, scope=context.scope) as sched:
-            if host_duration:
-                for duration, step in sched.scan("duration", durations.tolist()):
-                    prog = _build_shot_program(config, context, duration=duration)
-                    step.run_acquire_summed(
-                        prog,
-                        context.soc,
-                        reducer=shot_sums(prog, classes),
-                        rounds=config.rounds,
-                        options=RunOptions(),
-                    )
-            else:
-                prog = _build_shot_program(config, context, duration=None)
-                sched.run_acquire_summed(
+            prog = _build_shot_program(cfg, context, duration=None)
+            sched.run_acquire_summed(
+                prog,
+                context.soc,
+                reducer=shot_sums(prog, _class_axes(cfg)),
+                rounds=cfg.rounds,
+                options=RunOptions(),
+            )
+        buffer.trigger_update(flush=True)
+        return HeraldedChevronResult(frequencies, durations, buffer.array)
+
+    def _run_host_duration(
+        self,
+        cfg: HeraldedChevronCfg,
+        context: RunContext,
+        frequencies: NDArray[np.float64],
+        durations: NDArray[np.float64],
+        update_view: Callable[[NDArray[np.float64]], None],
+    ) -> HeraldedChevronResult:
+        """Rebuild the sampled envelopes per length; frequency stays FPGA swept."""
+        # Schedule.scan writes duration into the leading axis of the buffer.
+        shape = (len(durations), 2, 2, len(frequencies), 3, 3, 3, 3)
+        buffer = SignalBuffer(
+            shape,
+            dtype=np.float64,
+            on_update=lambda sums: update_view(np.moveaxis(sums, 0, 3)),
+        )
+        classes = _class_axes(cfg)
+        with Schedule(buffer, scope=context.scope) as sched:
+            for duration, step in sched.scan("duration", durations.tolist()):
+                prog = _build_shot_program(cfg, context, duration=duration)
+                step.run_acquire_summed(
                     prog,
                     context.soc,
                     reducer=shot_sums(prog, classes),
-                    rounds=config.rounds,
+                    rounds=cfg.rounds,
                     options=RunOptions(),
                 )
         buffer.trigger_update(flush=True)
-        sums = np.moveaxis(buffer.array, 0, 3) if host_duration else buffer.array
-        return HeraldedChevronResult(frequencies, durations, sums)
+        return HeraldedChevronResult(
+            frequencies, durations, np.moveaxis(buffer.array, 0, 3)
+        )
 
     def analyze(
         self,
@@ -368,6 +395,16 @@ class HeraldedChevronExp(Experiment[HeraldedChevronResult, HeraldedChevronCfg]):
             )
 
 
+def _class_axes(cfg: HeraldedChevronCfg) -> tuple[Classify, ...]:
+    """Order the last four Result axes by read, then by qubit position."""
+    return (
+        Classify("herald", cfg.qubit1_tone),
+        Classify("herald", cfg.qubit2_tone),
+        Classify("terminal", cfg.qubit1_tone),
+        Classify("terminal", cfg.qubit2_tone),
+    )
+
+
 def _build_shot_program(
     cfg: HeraldedChevronCfg, context: RunContext, *, duration: float | None
 ) -> TimelineProgramV2:
@@ -381,7 +418,9 @@ def _build_shot_program(
     builder.add_loop("prepared_qubit1", 2)
     builder.add_loop("prepared_qubit2", 2)
     frequency = builder.add_sweep("frequency", cfg.frequency)
-    length = builder.add_sweep("duration", cfg.duration) if duration is None else duration
+    length = (
+        builder.add_sweep("duration", cfg.duration) if duration is None else duration
+    )
     prepare_qubit1 = Pulse("prepare_qubit1", cfg.x180_qubit1)
     prepare_qubit2 = Pulse("prepare_qubit2", cfg.x180_qubit2)
     readout = MuxReadout("readout", cfg.readout)
@@ -420,8 +459,12 @@ def _build_shot_program(
     builder.join("drive_qubit1_time", "drive_qubit2_time", into="default")
 
     builder.fork("default", into=["contrast_qubit1_time", "contrast_qubit2_time"])
-    builder.emit(Pulse("contrast_qubit1", cfg.x180_qubit1), timeline="contrast_qubit1_time")
-    builder.emit(Pulse("contrast_qubit2", cfg.x180_qubit2), timeline="contrast_qubit2_time")
+    builder.emit(
+        Pulse("contrast_qubit1", cfg.x180_qubit1), timeline="contrast_qubit1_time"
+    )
+    builder.emit(
+        Pulse("contrast_qubit2", cfg.x180_qubit2), timeline="contrast_qubit2_time"
+    )
     builder.join("contrast_qubit1_time", "contrast_qubit2_time", into="default")
     builder.emit(readout, tag="terminal")
     return builder.build()
