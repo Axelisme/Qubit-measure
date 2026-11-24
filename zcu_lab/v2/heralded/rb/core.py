@@ -362,6 +362,7 @@ def _plot_pooled_survival(
     data: RBHeraldedResult,
     fit: RBJointDecayFit | None,
     analysis: RBHeraldedAnalysis,
+    fidelity_comparison: str | None,
 ) -> None:
     """Show the pooled live return view with the joint fit and result."""
     fig, ax = plots.subplots(
@@ -372,13 +373,15 @@ def _plot_pooled_survival(
     report = ["Pooled counts · Capped: shot SEM · Pale: seed SD"]
     estimate = analysis.estimate
     if estimate is not None:
-        report.extend(
-            (
-                f"CZ error estimate = {estimate.gate_error:.3g}; 95% seed CI "
-                f"[{estimate.error_ci_low:.3g}, {estimate.error_ci_high:.3g}]",
-                f"Joint decay p: Reference {estimate.p_reference:.4g} · "
-                f"CZ interleaved {estimate.p_interleaved:.4g}",
-            )
+        report.append(
+            f"CZ error estimate = {estimate.gate_error:.3g}; 95% seed CI "
+            f"[{estimate.error_ci_low:.3g}, {estimate.error_ci_high:.3g}]"
+        )
+        if fidelity_comparison is not None:
+            report.append(fidelity_comparison)
+        report.append(
+            f"Joint decay p: Reference {estimate.p_reference:.4g} · "
+            f"CZ interleaved {estimate.p_interleaved:.4g}"
         )
         if analysis.fit_quality is not None:
             rms = [
@@ -387,13 +390,15 @@ def _plot_pooled_survival(
                 else f"{item.normalized_residual_rms:.3g}"
                 for item in analysis.fit_quality
             ]
+            grouped_rms = [
+                f"{herald}: {rms[2 * h]} / {rms[2 * h + 1]}"
+                for h, herald in enumerate(_HERALD_LABELS)
+            ]
             report.extend(
                 (
                     "Grouped fit normalized residual RMS (Reference / CZ interleaved)",
-                    " · ".join(
-                        f"{herald}: {rms[2 * h]} / {rms[2 * h + 1]}"
-                        for h, herald in enumerate(_HERALD_LABELS)
-                    ),
+                    " · ".join(grouped_rms[:2]),
+                    " · ".join(grouped_rms[2:]),
                 )
             )
     elif analysis.reason is not None:
@@ -755,6 +760,7 @@ class RBHeraldedExp(Experiment[RBHeraldedResult, RBHeraldedCfg]):
             raise ValueError("Expected heralded RB sums (seed,2,depth,3,3,3,3)")
         paired_rb_analysis.validate_counts(data.sums, (-4, -3, -2, -1))
         rendered_fit = None
+        fidelity_comparison = None
         if cfg is None:
             analysis = RBHeraldedAnalysis(
                 None,
@@ -798,8 +804,13 @@ class RBHeraldedExp(Experiment[RBHeraldedResult, RBHeraldedCfg]):
                     totals,
                     options,
                 )
-        # 3. Show observed returns and group diagnostics even when the joint result is absent.
-        _plot_pooled_survival(plots, data, rendered_fit, analysis)
+                # 3. Compare the asymptote models without changing the free-B result or CI.
+                if analysis.estimate is not None:
+                    fidelity_comparison = paired_rb_analysis.cz_fidelity_comparison(
+                        analysis.estimate, data.depths, means, errors
+                    )
+        # 4. Show observed returns and group diagnostics even when the joint result is absent.
+        _plot_pooled_survival(plots, data, rendered_fit, analysis, fidelity_comparison)
         _plot_grouped_survival(plots, data)
         _plot_decay_fits(plots, data.depths, means, seed_std, rendered_fit, analysis)
         _plot_herald_fractions(plots, data.depths, np.nansum(data.sums, axis=0))

@@ -145,29 +145,39 @@ def fit_joint_decay(
     depths: NDArray[np.int64],
     means: NDArray[np.float64],
     errors: NDArray[np.float64],
+    *,
+    fixed_offset: float | None = None,
 ) -> RBJointDecayFit:
-    """Fit G groups sharing one decay per arm, with local amplitude/offset.
+    """Fit G groups sharing one decay per arm in A*p**depth+B.
 
     depths is int64 (depth,), in random Clifford counts. means and errors are
-    float64 (G,2,depth), G >= 2, with axes group/reference-interleaved/depth.
+    float64 (G,2,depth), with axes group/reference-interleaved/depth.
     Means are equal-seed probabilities; errors are finite positive probability
-    standard errors. Groups have independent A/B and share p by arm in
-    A*p**depth+B. Return model curves in input group order and the shared fit.
-    Invalid shapes, no measurable contrast in an arm or no identifiable decay
-    with finite covariance raise ValueError. Shared-fit errors propagate.
+    standard errors (use equal values for unweighted fits). Each group and arm
+    has its own amplitude A. With fixed_offset=None, fit each B independently
+    and require G >= 2. With fixed_offset in [0, 1], hold the asymptote B at
+    that probability in every group and arm and allow G >= 1.
+    Return model curves in input group order and the shared fit. Out-of-range
+    or nonfinite offsets raise ValueError at entry. Invalid shapes, no
+    measurable contrast in an arm or no identifiable decay with finite
+    covariance also raise ValueError. Shared-fit errors propagate.
     Inputs are not modified.
     """
+    if fixed_offset is not None and not 0.0 <= fixed_offset <= 1.0:
+        raise ValueError("fixed_offset must be a finite probability in [0, 1]")
+    min_groups = 2 if fixed_offset is None else 1
     if (
         depths.ndim != 1
         or not depths.size
         or means.ndim != 3
-        or means.shape[0] < 2
+        or means.shape[0] < min_groups
         or means.shape[1:] != (2, depths.size)
         or errors.shape != means.shape
     ):
         raise ValueError(
-            "Expected depths shape (depth,), means shape (G>=2,2,depth) and matching errors; "
-            f"got depths {depths.shape}, means {means.shape}, errors {errors.shape}"
+            f"Expected depths shape (depth,), means shape (G>={min_groups},2,depth) "
+            f"and matching errors; got depths {depths.shape}, means {means.shape}, "
+            f"errors {errors.shape}"
         )
     parameters = []
     traces = []
@@ -178,12 +188,18 @@ def fit_joint_decay(
         parameters.append(ParameterSpec(f"p_{arm}", 0.95, limits=(1e-6, 1 - 1e-6)))
         for group in range(means.shape[0]):
             curve = means[group, arm]
-            amplitude = float(curve[0] - curve[-1])
+            offset = float(curve[-1]) if fixed_offset is None else fixed_offset
+            amplitude = float(curve[0] - offset)
             names = (f"p_{arm}", f"A_{group}_{arm}", f"B_{group}_{arm}")
             parameters.extend(
                 (
                     ParameterSpec(names[1], amplitude, limits=(-1.0, 1.0)),
-                    ParameterSpec(names[2], float(curve[-1]), limits=(0.0, 1.0)),
+                    ParameterSpec(
+                        names[2],
+                        offset,
+                        fixed=fixed_offset is not None,
+                        limits=(0.0, 1.0),
+                    ),
                 )
             )
             traces.append(FitTrace(xs, curve, _decay_model, names, errors[group, arm]))
