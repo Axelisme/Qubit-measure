@@ -158,7 +158,7 @@ write_snapshot(
 
 ## 實驗 Run 牆鐘
 
-[`case-inputs.json`](data/experiment_wall_time/case-inputs.json) 決定全表。首版 62 列包含先前手選的 52 個工作量（選集 commit `4a2dea87690bfcb2764886b2e5feb0b2113510c9`），另有 10 個快磁通或共用 coil 的派送驗收場景。每個場景填唯一 `scene_id`、精確 adapter key、速度 `metric`，以及有界 Form 覆寫的 path 和值。同一 adapter 可對應不同場景。Lab 新增 adapter 不會自動增加列。
+[`case-inputs.json`](data/experiment_wall_time/case-inputs.json) 決定全表。首版 62 列包含先前手選的 52 個工作量（選集 commit `4a2dea87690bfcb2764886b2e5feb0b2113510c9`），另有 10 個快磁通或共用 coil 的派送驗收場景。速度普查再補入 40 個場景，並縮減既有部分場景的工作量。每個場景填唯一 `scene_id`、精確 adapter key、速度 `metric`，以及有界 Form 覆寫的 path 和值。同一 adapter 可對應不同場景。Lab 新增 adapter 不會自動增加列。
 
 入庫審閱時，維護者核對場景與覆寫的 `basis` 理由及 `unpinned.form`／`point` 的來源說明。CLI 不檢查這些註記的有無或內容。查核原則見[程式碼品質〈依判定用途決定查核與記錄〉](../docs/code-quality.md#依判定用途決定查核與記錄)。`ftf_exclusion` 會影響派送。對仍有註冊 adapter 的場景填非空理由時，工具不開表也不派送 Run。報表以該理由將該列標為 `not_runnable`。回查 manifest 解析與派送分支時，搜尋 `read_manifest` 與 `_run_batch`。
 
@@ -168,13 +168,13 @@ write_snapshot(
 
 工具將 fixture 複製到每列可寫的 project，經公開 entry Open、use point 選取 `ftf-demo/initial`，再開現行 adapter 的 Form。未覆寫的欄位取自現行 Form 及捕捉的 fixture 參數、模組和 aliases；需要操作者輸入的欄位可以留空。見 [Measure services 的開表 owner](../lib/zcu_tools/gui/app/measure/services/README.md#操作-owners)。Open 後工具以一次 `form.write` 套用該 scene 的覆寫，不會補回 Open 缺少的來源。路徑使用欄位名及從 0 起算的索引，例如 `["delay", "n"]` 是線性掃描點數。表單 Ready 才派送 Run。Run 的 admission、輸入快照與終態見 [ADR-0066〈問題與決策〉](../docs/adr/0066-operation-lifecycle.md#問題與決策)。
 
-場景覆寫只保留操作者本來要選的欄位，或用於限制計時工作量的時域、板型與掃描範圍。[Constructive phase](../zcu_lab/v2/two_qubit/constructive_phase/guide.md#prepare-the-form) 的計時案例只指定 duration 端點。相對相位用現行 Form 的可編輯初值，不釘舊的 25 點，也不拿 25 點當報表分母。`singleshot/ac_stark` 的 Q1 pulse source 不能在 Open 提供有效的 mixer 初值；板型不需要 mixer，此案例才直接填 `null`。
+場景覆寫只保留操作者本來要選的欄位，或用於限制計時工作量的時域、板型與掃描範圍。[Constructive phase](../zcu_lab/v2/two_qubit/constructive_phase/guide.md#prepare-the-form) 的計時案例指定 duration 端點，並將 duration 和相對相位各縮為 11 點。報表分母仍取 Result。`singleshot/ac_stark` 的 Q1 pulse source 不能在 Open 提供有效的 mixer 初值；板型不需要 mixer，此案例才直接填 `null`。
 
 Fresh FTF point 的 `qubit.kappa` 是模型線寬，單位是 MHz。用 Q1 的 κ 開 `twotone/freq`，全寬約 0.11723 MHz；這不是計時場景的 87.860 MHz 寬尋峰。要找峰請按用途調整掃窗。不要把有界計時窗當成 Form 初值或校準值。
 
 查掃頻窗的校準來源、可編輯的表單初值與案例覆寫的分工，見[作者指南〈校準初值政策〉](../zcu_lab/v2/measure-authoring.md#校準初值政策)。
 
-查 CZ pulse、slot 與相位配對的來源，從 [Joint readout 到 local Z 的校準路線](../zcu_lab/v2/two_qubit/guide.md#joint-readout-到-local-z-的校準路線)看校準順序。`ftf-demo/initial` 存有 CZ pulse 與 slot，但沒有 `$coupler.ext.cz_phase`。量到 local-Z correction 不等於把配對寫入來源；配對的身分檢查和寫回見 [Local Z〈Preview 與 Apply〉](../zcu_lab/v2/two_qubit/local_z/guide.md#preview-與-apply)。
+查 CZ pulse、slot 與相位配對的來源，從 [Joint readout 到 local Z 的校準路線](../zcu_lab/v2/two_qubit/guide.md#joint-readout-到-local-z-的校準路線)看校準順序。工具的 `ftf-demo/initial` 存有 CZ pulse 與 slot，並填入僅供路徑計時的 `$coupler.ext.cz_phase`。量到 local-Z correction 不等於把配對寫入來源；配對的身分檢查和寫回見 [Local Z〈Preview 與 Apply〉](../zcu_lab/v2/two_qubit/local_z/guide.md#preview-與-apply)。
 
 查序列內的脈衝磁通線設定，見 [FTF `flux_lines` 欄位與限制](../zcu_lab/simulation_envs/FTF/field-guide.md#flux-lines序列內磁通校準與濾波)。查 point 裡的 DC 磁通校準，見 [ADR-0082〈Component 保存 offset 與 signed periods〉](../docs/adr/0082-component-flux-frame.md#component-保存-offset-與-signed-periods)。
 
@@ -243,9 +243,9 @@ Run 在期限內完成，且至少有一筆 acquire、每筆都有 acquire 牆�
 
 Controller 在期限內回報 Run `failed` 時，工具先寫 `run-failure.json`，再落盤 `run_failed` 列。該列記 Run 起點、收到失敗事件的時刻，以及 Controller 提供的錯誤類型與訊息。`failure_record` 是相對於該列 `case_directory` 的診斷檔路徑。失敗列不填 Run 或核心秒數。工具寫完該列才檢查 Controller 是否 idle；若仍有活動中的操作，就停止派送。摘要分別計數成功計時、`timeout` 與 `run_failed`。`Run failures` 按完全相同的 Controller 診斷分組，每組列出 scene ID 與診斷檔路徑。工具不推斷根因。
 
-若 Open 成功，但表單仍缺欄位或 slot，工具記 `missing_defaults`，不派送 Run。乾淨 fixture 不附讀出 classifier。需要帶 radius 的 circle classifier 時，先依各自 guide 在相同讀出條件下做 GE 與 GE Post。這是上游校準前置，不是 FTF 不支援。Constructive phase 在 Form 驗證時檢查 classifier，Singleshot AC Stark 在 Run 時檢查。
+若 Open 成功，但表單仍缺欄位或 slot，工具記 `missing_defaults`，不派送 Run。計時 fixture 附 R1 合成 GE classifier 和從少量 FTF shots 取得的雙 tone classifier。這些值只供路徑計時，不能用作校準或物理解讀。正式量測需要帶 radius 的 circle classifier 時，依各自 guide 在相同讀出條件下做 GE 與 GE Post。Constructive phase 在 Form 驗證時檢查 classifier，Singleshot AC Stark 在 Run 時檢查。
 
-`not_runnable` 只適用於場景明列的排除。已選的 `two_qubit/rb`、`two_qubit/rb_heralded` 仍缺 `$coupler.ext.cz_phase` 的 Q1／Q2 有序 Local Z 配對。工具記原因，不開 project，也不派送 Open 或 Run。未納入的 `two_qubit/cz_optimize` 仍有相同前置；JPA 也不在這份清單內。
+`not_runnable` 只適用於場景明列的排除。`two_qubit/rb`、`two_qubit/rb_heralded` 和 `two_qubit/cz_optimize` 使用 fixture 的 Q1／Q2 有序 Local Z 配對，兩角都為 0°。只有 CZ optimize 的 Form 覆寫會用共用的 `cz_survey` arb。這些輸入只供路徑計時。JPA 不在這份清單內。
 
 已選場景的精確 adapter 不再註冊時，工具寫下 `missing_adapter`、scene ID、adapter key 和維護者待辦。不開 project、不派送 Run、不記耗時，也不算已判定。其他場景繼續，續跑不沿用該未量列。這不同於無效 selector，後者不開批次。
 

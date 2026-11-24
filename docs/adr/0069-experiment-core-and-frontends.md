@@ -277,6 +277,16 @@ Notebook save 吸收 unique path 的便利層並回傳實際 path，再呼叫 ex
 
 使用者在 2026-11-19 對以單數改名為先例、不提供 alias 的提案回覆「全采用建议」。選項與首批範圍見[實驗命名與顯示討論](../discussions/2026-11-20-experiment-naming-and-display.md)。
 
+#### Cfg 值域擴張升 minor
+
+**規則。** 新 writer 若能寫出舊 validator 不接受的值，就提升 `cfg_schema_version` 的 minor。新 writer 寫出的每份 cfg 都用新 minor，不按當筆值選版號。新版照原樣讀回舊版合法的 inline cfg，不做遷移。舊版載入新檔時，若舊 validator 拒絕 cfg，Load 只保留 Result 與 metadata，並回報 `cfg_issue`。要重做 Analyze，改用新版。
+
+**例子。** 掃頻 drive 允許兩路來源 carrier 不同後，Chevron 從 5.0 升至 5.1，Conditional phase 從 7.0 升至 7.1，其 heralded 入口從 4.0 升至 4.1。Conditional spectroscopy 從 7.0 升至 7.1，其 heralded 入口從 3.0 升至 3.1。
+
+**邊界。** 這條規則適用於 cfg 結構不變、舊合法值仍合法的值域擴張。欄位改名仍升 major。舊版若能驗過新檔的 cfg，就照常讀取，不因 minor 不同而拒讀。長期從原始 `data.h5` 搭配實驗程式碼及其 Git 歷史找回原值與數組。不要求舊 Analyze 仍能執行，也不為此打包 decoder。
+
+**依據。** 2026-11-24，liaison 依使用者的「讓agent解析或是經Load看，前者是當資料格式不兼容時使用」和「其實是可以依賴程式碼的，至少是當前的對應實驗，只要能讀得懂就好」代答。使用者覆核代裁並回覆「接受代采。」升 minor 標記 writer 的值域改變，又不切斷新版讀取舊合法 cfg 的路徑。見[掃頻 drive cfg 的版號討論](../discussions/2026-11-24-swept-drive-cfg-minor.md)。
+
 #### 只有模擬測試資料時的舊結果格式
 
 **規則。** 確認只有模擬器測試資料的家族更改 native 結果格式時，不為不相容的舊 layout 新增 reader。保留原檔，不改寫或遷移。相容 layout 仍沿用既有 cfg fallback。
