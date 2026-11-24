@@ -74,6 +74,7 @@ superseded_by: null
 
 ## 跨點重用與快取
 
+- 2026-11-24，[Projective chain 的精確 cell 簽章](./2026-11-24-exact-projective-cell-signatures.md)，`rejected`。絕對與相對簽章均零重複（`5dbccaffa`，`chain/len_rabi`、`chain/t1` 各 101 格，seed 123、單 worker，各只計首份 preparation 的 1,515 個 cell 控制）。Readout 相位不同，未量完整求解或配對速度。
 - 2026-11-23，[放寬 RB 跨 depth 的前綴候選](./2026-11-23-rb-prefix-candidates.md)，`rejected`。允許更多共同邊界未顯示整輪收益。放寬及只留最長邊界都約 103.4 s，原規則 97.6 s（`8cd18afcd`，離線 plain RB depth `[0,12,24]`、兩臂，單 worker，每規則一次 `run_stage` 牆鐘，Numba 暖度不同）。
 - 2026-11-23，[FTF sampled RWA 探針快取](./2026-11-23-ftf-rwa-probe-memo.md)，`adopted`。一次 preparation 內重用完全相同的 sampled RWA 探針結果，每次 evolve 仍獨立選路。基準的 full-drive DOP853 探針用 175.29 CPU s（`ffd2a0c6`，離線 `two_qubit/chevron` 四點、單 worker 的一次 warm Run，呼叫執行緒 CPU 總和）。這不是快取後的耗時。
 - 2026-11-22，[ADC raw plan 在 acquire 內重用](./2026-11-22-adc-raw-plan-acquire-owner.md)，`adopted`。把確定性的 ADC raw plan 綁到 acquire session，換批或結束才退役。Raw materialize 343.737 → 159.082 s（`e602f0dc6` → `a4cd9f1bd`，同 fixture 的完整 `chain_power`，非排他單 worker、各一個 Run 的 materialize 累計）。
