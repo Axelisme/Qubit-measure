@@ -112,6 +112,8 @@ superseded_by: null
 
 ## 環境與讀出
 
+- 2026-11-24，[ADC 共用腔場乘積積分](./2026-11-24-adc-cavity-product-integrals.md)，`adopted`。小型平坦區間共用每態的短步係數，一次積分各腔場乘積。`chain/len_rabi` 的 readout 20.772 → 8.279 s（`addd6c8fb` → `2a571d682`，離線 fixture、seed 123、單 worker、各冷 cache，各一次 11 格 Run）。
+- 2026-11-24，[ADC flat jump 只算兩態基線](./2026-11-24-adc-flat-jump-baselines.md)，`adopted`。平坦且不回傳 trace 的多態讀出只計算跳轉所用的兩態。`twotone/ro_optimize/chain_freq` 的 materialize 61.162 → 48.688 s（`addd6c8fb` → `5e43af2c7`，離線 fixture、seed 123、單 worker、各冷 cache，各一次 11 格 Run）。
 - 2026-11-22，[FTF 樣板提高 projective floor](./2026-11-22-ftf-projection-weight-floor.md)，`adopted`。提高新工作副本的 floor，減少低機率來源態的續演化。最大完整 density 差 6.921e-6（`cc6b252c0`，六列 FTF 輸入、同 seed、Markov 模型的 floor `1e-5` 對 `0`）。
 - 2026-11-18，[移除 private replay](./2026-11-18-remove-private-replay.md)，`adopted`。移除逐位重算及舊 archive 相容要求。為逐位重算，開發時曾把 pilot 最少 timeline 數從 8 提到 16（舊設定）。沒有單獨量測移除的 runtime 收益。
 - 2026-10-18，[Flat integrated readout 離散和](./2026-10-18-readout-discrete-sums.md)，`adopted`。對 ADC 樣本的條件場直接求幾何級數，省掉產生整條 trace 後再加總。研究原型要求兩個 eigenbasis 的 condition number 均 `<1e4`（研究 guard）。可取得基準樹，未取得原型的量測 commit。
