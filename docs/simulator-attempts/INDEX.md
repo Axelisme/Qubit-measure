@@ -76,6 +76,8 @@ superseded_by: null
 
 ## 跨點重用與快取
 
+- 2026-11-24，[Projective cell 共用單音共同相位的轉移列](./2026-11-24-projective-cell-phase-reuse.md)，`adopted`。同一點只對符合共同相位對稱的 cell 共用轉移列。首份 preparation 的來源態求解 3,229 → 2,967（`f7a88acef` → `c22947414`，`chain/len_rabi` 11 點、100 reps × 100 rounds、seed 123、單 worker 的一次冷 cache 配對）；未證實整輪加速。
+- 2026-11-24，[Projective chain 的精確 cell 簽章](./2026-11-24-exact-projective-cell-signatures.md)，`rejected`。絕對與相對簽章均零重複（`5dbccaffa`，`chain/len_rabi`、`chain/t1` 各 101 格，seed 123、單 worker，各只計首份 preparation 的 1,515 個 cell 控制）。Readout 相位不同，未量完整求解或配對速度。
 - 2026-11-24，[Shaped Sambe 在一次 cutoff 決策內重用峰值 Fourier 陣列](./2026-11-24-shaped-sambe-peak-cutoff-reuse.md)，`adopted`。只在同一決策重用精確同 key 的 cutoff-3 陣列。Spectroscopy 為 9.6173 → 9.1434 core s／格（`addd6c8fb` → `d1408edb4`，manifest `c2b6b9e0522e`，11 格的 `conditional_spectroscopy_heralded`，排他單 worker，phase 暖機後各一次完整 Run）。
 - 2026-11-23，[放寬 RB 跨 depth 的前綴候選](./2026-11-23-rb-prefix-candidates.md)，`rejected`。允許更多共同邊界未顯示整輪收益。放寬及只留最長邊界都約 103.4 s，原規則 97.6 s（`8cd18afcd`，離線 plain RB depth `[0,12,24]`、兩臂，單 worker，每規則一次 `run_stage` 牆鐘，Numba 暖度不同）。
 - 2026-11-23，[FTF sampled RWA 探針快取](./2026-11-23-ftf-rwa-probe-memo.md)，`adopted`。一次 preparation 內重用完全相同的 sampled RWA 探針結果，每次 evolve 仍獨立選路。基準的 full-drive DOP853 探針用 175.29 CPU s（`ffd2a0c6`，離線 `two_qubit/chevron` 四點、單 worker 的一次 warm Run，呼叫執行緒 CPU 總和）。這不是快取後的耗時。
@@ -121,6 +123,7 @@ superseded_by: null
 
 ## 環境與讀出
 
+- 2026-11-24，[ADC 跨 round 重用 chain CDF](./2026-11-24-adc-chain-cdf-reuse.md)，`adopted`。同一 active raw generation 的每個讀出事件只算一次 CDF。A→B→A 重綁會為 A 開新 generation。`twotone/ro_optimize/chain_freq` 的 materialize 139.611 → 115.223 s（`5dbccaffa` → `1d82a507d`，離線 fixture、31 點 × 2,000 reps × 320 rounds、每點 16 reads、seed 123、單 worker、各一次冷 cache Run）。
 - 2026-11-24，[ADC 共用腔場乘積積分](./2026-11-24-adc-cavity-product-integrals.md)，`adopted`。小型平坦區間共用每態的短步係數，一次積分各腔場乘積。`chain/len_rabi` 的 readout 20.772 → 8.279 s（`addd6c8fb` → `2a571d682`，離線 fixture、seed 123、單 worker、各冷 cache，各一次 11 格 Run）。
 - 2026-11-24，[ADC flat jump 只算兩態基線](./2026-11-24-adc-flat-jump-baselines.md)，`adopted`。平坦且不回傳 trace 的多態讀出只計算跳轉所用的兩態。`twotone/ro_optimize/chain_freq` 的 materialize 61.162 → 48.688 s（`addd6c8fb` → `5e43af2c7`，離線 fixture、seed 123、單 worker、各冷 cache，各一次 11 格 Run）。
 - 2026-11-22，[FTF 樣板提高 projective floor](./2026-11-22-ftf-projection-weight-floor.md)，`adopted`。提高新工作副本的 floor，減少低機率來源態的續演化。最大完整 density 差 6.921e-6（`cc6b252c0`，六列 FTF 輸入、同 seed、Markov 模型的 floor `1e-5` 對 `0`）。

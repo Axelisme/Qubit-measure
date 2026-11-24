@@ -397,6 +397,9 @@ An acquire that reuses a prepared batch calls
 `RawPlanOwner.bind(prepared, identity)` instead of `prepared.bind(identity)`.
 ADC compares prepared objects by identity and retains plans for only the current
 batch. It builds each logical event's plan on demand during raw materialization.
+For a projection chain, concurrent calls compute the CDF at most once per event
+in the same active generation. Rebinding A after B starts a new generation,
+even for the same prepared object.
 [FTF](../../simulators/ftf/environment/README.md#preparation-reuse) and
 [standalone single-fluxonium](../../simulators/single_fluxonium/environment/README.md#reuse-and-lifetime)
 retire the plans when the batch changes or the acquire ends, without moving
