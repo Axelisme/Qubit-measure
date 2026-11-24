@@ -76,6 +76,8 @@ superseded_by: null
 
 ## 跨點重用與快取
 
+- 2026-11-25，[Paired RB 的完整通道相位重用未通過 depth 1](./2026-11-25-rb-full-channel-phase-composition.md)，`rejected`。用 joint RWA 相位轉換共用完整通道，最終 density 最大絕對元素差為 0.01139，超過 `1e-2` 門檻（`13aa91a3c`，24 態 FTF、400 ns 常數 X、32 ns CZ 計時波形、seed 7、depth 1，兩臂各一次，僅到讀出開始）。
+- 2026-11-25，[FTF twotone chain 原生時序相同，轉移列仍不同](./2026-11-25-twotone-chain-transition-sharing.md)，`rejected`。原生排程時序可共用一個 key，但實測可精確共用的非終端 cells 為 0／46（`13aa91a3c`，離線 `twotone/chain` 297.742 MHz 單點、12 reps、1 round、每 dwell 48 讀，單輪矩陣擷取）。
 - 2026-11-24，[跨 acquisition 重用 multitone RWA 探針](./2026-11-24-multitone-rwa-cross-acquire-probe-memo.md)，`rejected`。只在 sampled-probe exact key 相同時跨 acquisition 省掉積分。單臂上界為 1.085×（`e060dae1f` 加未入庫 trace hook，const CZ RB、三 seeds、單 worker，一臂的 core 耗時外推）。
 - 2026-11-24，[RB 的 exact-key segment map 重用](./2026-11-24-rb-exact-segment-map-reuse.md)，`rejected`。物理輸入完全相同的 segment 才共用演化 map。同一 evolve 共用約 1.03×（`e060dae1f`，RB seed 0、depths 0／1／2／4、24 levels、單 worker，單輪 evolve 耗時外推）。
 - 2026-11-24，[Projective cell 共用單音共同相位的轉移列](./2026-11-24-projective-cell-phase-reuse.md)，`adopted`。同一點只對符合共同相位對稱的 cell 共用轉移列。首份 preparation 的來源態求解 3,229 → 2,967（`f7a88acef` → `c22947414`，`chain/len_rabi` 11 點、100 reps × 100 rounds、seed 123、單 worker 的一次冷 cache 配對）；未證實整輪加速。

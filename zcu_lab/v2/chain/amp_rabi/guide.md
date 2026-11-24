@@ -18,12 +18,12 @@ Bind the qubit and its resonator. Select a calibrated single-tone pulse Readout;
 
 Run shows `all 65 numbers` and `first read` over completed rounds, both scaled in point-mean standard errors. Both curves subtract their across-gain median. The all-feature direction uses within-point noise and follows the sign of the first-read principal-axis IQ curve. Neither live curve shows shot-SEM bars. Stop keeps completed rounds; stopping before any round finishes fails Run.
 
-Analyze fits all 65 IQ and correlation statistics jointly across the sweep once. The separate first-read cosine supplies the starting value, not the joint estimate.
+Analyze fits all 65 IQ and correlation statistics jointly across the sweep once. The fitter scores trial periods against all 65 features before choosing a starting value. The estimate from the separate first-read cosine is one trial, not the joint estimate.
 The joint model interpolates between two population endpoints per initial state. In gain x it uses sin²(πfx) for g and the third state and cos²(πfx) for e. The third state can oscillate if its endpoints differ. Frequency f is in cycles per gain unit and π gain is `1/(2f)`. The dashed joint marker shows π gain inside the scan.
 
 The first-read `fit` shows projected IQ. Error bars are shot SEM: the projected single-cycle standard deviation divided by √(retained cycles at that point), not fit error or round-to-round scatter. If the saved moments cannot supply it, the legend says so and the points have no bars.
-With a seed estimate, points are not connected. Dashed lines and bands show seed π and π/2 gains and their parameter standard errors. R² describes the seed only.
-Without a seed, the plot says "First-read fit unavailable" and connects the points, keeping any available bars. Joint Analyze still attempts one fit from the saved gain axis; the fallback start is not a measurement. Successful joint Analyze then reports `first_read_pi_amp: null`. A joint fit error still fails Analyze.
+With a first-read estimate, points are not connected. Dashed lines and bands show first-read π and π/2 gains and their parameter standard errors. R² describes only this fit.
+Without an estimate, the plot says "First-read fit unavailable" and connects the points, keeping any available bars. Joint Analyze still scores trial periods and uses the best trial for its one joint fit. Successful joint Analyze then reports `first_read_pi_amp: null`. A joint fit error still fails Analyze.
 
 The joint figure comes first. Its upper panel overlays measured points and the model along the live all-feature direction. Each bar shows ±1 pooled shot SEM of the projected mean. The estimate pools within-point shot covariance across the sweep and propagates it to the mean using each point's retained cycle count. It treats the projection direction and background as fixed. All bars have the same length in these SEM units. They are not separate noise estimates at each point or fit errors.
 

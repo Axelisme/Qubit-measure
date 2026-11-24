@@ -755,9 +755,9 @@
           "basis": "Three mandatory optimizer sequence seeds, minimal legal set."
         },
         {
-          "path": ["sigma_knot"],
+          "path": ["sigma_i_ratio"],
           "value": 0.1,
-          "basis": "Finite scratch optimizer initial waveform spread."
+          "basis": "Finite scratch optimizer initial spread for the two free I harmonic ratios."
         },
         {
           "path": ["sigma_z_deg"],

@@ -2,10 +2,12 @@
 
 from collections.abc import Sequence
 from dataclasses import dataclass
+from textwrap import fill
 
 import numpy as np
 from numpy.typing import NDArray
 from pydantic import Field
+from zcu_tools.analysis.fitting import fit_joint_decay
 from zcu_tools.cfg_model import ConfigBase
 
 
@@ -42,6 +44,31 @@ class RBEstimate:
     n_paired_seeds: int
     bootstrap_successes: int
     warning: str
+
+
+def cz_fidelity_comparison(
+    free: RBEstimate,
+    depths: NDArray[np.int64],
+    means: NDArray[np.float64],
+    errors: NDArray[np.float64],
+) -> str:
+    """Format the free-B and quarter-asymptote d=4 CZ fidelity point estimates.
+
+    depths counts random Cliffords. means and errors are (group, arm, depth)
+    probabilities and fit errors for the cohorts used by the free-B fit.
+    Report 1 - gate_error without clipping. A failed fixed fit leaves the
+    free-B value visible and reports why the fixed-B value is unavailable.
+    The comparison is for display only, not a saved analysis field.
+    """
+    free_label = f"F_CZ (free B) = {1 - free.gate_error:.4%}"
+    fixed_label = "F_CZ (B = 1/4)"
+    try:
+        fit = fit_joint_decay(depths, means, errors, fixed_offset=0.25)
+    except (ValueError, RuntimeError) as exc:
+        return f"{free_label}\n{fill(f'{fixed_label} unavailable: {exc}', width=82)}"
+    pr, pi = fit.fit.values["p_0"], fit.fit.values["p_1"]
+    fidelity = 1 - 0.75 * (1 - pi / pr)
+    return f"{free_label} · {fixed_label} = {fidelity:.4%}"
 
 
 def validate_counts(counts: NDArray[np.float64], class_axes: tuple[int, ...]) -> None:

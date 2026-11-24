@@ -287,3 +287,4 @@
 - 2026-11-21 [讀出範本在 ADC 窗口前後各留 0.015 µs](2026-11-21-readout-template-window-margin.md)：預設時序。範本、DPM 寫回與普通 onetone 表單共用 0.03 µs 的長度差。
 - 2026-11-23 [MIST single trace 保留平均 IQ 的位移大小](2026-11-23-mist-single-trace-observable.md)：讀圖語意。Live 與預設 Analyze 用同一掃描前段複數參考，畫幅值而不套用 shot SEM（不畫棒已由[新紀錄](2026-11-23-mist-trace-propagated-sem.md)取代）。
 - 2026-11-24 [CZ 最佳化只搜尋等長的 arb 脈衝](2026-11-24-cz-optimize-search-space.md)：搜尋空間。起點照原樣播放；後續只搜尋等長 arb，複數峰歸一，共同倍率與兩個 local Z 一起調。
+- 2026-11-25 [CZ 最佳化搜尋 FAST-DRAG 權重](2026-11-25-cz-optimize-fourier-basis.md)：搜尋空間與資料格式。固定一個 I 權重，搜尋其餘比例與 β；Native 用新版 tag 拒絕舊節點結果。

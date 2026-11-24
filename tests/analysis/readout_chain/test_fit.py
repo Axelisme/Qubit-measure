@@ -12,6 +12,7 @@ from zcu_tools.analysis.readout_chain import (
     CycleNuisances,
     CycleSums,
     fit_cycle,
+    rabi_model,
 )
 
 from ._cycle_samples import sampled_sums
@@ -126,6 +127,30 @@ def test_exact_moments_recover_curve_and_joint_predictions(kind: str) -> None:
         fit.nuisances.read_landing[order], nuisance.read_landing, atol=1e-4
     )
     np.testing.assert_allclose(fit.nuisances.variance, nuisance.variance, atol=1e-5)
+
+
+def test_rabi_recovers_chain_period_despite_near_nyquist_first_read() -> None:
+    model = rabi_model()
+    _, nuisance = planted_model("rabi")
+    axis = np.linspace(0.0, 3.0, 17)
+    moments = curve_moments(model, axis, {"f": 1.2}, nuisance)
+    counts = np.full(axis.shape, 250.0)
+    means = moments.means.copy()
+    # A pickup on the first read dominates its period estimate, but the rest
+    # of the features still carry the planted Rabi period.
+    first_read_frequency = 2.55
+    means[:, 0] += 0.65 * np.cos(2 * np.pi * first_read_frequency * axis)
+    products = counts @ moments.covariance.reshape(len(axis), -1)
+    sums = CycleSums(
+        axis,
+        counts,
+        counts[:, None] * means,
+        products.reshape(65, 65) + means.T @ (counts[:, None] * means),
+    )
+
+    fit = fit_cycle(sums, model, {"f": first_read_frequency})
+
+    assert 0.5 / fit.parameters["f"] == pytest.approx(0.4167, abs=0.01)
 
 
 def test_joint_predictions_use_the_signed_live_projection_on_points_and_grid() -> None:

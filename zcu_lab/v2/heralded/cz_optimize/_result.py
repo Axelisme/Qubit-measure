@@ -19,7 +19,7 @@ from zcu_tools.experiment.axes_spec import (
 
 from zcu_lab.v2.support.cz_optimize_waveform import (
     GAIN_INDEX,
-    KNOTS,
+    I_TERMS,
     StartStyle,
     render_candidate,
 )
@@ -32,8 +32,12 @@ class _Parameter(NamedTuple):
 
 
 PARAMETERS = (
-    *(_Parameter(f"i_knot_{i}", f"I knot {i}", "") for i in range(1, KNOTS + 1)),
-    *(_Parameter(f"q_knot_{i}", f"Q knot {i}", "") for i in range(1, KNOTS + 1)),
+    # Native names: i_coeff_1, i_coeff_2, i_coeff_3 and beta.
+    *(
+        _Parameter(f"i_coeff_{i}", f"I harmonic c{i}", "")
+        for i in range(1, I_TERMS + 1)
+    ),
+    _Parameter("beta", "FAST-DRAG β", "s"),
     _Parameter("gain_scale", "Field multiplier g", ""),
     _Parameter("local_z_qubit1", "Qubit1 local Z", "rad"),
     _Parameter("local_z_qubit2", "Qubit2 local Z", "rad"),
@@ -47,8 +51,8 @@ class HeraldedCZOptimizeResult:
     seeds is int64 (seed,). sums is float64 (evaluation, seed, 3, 3, 3, 3):
     herald Qubit1/Qubit2, then terminal Qubit1/Qubit2, with classes g, e,
     Other on each axis. params is float64 (evaluation,
-    parameter) in PARAMETERS order (I knots, Q knots, physical gain g,
-    radians for Qubit1 and Qubit2). Row zero holds the CMA initial mean; the
+    parameter) in PARAMETERS order (c1, c2, c3, β in seconds, physical gain g,
+    Qubit1 and Qubit2 Z in radians). Row zero holds the CMA initial mean; the
     measured evaluation zero plays the original pulse instead. peak is float64
     (evaluation,), the normalized candidate complex peak (near one, or zero
     for a zero envelope). It is NaN for evaluation zero and unrendered rows.
@@ -87,7 +91,7 @@ class HeraldedCZOptimizeResult:
         return float(gains[0]), float(gains[1])
 
     def render_candidate(self, index: int) -> WaveformSamples:
-        """Render the CMA sample grid at a finite parameter row (zero is the fit).
+        """Render the CMA sample grid at a finite parameter row (zero is the CMA start).
 
         Returns dimensionless I/Q and times in µs including the end boundary.
         Does not recover the actual starting pulse played at evaluation zero.
@@ -220,13 +224,14 @@ def axes_spec[CfgT: ConfigBase](
         ),
         result_type=HeraldedCZOptimizeResult,
         cfg_type=cfg_type,
-        tag="heralded/cz_optimize",
+        # The tag versions the Result layout independently of the cfg envelope.
+        tag="heralded/cz_optimize/fourier-v2",
         result_builder=_restore,
         result_validator=_validate_evaluations,
         run_values=(
             RunValueSpec(field_name="start_duration_s", wire_name="duration", unit="s"),
         ),
-        cfg_schema_version="1.0",
+        cfg_schema_version="2.0",
         labber_layout="independent",
         labber_variables=(*(param.name for param in PARAMETERS), "peak"),
     )
