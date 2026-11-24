@@ -74,3 +74,8 @@ from .singleshot import (
     fit_singleshot_p0,
     gauss_func,
 )
+from .weighted_fringe import (
+    WeightedFringeFit,
+    WeightedFringeTrace,
+    fit_weighted_decay_fringe,
+)

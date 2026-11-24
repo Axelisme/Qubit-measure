@@ -88,5 +88,28 @@ def qubit_sigma(
     return _sigma(qubit_marginal_probabilities(counts, target))
 
 
+def qubit_sigma_fit_errors(
+    counts: NDArray[np.float64], target: Literal["qubit1", "qubit2"]
+) -> NDArray[np.float64]:
+    """Return shot-noise errors for (Ne-Ng)/N, including other in N.
+
+    counts is delay × terminal Qubit1 × terminal Qubit2. The multinomial variance of
+    the {-1,+1,0} observation is (Pg+Pe-contrast²)/N. A one-shot error floor
+    1/N keeps saturated finite-count bins from receiving infinite weight.
+    Zero counts give NaN, not an invented observation.
+    """
+    marginal = counts.sum(axis=-1 if target == "qubit1" else -2)
+    total = marginal.sum(axis=-1)
+    value = np.full(total.shape, np.nan)
+    second = np.full(total.shape, np.nan)
+    np.divide(marginal[:, 1] - marginal[:, 0], total, out=value, where=total > 0)
+    np.divide(marginal[:, 1] + marginal[:, 0], total, out=second, where=total > 0)
+    variance = np.full(total.shape, np.nan)
+    np.divide(np.maximum(second - value**2, 0), total, out=variance, where=total > 0)
+    floor = np.full(total.shape, np.nan)
+    np.divide(1.0, total, out=floor, where=total > 0)
+    return np.maximum(np.sqrt(variance), floor)
+
+
 def _sigma(marginal: NDArray[np.float64]) -> NDArray[np.float64]:
     return marginal[..., 1] - marginal[..., 0]

@@ -38,14 +38,17 @@ from zcu_tools.program.v2.modules import MuxReadout
 
 from zcu_lab.v2.support import live_errorbar
 from zcu_lab.v2.support.device import set_flux
-from zcu_lab.v2.support.paired_counts import qubit_sigma, validate_qubit_tones
+from zcu_lab.v2.support.paired_counts import (
+    qubit_sigma,
+    qubit_sigma_fit_errors,
+    validate_qubit_tones,
+)
 
 from .._readout import MuxResetCfg
 from ._analysis import (
     IdleBranchFit,
     complete_points,
-    fit_traces,
-    sigma_errors,
+    fit_trace,
     summarize,
     validate_axes,
 )
@@ -487,10 +490,10 @@ class IdleZZExp(Experiment[IdleZZResult, IdleZZCfg]):
                     bool(np.all(complete[dc_index, state])),
                     traces[dc_index, state],
                 )
-                fits.extend(
-                    fit_traces(
-                        (fit,),
-                        (sigma_errors(result.sums[dc_index, state], cfg.target),),
+                fits.append(
+                    fit_trace(
+                        fit,
+                        qubit_sigma_fit_errors(result.sums[dc_index, state], cfg.target),
                         delays=result.delays,
                         detune=cfg.detune,
                     )

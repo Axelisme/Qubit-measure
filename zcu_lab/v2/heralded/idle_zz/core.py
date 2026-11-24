@@ -10,7 +10,6 @@ from matplotlib.figure import Figure
 from matplotlib.ticker import MaxNLocator
 from numpy.typing import NDArray
 from pydantic import Field, model_validator
-from zcu_tools.analysis.shot_uncertainty import class_probability_covariance
 from zcu_tools.cfg_model import ConfigBase, DeviceName, FieldMeta
 from zcu_tools.experiment import (
     Experiment,
@@ -21,8 +20,10 @@ from zcu_tools.experiment import (
     VariableZSpec,
 )
 from zcu_tools.experiment.context import RunContext
+from zcu_tools.experiment.records import RunRecord
 from zcu_tools.experiment.v2.runtime import RunOptions, Schedule, SignalBuffer
 from zcu_tools.experiment.v2.utils.round_zcu import round_sweep_dict, sweep2array
+from zcu_tools.plotting.plots import Plots
 from zcu_tools.program.v2 import (
     Classify,
     Pulse,
@@ -38,6 +39,7 @@ from zcu_lab.v2.support.device import set_flux
 from zcu_lab.v2.support.paired_counts import qubit_sigma, validate_qubit_tones
 
 from ..counts import terminal_counts
+from ._analysis import IdleZZHeraldedAnalysis, analyze_idle_zz, shot_sem
 
 
 @dataclass(frozen=True)
@@ -247,15 +249,6 @@ def restore_result(data: GroupedLoadData[IdleZZHeraldedCfg]) -> IdleZZHeraldedRe
 _BRANCH_NAMES = ("I", "Xπ")
 
 
-def _shot_sem(
-    counts: NDArray[np.float64], target: Literal["qubit1", "qubit2"]
-) -> NDArray[np.float64]:
-    """Project terminal probability covariance onto the target's e-minus-g contrast."""
-    marginal = counts.sum(axis=-1 if target == "qubit1" else -2)
-    cov = class_probability_covariance(marginal)
-    return np.sqrt(np.maximum(cov[..., 0, 0] + cov[..., 1, 1] - 2 * cov[..., 0, 1], 0))
-
-
 def _label_ramsey(fig: Figure, cfg: IdleZZHeraldedCfg, index: int) -> str:
     """Label the shared Run/Analyze data axes and return the figure title."""
     target = cfg.target.capitalize()
@@ -356,7 +349,7 @@ class IdleZZHeraldedExp(Experiment[IdleZZHeraldedResult, IdleZZHeraldedCfg]):
         def update_view(sums: NDArray[np.float64]) -> tuple[Figure, ...]:
             gg = terminal_counts(sums, ("g", "g"))
             traces = qubit_sigma(gg, config.target)
-            errors = _shot_sem(gg, config.target)
+            errors = shot_sem(gg, config.target)
             for index, (_, viewer) in enumerate(views):
                 viewer.set(delays, traces[index], errors[index])
             return tuple(fig for fig, _ in views)
@@ -431,3 +424,21 @@ class IdleZZHeraldedExp(Experiment[IdleZZHeraldedResult, IdleZZHeraldedCfg]):
                 )
         # 4. Retain joint herald/terminal counts for completed rounds on every planned DC/delay slot.
         return IdleZZHeraldedResult(dc_values, delays, buffer.array)
+
+    def analyze(
+        self,
+        source: RunRecord[IdleZZHeraldedCfg, IdleZZHeraldedResult],
+        options: None,
+        *,
+        plots: Plots,
+    ) -> IdleZZHeraldedAnalysis:
+        """Use the saved cfg and counts for signed ζ and separate diagnoses.
+
+        Plot both primary classes by actual spectator state and put the gg-only
+        and spectator-e fits in a separate figure. Preserve missing estimates
+        as gaps with reasons. Do not write back.
+        """
+        del options
+        if source.cfg is None:
+            raise ValueError("Heralded idle ZZ analysis requires saved cfg")
+        return analyze_idle_zz(source.cfg, source.result, plots)

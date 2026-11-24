@@ -171,6 +171,8 @@ Tuple 解構只供過渡相容，caller 遷移成具名存取後會移除。
 `copy.copy`、`copy.deepcopy` 與 pickle 往返保留所有 tuple 欄位與 quality。
 `_make` 與 `_replace` 拋出 `TypeError`，要求重跑 fitter，讓改值後的 quality 與結果一致。
 
+`fit_weighted_decay_fringe(delays, observations, sigmas)` 在同一等距 delay 軸上做逐點 sigma 加權擬合。各條 trace 只共用正頻率，振幅、偏移、相位、衰減時間各自擬合。首條 trace 供應頻率初值。結果保留 `shared` 的具名共變異數矩陣與 optimizer diagnostics。每條 `traces` 結果可用 `evaluate(delays)` 畫密網格，`quality` 使用該條 observations 與同次 fit 投影的 covariance。普通 `fit_decay_fringe` 不加權，也不改回傳契約。
+
 ## fitting helpers
 
 `fitexp` 與 `fit_decay` 的自由 amplitude 界限為 observations 全距的正負兩倍。

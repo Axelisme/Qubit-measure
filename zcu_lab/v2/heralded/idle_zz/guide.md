@@ -13,9 +13,12 @@
 
 ## 判讀頻差
 
-- gg 與 target 初態 e、spectator 初態 g 的一類進主估計。後者先反轉 target 對比：target 是 Qubit1 時用 eg，是 Qubit2 時用 ge。
-- Spectator 初態 e 的兩類各自對照，不進主估計。依 spectator 實際 g／e 態交換其 I／Xπ 分支。Herald 的 Other 類留在資料，不進擬合；終端 Other 在對比分子計零並留在分母。
-- 每個 bias 的 ζ 是實際 spectator e 的 signed Ramsey 頻率減去 g 的頻率。沿用普通 [Idle ZZ 的同側條件](../../two_qubit/idle_zz/guide.md#決定是否採用頻差)。缺必要分類或延遲時，主估計留空，不用 gg-only 頻差補值。
-- 量測點的誤差棒是 shot SEM；頻率的 ± 是 fit SE。ζ 的 SE 由兩個實際 spectator 態的頻率 SE 平方和開根。掃 bias 時，優先複測 |ζ| 低且誤差可辨的點；沒有 writeback。
+按 **Analyze**。主圖把每個 bias 的實際 spectator g／e 分在兩欄。每欄用 gg 和 target herald e、spectator herald g 的一類擬合。後者在 Qubit1 target 是 eg，在 Qubit2 target 是 ge。先反轉該類的 target 對比。兩條共用頻率，分別擬合振幅、偏移、相位和衰減時間。
+
+獨立診斷圖顯示 gg-only，以及 spectator herald e 的兩類。後兩類的實際 g 對應 Xπ，實際 e 對應 I。這三種擬合都不進主估計。Herald Other 留在資料，不進擬合。終端 Other 在對比分子計零，仍留在分母。未量測點與該類零發點都不畫成零。
+
+ζ 是實際 spectator e 的有號頻率減去 g 的有號頻率。兩個頻率都需符合 [Idle ZZ 的同側條件](../../two_qubit/idle_zz/guide.md#決定是否採用頻差)。若頻率距離 0 或兩倍 detuning 絕對值不超過 `max(1 / 延遲窗長, 頻率 SE)`，該支不定符號。缺必要分類、缺延遲或頻率不能定符號時，保留可得的點與診斷，不用 gg-only 補 ζ。只缺診斷類不會擋住主估計。
+
+量測點的誤差棒是逐發抽樣的 shot SEM。頻率的 ± 是 fit SE，ζ 的 SE 由兩支頻率 SE 平方和開根。用圖上的 R² 和正規化殘差 RMS 檢查各條曲線是否貼近量測點，這兩項不作為擬合門檻。掃 bias 時，優先複測 |ζ| 低且誤差可辨的點。這個估計不代表各 herald 類的製備污染相同，也不寫回設定。
 
 共用操作見 [量測流程](../../operator-workflow.md)。

@@ -1,21 +1,13 @@
-"""Count-weighted single and shared fringe fits for idle conditional Ramsey."""
+"""Count-weighted fringe analysis for nominal idle Ramsey branches."""
 
 from __future__ import annotations
 
 from dataclasses import dataclass, replace
-from typing import Literal
 
 import numpy as np
 from numpy.typing import NDArray
 from zcu_tools.analysis.failure import AnalysisFailed
-from zcu_tools.analysis.fitting import (
-    FitQuality,
-    compute_fit_quality,
-    decay_time_bounds,
-    decaycos,
-    fit_decay_fringe,
-)
-from zcu_tools.analysis.fitting.shared import FitTrace, ParameterSpec, fit_shared
+from zcu_tools.analysis.fitting import FitQuality, fit_weighted_decay_fringe
 
 
 @dataclass(frozen=True)
@@ -90,49 +82,19 @@ def complete_points(sums: NDArray[np.float64], expected: int) -> NDArray[np.bool
     return finite
 
 
-def sigma_errors(
-    counts: NDArray[np.float64], target: Literal["qubit1", "qubit2"]
-) -> NDArray[np.float64]:
-    """Return shot-noise errors for (Ne-Ng)/N, including other in N.
-
-    counts is delay × terminal Qubit1 × terminal Qubit2. The multinomial variance of
-    the {-1,+1,0} observation is (Pg+Pe-sigma²)/N. A one-shot error floor
-    1/N keeps saturated finite-count bins from receiving infinite weight.
-    Zero counts give NaN, not an invented observation.
-    """
-    marginal = counts.sum(axis=-1 if target == "qubit1" else -2)
-    total = marginal.sum(axis=-1)
-    value = np.full(total.shape, np.nan)
-    second = np.full(total.shape, np.nan)
-    np.divide(marginal[:, 1] - marginal[:, 0], total, out=value, where=total > 0)
-    np.divide(marginal[:, 1] + marginal[:, 0], total, out=second, where=total > 0)
-    variance = np.full(total.shape, np.nan)
-    np.divide(np.maximum(second - value**2, 0), total, out=variance, where=total > 0)
-    floor = np.full(total.shape, np.nan)
-    np.divide(1.0, total, out=floor, where=total > 0)
-    return np.maximum(np.sqrt(variance), floor)
-
-
-def fit_traces(
-    fits: tuple[IdleBranchFit, ...],
-    errors: tuple[NDArray[np.float64], ...],
+def fit_trace(
+    fit: IdleBranchFit,
+    errors: NDArray[np.float64],
     *,
     delays: NDArray[np.float64],
     detune: float,
-) -> tuple[IdleBranchFit, ...]:
-    """Fit traces of one actual spectator state with shared frequency/decay.
-
-    Each trace keeps its own offset, signed amplitude and phase, so an ee
-    fringe can be inverted without changing its physical frequency. fits and
-    errors have matching order and contain only one actual spectator state.
-    Require complete full delay axes and nonzero accepted counts in each trace.
-    Failed or sign-ambiguous fits retain traces and an unavailable reason.
-    """
+) -> IdleBranchFit:
+    """Fit one nominal spectator branch; retain observations on failure."""
     span = float(np.ptp(delays))
     reason = None
-    if not all(f.complete for f in fits):
+    if not fit.complete:
         reason = "No completed acquisition at one or more required delays"
-    elif not all(np.all(np.isfinite(f.trace)) for f in fits):
+    elif not np.all(np.isfinite(fit.trace)):
         reason = "No accepted shots at one or more required delays"
     elif (
         len(delays) < 6
@@ -140,12 +102,12 @@ def fit_traces(
         or not np.allclose(np.diff(delays), np.diff(delays)[0])
     ):
         reason = "At least six distinct regularly spaced delays with positive span are needed"
-    elif any(np.ptp(f.trace) <= np.finfo(float).eps for f in fits):
+    elif np.ptp(fit.trace) <= np.finfo(float).eps:
         reason = "No identifiable Ramsey contrast"
     if reason:
-        return tuple(replace(f, reason=reason) for f in fits)
+        return replace(fit, reason=reason)
     try:
-        return _fit_complete_traces(fits, errors, delays, detune)
+        return _fit_complete_trace(fit, errors, delays, detune)
     except (
         AnalysisFailed,
         ValueError,
@@ -153,83 +115,39 @@ def fit_traces(
         FloatingPointError,
         np.linalg.LinAlgError,
     ) as exc:
-        return tuple(replace(f, reason=f"Fringe fit failed: {exc}") for f in fits)
+        return replace(fit, reason=f"Fringe fit failed: {exc}")
 
 
-def _fit_complete_traces(
-    fits: tuple[IdleBranchFit, ...],
-    errors: tuple[NDArray[np.float64], ...],
+def _fit_complete_trace(
+    fit: IdleBranchFit,
+    errors: NDArray[np.float64],
     delays: NDArray[np.float64],
     detune: float,
-) -> tuple[IdleBranchFit, ...]:
-    seeds = [fit_decay_fringe(delays, f.trace) for f in fits]
-    decay_bounds = decay_time_bounds(delays)
-    frequencies = np.fft.fftfreq(len(delays), d=abs(delays[1] - delays[0]))
-    frequencies = frequencies[frequencies >= 0.125 / float(np.ptp(delays))]
-    # Keep the same sampled-frequency and resolvable-decay bounds as the seed fitter.
-    frequency_bounds = (float(frequencies.min()), float(frequencies.max()))
-    parameters = [
-        ParameterSpec("frequency", float(seeds[0].freq), limits=frequency_bounds),
-        ParameterSpec("decay_time", float(seeds[0].decay_time), limits=decay_bounds),
-    ]
-    traces = []
-    for index, (fit, count_error, seed) in enumerate(
-        zip(fits, errors, seeds, strict=True)
-    ):
-        offset, amplitude, _, phase, _ = seed.params
-        names = tuple(f"{name}_{index}" for name in ("offset", "amplitude", "phase"))
-        parameters.extend(
-            ParameterSpec(name, float(value))
-            for name, value in zip(names, (offset, amplitude, phase), strict=True)
-        )
-        traces.append(
-            FitTrace(
-                delays,
-                fit.trace,
-                decaycos,
-                (names[0], names[1], "frequency", names[2], "decay_time"),
-                count_error,
-            )
-        )
-    shared = fit_shared(traces, parameters)
-    frequency = shared.values["frequency"]
-    variance = shared.variance("frequency")
-    error = float(np.sqrt(variance)) if variance >= 0 else np.nan
+) -> IdleBranchFit:
+    weighted = fit_weighted_decay_fringe(delays, (fit.trace,), (errors,))
+    (model,) = weighted.traces
+    frequency = weighted.frequency
+    error = weighted.frequency_se
     resolution = max(1 / float(np.ptp(delays)), error)
     reason = None
-    if not shared.diagnostics.valid:
+    if not weighted.shared.diagnostics.valid:
         reason = "Shared fringe optimizer did not converge"
     elif not np.isfinite(error):
         reason = "Frequency uncertainty is not finite; sign is unidentifiable"
     elif detune == 0 or min(frequency, abs(frequency - 2 * abs(detune))) <= resolution:
         reason = "Sign unidentifiable near 0 or 2*abs(detune); possible zero-frequency folding"
-    answers = []
     dense_delays = np.linspace(delays.min(), delays.max(), max(201, len(delays)))
-    for fit, trace in zip(fits, traces, strict=True):
-        values = {name: shared.values[name] for name in trace.parameter_names}
-        curve = decaycos(delays, *values.values())
-        indices = [shared.parameter_names.index(name) for name in trace.parameter_names]
-        quality = compute_fit_quality(
-            fit.trace,
-            curve,
-            values,
-            shared.covariance[np.ix_(indices, indices)],
-            decay_bounds=decay_bounds,
-        )
-        answers.append(
-            replace(
-                fit,
-                fit_curve=curve,
-                dense_curve=(dense_delays, decaycos(dense_delays, *values.values())),
-                magnitude_mhz=frequency,
-                signed_mhz=None if reason else float(np.sign(detune) * frequency),
-                error_mhz=error if np.isfinite(error) else None,
-                resolution_mhz=resolution,
-                reason=reason,
-                fit_quality=quality,
-            )
-        )
-    return tuple(answers)
+    return replace(
+        fit,
+        fit_curve=model.curve,
+        dense_curve=(dense_delays, model.evaluate(dense_delays)),
+        magnitude_mhz=frequency,
+        signed_mhz=None if reason else float(np.sign(detune) * frequency),
+        error_mhz=error if np.isfinite(error) else None,
+        resolution_mhz=resolution,
+        reason=reason,
+        fit_quality=model.quality,
+    )
 
 
 def summarize(fits: tuple[IdleBranchFit, ...]) -> IdleZZAnalysis:
