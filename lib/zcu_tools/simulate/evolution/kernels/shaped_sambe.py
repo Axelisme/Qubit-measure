@@ -2,7 +2,6 @@
 
 from collections.abc import Callable
 from dataclasses import dataclass
-from typing import cast
 
 import numpy as np
 from numba import njit
@@ -394,7 +393,7 @@ class ShapedSambeKernel:
             # Start with a cubic amplitude polynomial; refine its estimated
             # omitted tail before accepting a key.
             nodes = 4
-            duration = cast(float, table.duration_ns[rows[index]])
+            duration = float(table.duration_ns[rows[index]].item())
             cycles = max(1, duration / step)
             # Compare the limiting amplitude, not 128 carrier-phase ODEs.
             # The bandwidth guard and the retained polynomial's last degree
