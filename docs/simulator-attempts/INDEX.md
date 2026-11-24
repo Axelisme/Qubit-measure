@@ -5,9 +5,14 @@
 ## 收錄規則
 
 - 每次以速度或資源用量為目標的模擬器嘗試，在落地或放棄時新增一檔，並在下方選一個主題加一列。部分採用、暫停或仍在調查的嘗試也可先登記，結案時更新同一檔。單純的介面或資料格式變更不收。
+- 速度 task 落地時，用同一份 manifest 重量它動到的場景，並更新下方的速度榜單。引用榜單數字前，先執行 `git log <commit>..HEAD -- <被測路徑>`；有改動就先重量，或說明改動為何不影響該數字。
 - 已有討論就連到原文，不搬寫比較過程或量測表。依據只在未入庫的工作檔時，把結論與判斷所需的數字寫進正文，並說明原始工作檔未入庫。
 - 索引每列放日期、嘗試檔連結、狀態、一句做法和一個代表數字。每個實測數字旁標明量測 commit、輸入與範圍，例如單輪或總和、實測或外推。缺少可追溯的量測時，可列有來源的設計值、門檻或算例，並標明用途。資料不全就寫明缺什麼，不以實作 commit 代替量測 commit。
 - 狀態記錄這次嘗試的結果，不描述目前的模組契約。若後續嘗試取代這次做法，在 `superseded_by` 填後續嘗試的相對路徑。
+
+## 普查
+
+- 2026-11-24，[模擬器速度榜單](./speed-ranking.md)，維護中。按 core 秒數／格查各場景的最大成本階段、量測版本與未覆蓋原因。
 
 ## 單檔模板
 
@@ -46,6 +51,9 @@ superseded_by: null
 ```
 
 ## Family 與 guard
+
+- 2026-11-24，[Shaped Sambe 的帶狀 Hermitian 全譜求解](./2026-11-24-banded-shaped-sambe.md)，`rejected`。用下帶儲存取代密集矩陣後，`chain/amp_rabi` 由 6.294 增至 8.912 core s／格（`addd6c8fb` → `0f5d83887`，同 block1 manifest、seed 123、單 worker，兩側批次從空快取開始，各一次完整 11 格 Run）。
+- 2026-11-24，[長時強驅動雙載波的內建波形路由](./2026-11-24-long-dual-carrier-builtins.md)，`paused`。先分類，再用 `inspect_dispatch` 確認目標段的預設路由只列 `dop853`，另行診斷 `common_frame` guard 才觀察到拒收（`32dfb53a5`）。DP5(4) apply 合計 6.449438 CPU s（`593426c2f`，24 態 FTF、單 CPU worker、8 個 1000 ns π／強振幅不同載波雙線格各一次，共 10 個直接積分段，不含平台）。
 
 - 2026-11-23，[Sampled multitone RWA 探針提早判死](./2026-11-23-sampled-rwa-probe-early-rejection.md)，`rejected`。中途超標就退出會誤拒端點合格的列。D=4 正例在 10% span 的密度差為 `2.117e-4`，高於 `1e-4` 門檻（`8cd18afcd`，1.5 ns 的單一 spot-edge probe）。
 - 2026-11-22，[讓被拒的 sampled span 改走 common-frame](./2026-11-22-sampled-span-common-frame.md)，`rejected`。強制放行和加入包絡斜率修正都比留在 DP5(4) 慢。強制放行 0.877 s，DP5(4) 0.782 s（`47fbcf5e8`，heralded RB 的 400 ns 雙 tone 末段，單列 apply 牆鐘）。
@@ -111,6 +119,8 @@ superseded_by: null
 
 ## 環境與讀出
 
+- 2026-11-24，[ADC 共用腔場乘積積分](./2026-11-24-adc-cavity-product-integrals.md)，`adopted`。小型平坦區間共用每態的短步係數，一次積分各腔場乘積。`chain/len_rabi` 的 readout 20.772 → 8.279 s（`addd6c8fb` → `2a571d682`，離線 fixture、seed 123、單 worker、各冷 cache，各一次 11 格 Run）。
+- 2026-11-24，[ADC flat jump 只算兩態基線](./2026-11-24-adc-flat-jump-baselines.md)，`adopted`。平坦且不回傳 trace 的多態讀出只計算跳轉所用的兩態。`twotone/ro_optimize/chain_freq` 的 materialize 61.162 → 48.688 s（`addd6c8fb` → `5e43af2c7`，離線 fixture、seed 123、單 worker、各冷 cache，各一次 11 格 Run）。
 - 2026-11-22，[FTF 樣板提高 projective floor](./2026-11-22-ftf-projection-weight-floor.md)，`adopted`。提高新工作副本的 floor，減少低機率來源態的續演化。最大完整 density 差 6.921e-6（`cc6b252c0`，六列 FTF 輸入、同 seed、Markov 模型的 floor `1e-5` 對 `0`）。
 - 2026-11-18，[移除 private replay](./2026-11-18-remove-private-replay.md)，`adopted`。移除逐位重算及舊 archive 相容要求。為逐位重算，開發時曾把 pilot 最少 timeline 數從 8 提到 16（舊設定）。沒有單獨量測移除的 runtime 收益。
 - 2026-10-18，[Flat integrated readout 離散和](./2026-10-18-readout-discrete-sums.md)，`adopted`。對 ADC 樣本的條件場直接求幾何級數，省掉產生整條 trace 後再加總。研究原型要求兩個 eigenbasis 的 condition number 均 `<1e4`（研究 guard）。可取得基準樹，未取得原型的量測 commit。

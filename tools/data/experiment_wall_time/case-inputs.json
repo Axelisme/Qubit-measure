@@ -3,7 +3,7 @@
   "point": "initial",
   "unpinned": {
     "form": "The live adapter supplies unpinned Form defaults at Open. It can derive fields from the opened point, library and aliases, and leave fields that require operator input blank.",
-    "point": "The tool-owned fixture/result/ftf-demo documents supply unpinned point values and global context. Simulator and board inputs are the adjacent ftf-settings.yaml and board-profile.yaml."
+    "point": "The tool-owned fixture/result/ftf-demo documents supply unpinned point values and global context. The synthetic R1 GE classifier, the low-shot simulated mux classifiers, the 0-degree Local Z pair and the shared CZ arb are path-timing inputs, not physical calibrations. Simulator and board inputs are the adjacent ftf-settings.yaml and board-profile.yaml."
   },
   "scenes": [
     {
@@ -139,6 +139,19 @@
       ]
     },
     {
+      "scene_id": "mux/onetone",
+      "adapter": "mux/onetone",
+      "metric": {"kind": "scan", "axes": [{"field": "dfs"}]},
+      "basis": "Simulator speed survey scene; scan axes shortened to about 11 points per field; path timing only.",
+      "overrides": [
+        {
+          "path": ["df", "n"],
+          "value": 11,
+          "basis": "Reduce this speed survey axis to about 11 points; retain the Form window."
+        }
+      ]
+    },
+    {
       "scene_id": "mux/onetone_flux_global",
       "adapter": "mux/onetone_flux_global",
       "metric": {"kind": "scan", "axes": [{"field": "flux_values", "dimension": 1}, {"field": "frequencies", "dimension": 1}]},
@@ -151,6 +164,52 @@
       "metric": {"kind": "scan", "axes": [{"field": "flux_values", "dimension": 1}, {"field": "frequencies", "dimension": 1}]},
       "basis": "The earlier slow-workload selection identified this adapter as slow; keep it in the curated table.",
       "overrides": []
+    },
+    {
+      "scene_id": "mux/singleshot_ge",
+      "adapter": "mux/singleshot_ge",
+      "metric": {"kind": "shots"},
+      "basis": "Speed survey shots-only mux GE path; retain the Form shot count.",
+      "overrides": []
+    },
+    {
+      "scene_id": "mux/t1",
+      "adapter": "mux/t1",
+      "metric": {"kind": "scan", "axes": [{"field": "times"}]},
+      "basis": "Simulator speed survey scene; scan axes shortened to about 11 points per field; path timing only.",
+      "overrides": [
+        {
+          "path": ["delay", "n"],
+          "value": 11,
+          "basis": "Reduce this speed survey axis to about 11 points; retain the Form window."
+        }
+      ]
+    },
+    {
+      "scene_id": "mux/t2echo",
+      "adapter": "mux/t2echo",
+      "metric": {"kind": "scan", "axes": [{"field": "times"}]},
+      "basis": "Simulator speed survey scene; scan axes shortened to about 11 points per field; path timing only.",
+      "overrides": [
+        {
+          "path": ["delay", "n"],
+          "value": 11,
+          "basis": "Reduce this speed survey axis to about 11 points; retain the Form window."
+        }
+      ]
+    },
+    {
+      "scene_id": "mux/t2ramsey",
+      "adapter": "mux/t2ramsey",
+      "metric": {"kind": "scan", "axes": [{"field": "times"}]},
+      "basis": "Simulator speed survey scene; scan axes shortened to about 11 points per field; path timing only.",
+      "overrides": [
+        {
+          "path": ["delay", "n"],
+          "value": 11,
+          "basis": "Reduce this speed survey axis to about 11 points; retain the Form window."
+        }
+      ]
     },
     {
       "scene_id": "mux/twotone_flux_global",
@@ -216,6 +275,55 @@
       ]
     },
     {
+      "scene_id": "onetone/flux_dep",
+      "adapter": "onetone/flux_dep",
+      "metric": {"kind": "scan", "axes": [{"field": "values"}, {"field": "freqs"}]},
+      "basis": "Simulator speed survey scene; scan axes shortened to about 11 points per field; path timing only.",
+      "overrides": [
+        {
+          "path": ["flux", "n"],
+          "value": 11,
+          "basis": "Reduce this speed survey axis to about 11 points; retain the Form window."
+        },
+        {
+          "path": ["freq", "n"],
+          "value": 11,
+          "basis": "Reduce this speed survey axis to about 11 points; retain the Form window."
+        }
+      ]
+    },
+    {
+      "scene_id": "onetone/freq",
+      "adapter": "onetone/freq",
+      "metric": {"kind": "scan", "axes": [{"field": "freqs"}]},
+      "basis": "Simulator speed survey scene; scan axes shortened to about 11 points per field; path timing only.",
+      "overrides": [
+        {
+          "path": ["freq", "n"],
+          "value": 11,
+          "basis": "Reduce this speed survey axis to about 11 points; retain the Form window."
+        }
+      ]
+    },
+    {
+      "scene_id": "onetone/power_dep",
+      "adapter": "onetone/power_dep",
+      "metric": {"kind": "scan", "axes": [{"field": "gains"}, {"field": "freqs"}]},
+      "basis": "Simulator speed survey scene; scan axes shortened to about 11 points per field; path timing only.",
+      "overrides": [
+        {
+          "path": ["gain", "n"],
+          "value": 11,
+          "basis": "Reduce this speed survey axis to about 11 points; retain the Form window."
+        },
+        {
+          "path": ["freq", "n"],
+          "value": 11,
+          "basis": "Reduce this speed survey axis to about 11 points; retain the Form window."
+        }
+      ]
+    },
+    {
       "scene_id": "onetone/range_find",
       "adapter": "onetone/range_find",
       "metric": {"kind": "scan", "axes": [{"field": "freqs"}]},
@@ -247,6 +355,33 @@
       ]
     },
     {
+      "scene_id": "singleshot/amp_rabi",
+      "adapter": "singleshot/amp_rabi",
+      "metric": {"kind": "scan", "axes": [{"field": "gains"}]},
+      "basis": "Simulator speed survey scene; scan axes shortened to about 11 points per field; path timing only. The R1 synthetic GE classifier is a path-timing input, not a calibration.",
+      "overrides": [
+        {
+          "path": ["gain", "n"],
+          "value": 11,
+          "basis": "Reduce this speed survey axis to about 11 points; retain the Form window."
+        }
+      ]
+    },
+    {
+      "scene_id": "singleshot/check",
+      "adapter": "singleshot/check",
+      "metric": {"kind": "shots"},
+      "basis": "Speed survey shots-only check; retain the Form shot count. The R1 synthetic GE classifier is a path-timing input, not a calibration.",
+      "overrides": []
+    },
+    {
+      "scene_id": "singleshot/ge",
+      "adapter": "singleshot/ge",
+      "metric": {"kind": "shots"},
+      "basis": "Speed survey shots-only GE path; retain the Form shot count. The R1 synthetic GE classifier is a path-timing input, not a calibration.",
+      "overrides": []
+    },
+    {
       "scene_id": "singleshot/len_rabi",
       "adapter": "singleshot/len_rabi",
       "metric": {"kind": "scan", "axes": [{"field": "lengths"}]},
@@ -256,6 +391,50 @@
           "path": ["length", "stop"],
           "value": 0.84,
           "basis": "Four times the captured 0.48 us Q1 x180 is 1.92 us. The offline envelope check at commit 55e47cb0b8f1aa3934c09be82de48d922e6f193a found 8,384 samples on gen 2 at point 24, beyond its 8,192-sample capacity. A 0.84 us stop corresponds to an estimated 8,048 samples on the board grid and retains the cosine and point count."
+        }
+      ]
+    },
+    {
+      "scene_id": "singleshot/mist/freq",
+      "adapter": "singleshot/mist/freq",
+      "metric": {"kind": "scan", "axes": [{"field": "freqs"}]},
+      "basis": "Simulator speed survey scene; scan axes shortened to about 11 points per field; path timing only. The R1 synthetic GE classifier is a path-timing input, not a calibration.",
+      "overrides": [
+        {
+          "path": ["freq", "n"],
+          "value": 11,
+          "basis": "Reduce this speed survey axis to about 11 points; retain the Form window."
+        }
+      ]
+    },
+    {
+      "scene_id": "singleshot/mist/power",
+      "adapter": "singleshot/mist/power",
+      "metric": {"kind": "scan", "axes": [{"field": "gains"}]},
+      "basis": "Simulator speed survey scene; scan axes shortened to about 11 points per field; path timing only. The R1 synthetic GE classifier is a path-timing input, not a calibration.",
+      "overrides": [
+        {
+          "path": ["gain", "n"],
+          "value": 11,
+          "basis": "Reduce this speed survey axis to about 11 points; retain the Form window."
+        }
+      ]
+    },
+    {
+      "scene_id": "singleshot/mist/power_freq",
+      "adapter": "singleshot/mist/power_freq",
+      "metric": {"kind": "scan", "axes": [{"field": "gains"}, {"field": "freqs"}]},
+      "basis": "Simulator speed survey scene; scan axes shortened to about 11 points per field; path timing only. The R1 synthetic GE classifier is a path-timing input, not a calibration.",
+      "overrides": [
+        {
+          "path": ["gain", "n"],
+          "value": 11,
+          "basis": "Reduce this speed survey axis to about 11 points; retain the Form window."
+        },
+        {
+          "path": ["freq", "n"],
+          "value": 11,
+          "basis": "Reduce this speed survey axis to about 11 points; retain the Form window."
         }
       ]
     },
@@ -274,6 +453,39 @@
           "path": ["freq", "stop"],
           "value": 301.037,
           "basis": "Keep a bounded frequency search around the captured Q1 f01 for the preparation pulse. The Form keeps its narrower kappa-based seed."
+        }
+      ]
+    },
+    {
+      "scene_id": "singleshot/qutrit_population",
+      "adapter": "singleshot/qutrit_population",
+      "metric": {"kind": "shots"},
+      "basis": "Speed survey shots-only qutrit readout; retain the Form shot count. The R1 synthetic GE classifier is a path-timing input, not a calibration.",
+      "overrides": []
+    },
+    {
+      "scene_id": "singleshot/reset_check",
+      "adapter": "singleshot/reset_check",
+      "metric": {"kind": "scan", "axes": [{"field": "gains"}]},
+      "basis": "Simulator speed survey scene; scan axes shortened to about 11 points per field; path timing only. The R1 synthetic GE classifier is a path-timing input, not a calibration.",
+      "overrides": [
+        {
+          "path": ["gain", "n"],
+          "value": 11,
+          "basis": "Reduce this speed survey axis to about 11 points; retain the Form window."
+        }
+      ]
+    },
+    {
+      "scene_id": "singleshot/t1",
+      "adapter": "singleshot/t1",
+      "metric": {"kind": "scan", "axes": [{"field": "lengths"}]},
+      "basis": "Simulator speed survey scene; scan axes shortened to about 11 points per field; path timing only. The R1 synthetic GE classifier is a path-timing input, not a calibration.",
+      "overrides": [
+        {
+          "path": ["delay", "n"],
+          "value": 11,
+          "basis": "Reduce this speed survey axis to about 11 points; retain the Form window."
         }
       ]
     },
@@ -330,8 +542,28 @@
       "scene_id": "two_qubit/chevron",
       "adapter": "two_qubit/chevron",
       "metric": {"kind": "scan", "axes": [{"field": "durations"}, {"field": "coordinates"}]},
-      "basis": "The earlier workload selection retained this adapter to exercise its bounded setup or a named prerequisite.",
+      "basis": "The earlier workload selection retained this adapter to exercise its bounded setup or a named prerequisite. Any GE classifiers or Local Z corrections from this fixture are path-timing inputs, not calibrations.",
       "overrides": [
+        {
+          "path": ["duration", "n"],
+          "value": 11,
+          "basis": "Reduce this speed survey scan to about 11 points per axis; preserve the scene window."
+        },
+        {
+          "path": ["duration", "start"],
+          "value": 0.06,
+          "basis": "FTF recalibration Round 10, run 20261120T123907Z-c0247a: measured 0.06–1.80 us window covers both depletion and return."
+        },
+        {
+          "path": ["duration", "stop"],
+          "value": 0.78,
+          "basis": "Bound duration scan by the fixture CZ pulse and FTF gen-2 waveform capacity; path timing only, not a recalibrated duration window."
+        },
+        {
+          "path": ["frequency", "n"],
+          "value": 11,
+          "basis": "Reduce this speed survey scan to about 11 points per axis; preserve the scene window."
+        },
         {
           "path": ["frequency", "start"],
           "value": 5795,
@@ -341,16 +573,6 @@
           "path": ["frequency", "stop"],
           "value": 5805.5,
           "basis": "FTF recalibration Round 10, run 20261120T123907Z-c0247a: use its MHz window around the re-observed 5800 MHz common drive feature, not a model transition."
-        },
-        {
-          "path": ["duration", "start"],
-          "value": 0.06,
-          "basis": "FTF recalibration Round 10, run 20261120T123907Z-c0247a: measured 0.06–1.80 us window covers both depletion and return; retain the current form point counts."
-        },
-        {
-          "path": ["duration", "stop"],
-          "value": 1.8,
-          "basis": "FTF recalibration Round 10, run 20261120T123907Z-c0247a: measured 0.06–1.80 us window covers both depletion and return; retain the current form point counts."
         }
       ]
     },
@@ -358,8 +580,13 @@
       "scene_id": "two_qubit/conditional_phase",
       "adapter": "two_qubit/conditional_phase",
       "metric": {"kind": "scan", "axes": [{"field": "gate_counts"}, {"field": "frequencies"}]},
-      "basis": "The earlier workload selection retained this adapter to exercise its bounded setup or a named prerequisite.",
+      "basis": "The earlier workload selection retained this adapter to exercise its bounded setup or a named prerequisite. Any GE classifiers or Local Z corrections from this fixture are path-timing inputs, not calibrations.",
       "overrides": [
+        {
+          "path": ["frequency", "n"],
+          "value": 11,
+          "basis": "Reduce this speed survey scan to about 11 points per axis; preserve the scene window."
+        },
         {
           "path": ["frequency", "start"],
           "value": 5798,
@@ -376,8 +603,13 @@
       "scene_id": "two_qubit/conditional_phase_heralded",
       "adapter": "two_qubit/conditional_phase_heralded",
       "metric": {"kind": "scan", "axes": [{"field": "gate_counts"}, {"field": "frequencies"}]},
-      "basis": "The earlier workload selection retained this adapter to exercise its bounded setup or a named prerequisite.",
+      "basis": "The earlier workload selection retained this adapter to exercise its bounded setup or a named prerequisite. Any GE classifiers or Local Z corrections from this fixture are path-timing inputs, not calibrations.",
       "overrides": [
+        {
+          "path": ["frequency", "n"],
+          "value": 11,
+          "basis": "Reduce this speed survey scan to about 11 points per axis; preserve the scene window."
+        },
         {
           "path": ["frequency", "start"],
           "value": 5798,
@@ -394,17 +626,45 @@
       "scene_id": "two_qubit/conditional_spectroscopy",
       "adapter": "two_qubit/conditional_spectroscopy",
       "metric": {"kind": "scan", "axes": [{"field": "dc_values"}, {"field": "frequencies"}]},
-      "basis": "The earlier workload selection retained this adapter to exercise its bounded setup or a named prerequisite.",
+      "basis": "The earlier workload selection retained this adapter to exercise its bounded setup or a named prerequisite. Any GE classifiers or Local Z corrections from this fixture are path-timing inputs, not calibrations.",
       "overrides": [
+        {
+          "path": ["frequency", "n"],
+          "value": 11,
+          "basis": "Reduce this speed survey scan to about 11 points per axis; preserve the scene window."
+        },
         {
           "path": ["frequency", "start"],
           "value": 5784,
-          "basis": "Ding-cz Round 22 repeated 5784–5816 MHz and resolved responses near 5785 and 5800 MHz. Use its MHz window with the current Form point count."
+          "basis": "Ding-cz Round 22 repeated 5784–5816 MHz and resolved responses near 5785 and 5800 MHz. Use its MHz window."
         },
         {
           "path": ["frequency", "stop"],
           "value": 5816,
-          "basis": "Ding-cz Round 22 repeated 5784–5816 MHz and resolved responses near 5785 and 5800 MHz. Use its MHz window with the current Form point count."
+          "basis": "Ding-cz Round 22 repeated 5784–5816 MHz and resolved responses near 5785 and 5800 MHz. Use its MHz window."
+        }
+      ]
+    },
+    {
+      "scene_id": "two_qubit/conditional_spectroscopy_heralded",
+      "adapter": "two_qubit/conditional_spectroscopy_heralded",
+      "metric": {"kind": "scan", "axes": [{"field": "dc_values"}, {"field": "frequencies"}]},
+      "basis": "Adapter inventory from lab_definitions; simulator path-timing workload. Any GE classifiers or Local Z corrections from this fixture are path-timing inputs, not calibrations.",
+      "overrides": [
+        {
+          "path": ["frequency", "n"],
+          "value": 11,
+          "basis": "Reduce this speed survey scan to about 11 points per axis; preserve the scene window."
+        },
+        {
+          "path": ["frequency", "start"],
+          "value": 5784,
+          "basis": "Use the existing conditional-spectroscopy bounded MHz window."
+        },
+        {
+          "path": ["frequency", "stop"],
+          "value": 5816,
+          "basis": "Use the existing conditional-spectroscopy bounded MHz window."
         }
       ]
     },
@@ -412,8 +672,13 @@
       "scene_id": "two_qubit/constructive_phase",
       "adapter": "two_qubit/constructive_phase",
       "metric": {"kind": "scan", "axes": [{"field": "durations"}, {"field": "coordinates"}]},
-      "basis": "The earlier workload selection retained this adapter to exercise its bounded setup or a named prerequisite.",
+      "basis": "The earlier workload selection retained this adapter to exercise its bounded setup or a named prerequisite. Any GE classifiers or Local Z corrections from this fixture are path-timing inputs, not calibrations.",
       "overrides": [
+        {
+          "path": ["duration", "n"],
+          "value": 11,
+          "basis": "Reduce this speed survey scan to about 11 points per axis; preserve the scene window."
+        },
         {
           "path": ["duration", "start"],
           "value": 0.012,
@@ -423,6 +688,11 @@
           "path": ["duration", "stop"],
           "value": 0.332,
           "basis": "Ding-cz Round 23 tested this duration span in us to cover the observed 0.084/0.164 us depletion/return and resolve the phase-dependent rate; retain the current Form point counts."
+        },
+        {
+          "path": ["relative_phase", "n"],
+          "value": 11,
+          "basis": "Reduce this speed survey scan to about 11 points per axis; preserve the scene window."
         }
       ]
     },
@@ -430,8 +700,13 @@
       "scene_id": "two_qubit/cz_amplitude",
       "adapter": "two_qubit/cz_amplitude",
       "metric": {"kind": "scan", "axes": [{"field": "scales"}]},
-      "basis": "The earlier workload selection retained this adapter to exercise its bounded setup or a named prerequisite.",
+      "basis": "The earlier workload selection retained this adapter to exercise its bounded setup or a named prerequisite. Any GE classifiers or Local Z corrections from this fixture are path-timing inputs, not calibrations.",
       "overrides": [
+        {
+          "path": ["scale", "n"],
+          "value": 11,
+          "basis": "Reduce this speed survey scan to about 11 points per axis; preserve the scene window."
+        },
         {
           "path": ["scale", "start"],
           "value": 0,
@@ -445,11 +720,113 @@
       ]
     },
     {
+      "scene_id": "two_qubit/cz_optimize",
+      "adapter": "two_qubit/cz_optimize",
+      "metric": {"kind": "evaluation", "peak_field": "peak", "counts_field": "sums"},
+      "basis": "Bounded optimizer path-time workload; timing fixture has a synthetic 0-degree Local Z pair. No physical CZ interpretation.",
+      "overrides": [
+        {
+          "path": ["cma_seed"],
+          "value": 0,
+          "basis": "Deterministic scratch optimizer seed."
+        },
+        {
+          "path": ["depth"],
+          "value": 2,
+          "basis": "Short fixed Clifford depth for scratch path timing."
+        },
+        {
+          "path": ["generations"],
+          "value": 1,
+          "basis": "One optimizer generation for bounded path timing."
+        },
+        {
+          "path": ["popsize"],
+          "value": 2,
+          "basis": "Minimum legal candidate population for bounded path timing."
+        },
+        {
+          "path": ["seed"],
+          "value": [
+            0,
+            1,
+            2
+          ],
+          "basis": "Three mandatory optimizer sequence seeds, minimal legal set."
+        },
+        {
+          "path": ["sigma_knot"],
+          "value": 0.1,
+          "basis": "Finite scratch optimizer initial waveform spread."
+        },
+        {
+          "path": ["sigma_z_deg"],
+          "value": 5,
+          "basis": "Finite scratch optimizer local-Z spread."
+        },
+        {
+          "path": ["drive", "qubit1"],
+          "value": {
+            "kind": "inline",
+            "module": {
+              "type": "pulse",
+              "waveform": {
+                "kind": "inline",
+                "module": {
+                  "style": "arb",
+                  "data": "cz_survey"
+                }
+              },
+              "ch": 2,
+              "freq": 5799.976979080261,
+              "gain": 0.024144059109456696,
+              "nqz": 2,
+              "phase": 0,
+              "pre_delay": 0,
+              "post_delay": 0,
+              "mixer_freq": null
+            }
+          },
+          "basis": "Match the survey's starting CZ line and use the shared 129-sample, 0.78 µs sin² arb in the fixture. Path timing only, not a calibrated pulse."
+        },
+        {
+          "path": ["drive", "qubit2"],
+          "value": {
+            "kind": "inline",
+            "module": {
+              "type": "pulse",
+              "waveform": {
+                "kind": "inline",
+                "module": {
+                  "style": "arb",
+                  "data": "cz_survey"
+                }
+              },
+              "ch": 3,
+              "freq": 5799.976979080261,
+              "gain": 0.024144059109456696,
+              "nqz": 2,
+              "phase": -0.21495102875174946,
+              "pre_delay": 0,
+              "post_delay": 0,
+              "mixer_freq": null
+            }
+          },
+          "basis": "Match the survey's starting CZ line and use the shared 129-sample, 0.78 µs sin² arb in the fixture. Path timing only, not a calibrated pulse."
+        }
+      ]
+    },
+    {
       "scene_id": "two_qubit/idle_zz",
       "adapter": "two_qubit/idle_zz",
       "metric": {"kind": "scan", "axes": [{"field": "dc_values"}, {"field": "delays"}]},
-      "basis": "The earlier workload selection retained this adapter to exercise its bounded setup or a named prerequisite.",
+      "basis": "The earlier workload selection retained this adapter to exercise its bounded setup or a named prerequisite. Any GE classifiers or Local Z corrections from this fixture are path-timing inputs, not calibrations.",
       "overrides": [
+        {
+          "path": ["delay", "n"],
+          "value": 11,
+          "basis": "Reduce this speed survey scan to about 11 points per axis; preserve the scene window."
+        },
         {
           "path": ["detune"],
           "value": 0.37,
@@ -458,20 +835,68 @@
       ]
     },
     {
+      "scene_id": "two_qubit/joint_readout",
+      "adapter": "two_qubit/joint_readout",
+      "metric": {"kind": "shots"},
+      "basis": "Adapter inventory from lab_definitions; simulator path-timing workload. Any GE classifiers or Local Z corrections from this fixture are path-timing inputs, not calibrations.",
+      "overrides": []
+    },
+    {
+      "scene_id": "two_qubit/local_z",
+      "adapter": "two_qubit/local_z",
+      "metric": {"kind": "scan", "axes": [{"field": "gate_counts"}]},
+      "basis": "Adapter inventory from lab_definitions; simulator path-timing workload. Any GE classifiers or Local Z corrections from this fixture are path-timing inputs, not calibrations.",
+      "overrides": []
+    },
+    {
       "scene_id": "two_qubit/rb",
       "adapter": "two_qubit/rb",
       "metric": {"kind": "scan", "axes": [{"field": "seeds"}, {"field": "depths"}]},
-      "basis": "The earlier workload selection retained this adapter to exercise its bounded setup or a named prerequisite.",
-      "overrides": [],
-      "ftf_exclusion": "Requires upstream calibration; not measured: fixed ftf-demo/initial lacks the ordered Q1/Q2 Local Z pair at $coupler.ext.cz_phase."
+      "basis": "Bounded RB path-time workload; timing fixture has synthetic 0-degree Local Z pair. No physical RB interpretation.",
+      "overrides": [
+        {
+          "path": ["depth"],
+          "value": [
+            0,
+            1,
+            2,
+            4
+          ],
+          "basis": "Short Clifford-depth sample for this scratch speed survey."
+        },
+        {
+          "path": ["seed"],
+          "value": [
+            0
+          ],
+          "basis": "One sequence seed for this scratch speed survey."
+        }
+      ]
     },
     {
       "scene_id": "two_qubit/rb_heralded",
       "adapter": "two_qubit/rb_heralded",
       "metric": {"kind": "scan", "axes": [{"field": "seeds"}, {"field": "depths"}]},
-      "basis": "The earlier workload selection retained this adapter to exercise its bounded setup or a named prerequisite.",
-      "overrides": [],
-      "ftf_exclusion": "Requires upstream calibration; not measured: fixed ftf-demo/initial lacks the ordered Q1/Q2 Local Z pair at $coupler.ext.cz_phase."
+      "basis": "Bounded RB path-time workload; timing fixture has synthetic 0-degree Local Z pair. No physical RB interpretation.",
+      "overrides": [
+        {
+          "path": ["depth"],
+          "value": [
+            0,
+            1,
+            2,
+            4
+          ],
+          "basis": "Short Clifford-depth sample for this scratch speed survey."
+        },
+        {
+          "path": ["seed"],
+          "value": [
+            0
+          ],
+          "basis": "One sequence seed for this scratch speed survey."
+        }
+      ]
     },
     {
       "scene_id": "twotone/ac_stark",
@@ -490,6 +915,31 @@
           "basis": "Keep a bounded Stark spectroscopy band around the captured Q1 f01. It is wider than the Form seed so the workload includes off-center probe frequencies."
         }
       ]
+    },
+    {
+      "scene_id": "twotone/ac_stark_ramsey",
+      "adapter": "twotone/ac_stark_ramsey",
+      "metric": {"kind": "scan", "axes": [{"field": "gains"}, {"field": "lengths"}]},
+      "basis": "Simulator speed survey scene; scan axes shortened to about 11 points per field; path timing only.",
+      "overrides": [
+        {
+          "path": ["gain", "n"],
+          "value": 11,
+          "basis": "Reduce this speed survey axis to about 11 points; retain the Form window."
+        },
+        {
+          "path": ["delay", "n"],
+          "value": 11,
+          "basis": "Reduce this speed survey axis to about 11 points; retain the Form window."
+        }
+      ]
+    },
+    {
+      "scene_id": "twotone/allxy",
+      "adapter": "twotone/allxy",
+      "metric": {"kind": "shots"},
+      "basis": "Speed survey control-sequence path; retain the Form reps and rounds.",
+      "overrides": []
     },
     {
       "scene_id": "twotone/chain",
@@ -515,6 +965,32 @@
       "metric": {"kind": "scan", "axes": [{"field": "res_freqs"}, {"field": "qub_freqs"}]},
       "basis": "The earlier slow-workload selection identified this adapter as slow; keep it in the curated table.",
       "overrides": []
+    },
+    {
+      "scene_id": "twotone/cpmg",
+      "adapter": "twotone/cpmg",
+      "metric": {"kind": "scan", "axes": [{"field": "ns"}, {"field": "delays", "dimension": 1}]},
+      "basis": "Simulator speed survey scene; scan axes shortened to about 11 points per field; path timing only.",
+      "overrides": [
+        {
+          "path": ["length_points"],
+          "value": 11,
+          "basis": "Reduce the independent CPMG time-sweep point count to about 11; preserve its duration window."
+        }
+      ]
+    },
+    {
+      "scene_id": "twotone/dispersive",
+      "adapter": "twotone/dispersive",
+      "metric": {"kind": "scan", "axes": [{"field": "freqs"}]},
+      "basis": "Simulator speed survey scene; scan axes shortened to about 11 points per field; path timing only.",
+      "overrides": [
+        {
+          "path": ["freq", "n"],
+          "value": 11,
+          "basis": "Reduce this speed survey axis to about 11 points; retain the Form window."
+        }
+      ]
     },
     {
       "scene_id": "twotone/flux_dep",
@@ -571,6 +1047,19 @@
       ]
     },
     {
+      "scene_id": "twotone/rabi/amp_rabi",
+      "adapter": "twotone/rabi/amp_rabi",
+      "metric": {"kind": "scan", "axes": [{"field": "amps"}]},
+      "basis": "Simulator speed survey scene; scan axes shortened to about 11 points per field; path timing only.",
+      "overrides": [
+        {
+          "path": ["gain", "n"],
+          "value": 11,
+          "basis": "Reduce this speed survey axis to about 11 points; retain the Form window."
+        }
+      ]
+    },
+    {
       "scene_id": "twotone/rabi/len_rabi",
       "adapter": "twotone/rabi/len_rabi",
       "metric": {"kind": "scan", "axes": [{"field": "lengths"}]},
@@ -582,6 +1071,75 @@
           "basis": "The current retry hits the gen 2 8192-sample limit before reaching the form's 1.92 us stop. Use 0.84 us (8048 samples at the board profile clock), retaining the cosine and point count."
         }
       ]
+    },
+    {
+      "scene_id": "twotone/raman_gf",
+      "adapter": "twotone/raman_gf",
+      "metric": {"kind": "scan", "axes": [{"field": "detunings"}]},
+      "basis": "Speed survey coverage gap. No timing until a Raman waveform and carrier are supplied.",
+      "overrides": []
+    },
+    {
+      "scene_id": "twotone/rb",
+      "adapter": "twotone/rb",
+      "metric": {"kind": "shots"},
+      "basis": "Speed survey single-qubit RB; retain the Form depth list, reps and rounds.",
+      "overrides": []
+    },
+    {
+      "scene_id": "twotone/reset/bath/freq_gain",
+      "adapter": "twotone/reset/bath/freq_gain",
+      "metric": {"kind": "scan", "axes": [{"field": "freqs"}, {"field": "gains"}]},
+      "basis": "Speed survey coverage gap. No timing until cavity frequency bounds are supplied.",
+      "overrides": []
+    },
+    {
+      "scene_id": "twotone/reset/bath/length",
+      "adapter": "twotone/reset/bath/length",
+      "metric": {"kind": "scan", "axes": [{"field": "lengths"}]},
+      "basis": "Speed survey coverage gap. No timing until cavity frequency and gain are supplied.",
+      "overrides": []
+    },
+    {
+      "scene_id": "twotone/reset/bath/phase",
+      "adapter": "twotone/reset/bath/phase",
+      "metric": {"kind": "scan", "axes": [{"field": "phases"}]},
+      "basis": "Speed survey coverage gap. No timing until cavity frequency and gain are supplied.",
+      "overrides": []
+    },
+    {
+      "scene_id": "twotone/reset/check",
+      "adapter": "twotone/reset/check",
+      "metric": {"kind": "scan", "axes": [{"field": "gains"}]},
+      "basis": "Simulator speed survey scene; scan axes shortened to about 11 points per field; path timing only.",
+      "overrides": [
+        {
+          "path": ["gain", "n"],
+          "value": 11,
+          "basis": "Reduce this speed survey axis to about 11 points; retain the Form window."
+        }
+      ]
+    },
+    {
+      "scene_id": "twotone/reset/dual_tone/freq",
+      "adapter": "twotone/reset/dual_tone/freq",
+      "metric": {"kind": "scan", "axes": [{"field": "freqs2"}, {"field": "freqs1"}]},
+      "basis": "Speed survey coverage gap. No timing until both gains and both frequency windows are supplied.",
+      "overrides": []
+    },
+    {
+      "scene_id": "twotone/reset/dual_tone/length",
+      "adapter": "twotone/reset/dual_tone/length",
+      "metric": {"kind": "scan", "axes": [{"field": "lengths"}]},
+      "basis": "Speed survey coverage gap. No timing until both carriers and gains are supplied.",
+      "overrides": []
+    },
+    {
+      "scene_id": "twotone/reset/dual_tone/power",
+      "adapter": "twotone/reset/dual_tone/power",
+      "metric": {"kind": "scan", "axes": [{"field": "gains2"}, {"field": "gains1"}]},
+      "basis": "Speed survey coverage gap. No timing until both carriers are supplied.",
+      "overrides": []
     },
     {
       "scene_id": "twotone/reset/flux/gain",
@@ -616,6 +1174,13 @@
       ]
     },
     {
+      "scene_id": "twotone/reset/single_tone/length",
+      "adapter": "twotone/reset/single_tone/length",
+      "metric": {"kind": "scan", "axes": [{"field": "lengths"}]},
+      "basis": "Speed survey coverage gap. No timing until the pulse carrier is supplied.",
+      "overrides": []
+    },
+    {
       "scene_id": "twotone/ro_optimize/auto",
       "adapter": "twotone/ro_optimize/auto",
       "metric": {"kind": "evaluation", "single_acquire_candidate_field": "params"},
@@ -630,11 +1195,68 @@
       "overrides": []
     },
     {
+      "scene_id": "twotone/ro_optimize/chain_length",
+      "adapter": "twotone/ro_optimize/chain_length",
+      "metric": {"kind": "scan", "axes": [{"field": "axis"}]},
+      "basis": "Simulator speed survey scene; scan axes shortened to about 11 points per field; path timing only.",
+      "overrides": [
+        {
+          "path": ["length", "n"],
+          "value": 11,
+          "basis": "Reduce this speed survey axis to about 11 points; retain the Form window."
+        }
+      ]
+    },
+    {
       "scene_id": "twotone/ro_optimize/chain_power",
       "adapter": "twotone/ro_optimize/chain_power",
       "metric": {"kind": "scan", "axes": [{"field": "axis"}]},
       "basis": "The earlier slow-workload selection identified this adapter as slow; keep it in the curated table.",
       "overrides": []
+    },
+    {
+      "scene_id": "twotone/ro_optimize/freq",
+      "adapter": "twotone/ro_optimize/freq",
+      "metric": {"kind": "scan", "axes": [{"field": "freqs"}]},
+      "basis": "Simulator speed survey scene; scan axes shortened to about 11 points per field; path timing only.",
+      "overrides": [
+        {
+          "path": ["freq", "n"],
+          "value": 11,
+          "basis": "Reduce this speed survey axis to about 11 points; retain the Form window."
+        }
+      ]
+    },
+    {
+      "scene_id": "twotone/ro_optimize/freq_gain",
+      "adapter": "twotone/ro_optimize/freq_gain",
+      "metric": {"kind": "scan", "axes": [{"field": "freqs"}, {"field": "gains"}]},
+      "basis": "Simulator speed survey scene; scan axes shortened to about 11 points per field; path timing only.",
+      "overrides": [
+        {
+          "path": ["freq", "n"],
+          "value": 11,
+          "basis": "Reduce this speed survey axis to about 11 points; retain the Form window."
+        },
+        {
+          "path": ["gain", "n"],
+          "value": 11,
+          "basis": "Reduce this speed survey axis to about 11 points; retain the Form window."
+        }
+      ]
+    },
+    {
+      "scene_id": "twotone/ro_optimize/length",
+      "adapter": "twotone/ro_optimize/length",
+      "metric": {"kind": "scan", "axes": [{"field": "lengths"}]},
+      "basis": "Simulator speed survey scene; scan axes shortened to about 11 points per field; path timing only.",
+      "overrides": [
+        {
+          "path": ["length", "n"],
+          "value": 11,
+          "basis": "Reduce this speed survey axis to about 11 points; retain the Form window."
+        }
+      ]
     },
     {
       "scene_id": "twotone/ro_optimize/power",
@@ -668,22 +1290,50 @@
       "scene_id": "twotone/stirap/amplitude",
       "adapter": "twotone/stirap/amplitude",
       "metric": {"kind": "scan", "axes": [{"field": "pump_gains"}, {"field": "stokes_gains"}]},
-      "basis": "The earlier workload selection named this previously unmeasured twotone workload.",
-      "overrides": []
+      "basis": "Simulator speed survey scene; scan axes shortened to about 11 points per field; path timing only.",
+      "overrides": [
+        {
+          "path": ["pump_gain", "n"],
+          "value": 11,
+          "basis": "Keep the STIRAP path timing grid at about 11 points per axis; measured carriers/gains remain required."
+        },
+        {
+          "path": ["stokes_gain", "n"],
+          "value": 11,
+          "basis": "Keep the STIRAP path timing grid at about 11 points per axis; measured carriers/gains remain required."
+        }
+      ]
     },
     {
       "scene_id": "twotone/stirap/delay",
       "adapter": "twotone/stirap/delay",
       "metric": {"kind": "scan", "axes": [{"field": "stokes_leads"}]},
-      "basis": "The earlier workload selection named this previously unmeasured twotone workload.",
-      "overrides": []
+      "basis": "Simulator speed survey scene; scan axes shortened to about 11 points per field; path timing only.",
+      "overrides": [
+        {
+          "path": ["stokes_lead", "n"],
+          "value": 11,
+          "basis": "Keep the STIRAP path timing grid at about 11 points per axis; measured carriers/gains remain required."
+        }
+      ]
     },
     {
       "scene_id": "twotone/stirap/detuning",
       "adapter": "twotone/stirap/detuning",
       "metric": {"kind": "scan", "axes": [{"field": "y_values"}, {"field": "x_values"}]},
-      "basis": "The earlier workload selection named this previously unmeasured twotone workload.",
-      "overrides": []
+      "basis": "Simulator speed survey scene; scan axes shortened to about 11 points per field; path timing only.",
+      "overrides": [
+        {
+          "path": ["pump_detuning", "n"],
+          "value": 11,
+          "basis": "Keep the STIRAP path timing grid at about 11 points per axis; measured carriers/gains remain required."
+        },
+        {
+          "path": ["stokes_detuning", "n"],
+          "value": 11,
+          "basis": "Keep the STIRAP path timing grid at about 11 points per axis; measured carriers/gains remain required."
+        }
+      ]
     },
     {
       "scene_id": "twotone/t1",

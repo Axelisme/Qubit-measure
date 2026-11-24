@@ -1,6 +1,6 @@
 # program/v2/modules — semantic program modules
 
-**Last updated:** 2026-11-22，readout mixer frequency requirements
+**Last updated:** 2026-11-24，in-memory arbitrary waveforms
 
 **讀者：** lab-author、framework-dev、agent。語意 program modules 的宣告、發射與 owner 邊界速查。
 
@@ -319,12 +319,15 @@ calls the hook for every declared module, including modules without sources.
 
 ## In-memory arbitrary waveforms
 
-To play candidate samples without writing an asset, pass
+To play samples without writing an asset, pass
 `InMemoryArbWaveformCfg(samples=...)` from `zcu_tools.program.v2` as the pulse's
-waveform. It copies the `WaveformSamples` and plays their full duration without
-reading a file. Within one program, pulses on the same generator share the
-envelope when their sample hashes match. The `arb_memory` style cannot be
-serialized or included in a persistent Spec or a flat-top ramp.
+waveform. It copies the `WaveformSamples` and plays their full reference
+duration without reading a file. Within one program, pulses on the same
+generator share the memory envelope when their sample hashes match.
+
+A cfg containing `arb_memory` cannot be serialized. To save the waveform in a
+persistent Spec or use it as a flat-top ramp, store the samples as an arb asset
+and reference the asset key.
 
 ## Pulse length tables and selected playback
 

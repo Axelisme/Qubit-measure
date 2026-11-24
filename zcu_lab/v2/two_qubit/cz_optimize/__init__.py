@@ -1,5 +1,6 @@
 """Fixed-depth interleaved RB optimization of a dual-line CZ."""
 
+from ._shape import StartStyle
 from .core import (
     CZOptimizeAnalysis,
     CZOptimizeCfg,
@@ -14,4 +15,5 @@ __all__ = [
     "CZOptimizeExp",
     "CZOptimizeResult",
     "CZOptimizeUnavailable",
+    "StartStyle",
 ]
