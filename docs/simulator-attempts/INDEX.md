@@ -52,6 +52,7 @@ superseded_by: null
 
 ## Family 與 guard
 
+- 2026-11-24，[預測拒收能否跳過 sampled RWA 探針](./2026-11-24-sampled-rwa-predicted-rejection.md)，`paused`。比對探針前可算的省略相位與實際端點判決，並按群計數 spot，未實作拒收切點。樣本分界不是端點誤差下界。382 群各一個 spot，首拒後沒有下一個 spot 可省（`234bf075f`，block 2 `c2b6b9e0522e`／`ftf-demo:initial` 五場各一次 Run，另一次 24 點重建正例，合計）。
 - 2026-11-24，[Shaped Sambe 的帶狀 Hermitian 全譜求解](./2026-11-24-banded-shaped-sambe.md)，`rejected`。用下帶儲存取代密集矩陣後，`chain/amp_rabi` 由 6.294 增至 8.912 core s／格（`addd6c8fb` → `0f5d83887`，同 block1 manifest、seed 123、單 worker，兩側批次從空快取開始，各一次完整 11 格 Run）。
 - 2026-11-24，[長時強驅動雙載波的內建波形路由](./2026-11-24-long-dual-carrier-builtins.md)，`paused`。先分類，再用 `inspect_dispatch` 確認目標段的預設路由只列 `dop853`，另行診斷 `common_frame` guard 才觀察到拒收（`32dfb53a5`）。DP5(4) apply 合計 6.449438 CPU s（`593426c2f`，24 態 FTF、單 CPU worker、8 個 1000 ns π／強振幅不同載波雙線格各一次，共 10 個直接積分段，不含平台）。
 
@@ -76,6 +77,7 @@ superseded_by: null
 
 - 2026-11-24，[Projective cell 共用單音共同相位的轉移列](./2026-11-24-projective-cell-phase-reuse.md)，`adopted`。同一點只對符合共同相位對稱的 cell 共用轉移列。首份 preparation 的來源態求解 3,229 → 2,967（`f7a88acef` → `c22947414`，`chain/len_rabi` 11 點、100 reps × 100 rounds、seed 123、單 worker 的一次冷 cache 配對）；未證實整輪加速。
 - 2026-11-24，[Projective chain 的精確 cell 簽章](./2026-11-24-exact-projective-cell-signatures.md)，`rejected`。絕對與相對簽章均零重複（`5dbccaffa`，`chain/len_rabi`、`chain/t1` 各 101 格，seed 123、單 worker，各只計首份 preparation 的 1,515 個 cell 控制）。Readout 相位不同，未量完整求解或配對速度。
+- 2026-11-24，[Shaped Sambe 在一次 cutoff 決策內重用峰值 Fourier 陣列](./2026-11-24-shaped-sambe-peak-cutoff-reuse.md)，`adopted`。只在同一決策重用精確同 key 的 cutoff-3 陣列。Spectroscopy 為 9.6173 → 9.1434 core s／格（`addd6c8fb` → `d1408edb4`，manifest `c2b6b9e0522e`，11 格的 `conditional_spectroscopy_heralded`，排他單 worker，phase 暖機後各一次完整 Run）。
 - 2026-11-23，[放寬 RB 跨 depth 的前綴候選](./2026-11-23-rb-prefix-candidates.md)，`rejected`。允許更多共同邊界未顯示整輪收益。放寬及只留最長邊界都約 103.4 s，原規則 97.6 s（`8cd18afcd`，離線 plain RB depth `[0,12,24]`、兩臂，單 worker，每規則一次 `run_stage` 牆鐘，Numba 暖度不同）。
 - 2026-11-23，[FTF sampled RWA 探針快取](./2026-11-23-ftf-rwa-probe-memo.md)，`adopted`。一次 preparation 內重用完全相同的 sampled RWA 探針結果，每次 evolve 仍獨立選路。基準的 full-drive DOP853 探針用 175.29 CPU s（`ffd2a0c6`，離線 `two_qubit/chevron` 四點、單 worker 的一次 warm Run，呼叫執行緒 CPU 總和）。這不是快取後的耗時。
 - 2026-11-22，[ADC raw plan 在 acquire 內重用](./2026-11-22-adc-raw-plan-acquire-owner.md)，`adopted`。把確定性的 ADC raw plan 綁到 acquire session，換批或結束才退役。Raw materialize 343.737 → 159.082 s（`e602f0dc6` → `a4cd9f1bd`，同 fixture 的完整 `chain_power`，非排他單 worker、各一個 Run 的 materialize 累計）。
@@ -99,6 +101,7 @@ superseded_by: null
 
 ## 表示與合併
 
+- 2026-11-24，[不同載波雙線的 gate 端點交互作用框架](./2026-11-24-multitone-gate-interaction-frame.md)，`rejected`。在局部交互作用框架建 gate 端點，兩場的結果陣列不變，但未量到加速。暖態 `constructive_phase` 1.7692 → 1.8065 core s／格（`addd6c8fb` → `45d465a5a`，同離線 fixture、FTF seed 123、單 worker，兩側均先跑 `chevron`，各一次完整 121 格 Run）。
 - 2026-11-24，[異形同載波的 shaped Sambe](./2026-11-24-same-carrier-shaped-sambe.md)，`paused`。保留各線包絡，在共同載波座標加總 Fourier block；兩場 guard 均拒收。既有 DP5(4) 0.592 CPU s（`fd160e255`，FAST-DRAG／cosine 雙線，8 態、100 ns，一次 Engine 演化）。
 - 2026-11-23，[同頻多線摺成單 tone](./2026-11-23-same-carrier-merge.md)，`adopted`。同載波同形線合成一對 I/Q 算符，交給單 tone family。Plain RB 16.401 → 0.892 CPU s（`2b8f628c3` 對 `0d851985`，depth `[0,4,8]`、seed 701、sim seed 123、2 reps、1 round，單 worker 暖機後各一次）。
 - 2026-11-22，[FTF 真空續演化與 Markov chain](./2026-11-22-ftf-projective-markov.md)，`partial`。投影後清零腔場，讓同點、同層、同 DC 態只續演化一次。獨立同模型參考通過 41／75 個 key（`e602f0dc6`，兩個 floor，兩個縮樣讀出掃描及 heralded conditional phase 的首讀）。
