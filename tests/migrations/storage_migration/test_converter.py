@@ -8,6 +8,7 @@ from pathlib import Path
 import h5py as h5
 import numpy as np
 import pytest
+from zcu_tools.datafile import Container
 
 from migrations.storage_migration import (
     MigrationInputError,
@@ -97,6 +98,45 @@ def test_instrument_snapshot_preserves_values_or_reports_isolated_pending(
     assert not report.failures
 
 
+@pytest.mark.parametrize("invalid", [False, True])
+def test_projection_precedes_assignment_and_preserves_payload_documents(
+    request_data: MigrationRequest, mapping: MigrationMapping, invalid: bool
+) -> None:
+    request, source = write_run(request_data)
+    original = source.read_bytes()
+
+    def project(payload: Container) -> Container:
+        if invalid:
+            raise ValueError("test field: invalid source value")
+        return replace(payload, docs={**payload.docs, "extra": {"number": 25}})
+
+    mapped = replace(
+        mapping, run_payload_projections={("synthetic_scan", "SyntheticCfg"): project}
+    )
+    report = migrate_storage(
+        request,
+        mapping=mapped,
+        validate_cfg=validate_cfg,
+        validate_native=noop_validation,
+    )
+    destination = request.database_root / request.name
+    assert (destination / "Labber/2025/10/scan.hdf5").read_bytes() == original
+    if invalid:
+        assert not report.converted_files
+        assert any(
+            item.location == "run evidence" and "test field" in item.reason
+            for item in report.pending
+        )
+        assert json.loads(manifest_path(request).read_text())["runs"] == []
+    else:
+        native = next((destination / "runs").glob("*/data.h5"))
+        stored = read_migrated(native)
+        assert stored.container.docs["extra"] == {"number": 25}
+        assert stored.cfg.values == {"frequency": 12.5}
+        assert stored.metadata.completion == "stopped"
+        assert "labber" in stored.container.groups
+
+
 def test_native_is_readable_and_validated_before_source_removal(
     request_data: MigrationRequest, mapping: MigrationMapping
 ) -> None:
@@ -139,6 +179,16 @@ def test_validation_failure_retains_source_and_reuses_run_identity(
 ) -> None:
     request, source = write_run(request_data)
     paths: list[Path] = []
+    projections = 0
+
+    def project(payload: Container) -> Container:
+        nonlocal projections
+        projections += 1
+        return replace(payload, docs={**payload.docs, "historical": {"number": 25}})
+
+    mapping = replace(
+        mapping, run_payload_projections={("synthetic_scan", "SyntheticCfg"): project}
+    )
 
     def fail(path: Path, tag: str, cfg_type: str) -> None:
         noop_validation(path, tag, cfg_type)
@@ -158,6 +208,7 @@ def test_validation_failure_retains_source_and_reuses_run_identity(
         assert source.is_file()
         assert path == paths[0]
         noop_validation(path, tag, cfg_type)
+        assert read_migrated(path).container.docs["historical"] == {"number": 25}
 
     report = migrate_storage(
         replace(request, resume=True, run_evidence=None),
@@ -167,6 +218,7 @@ def test_validation_failure_retains_source_and_reuses_run_identity(
     )
     after = json.loads(manifest_path(request).read_text())
     assert after["runs"] == before["runs"]
+    assert projections == 1
     assert not report.failures
     assert not source.exists()
 

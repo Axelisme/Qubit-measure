@@ -175,11 +175,11 @@ T1 的 fit 欄位包括 `params`、`stderr`、`bounds`、`fixed`、`free`、`cos
 
 RunMetadata、RunSnapshot 與 SoftwareProvenance 由 [experiment](../../lib/zcu_tools/experiment/README.md) 擁有。遷移先建 typed metadata，再以 `model_dump(mode="json")` 編碼，完成後才發布 native。通用容器格式由 [datafile](../../lib/zcu_tools/datafile/README.md) 擁有。遷移不手造 ledger 事件，Load 由 native metadata 取得身分，不解析目錄名補歷史事實。
 
-- **歷史輸入。** `LegacyRunEvidence` 提供 run 事實；`MigrationMapping.data_schemas` 提供 [`load_legacy_labber_payload`](../legacy_labber.py) 使用的 disk schema。Disk schema 與兩個 callbacks 以 `(source tag, cfg_type)` 的明確歷史身分配對。缺 cfg identity、無對應 schema 或 typed-invalid cfg 時只 pending，不回退 tag-only。`native_tags` 只轉換新 RunMetadata 的 tag，不改歷史 raw 或正常 loader。
+- **歷史輸入。** `LegacyRunEvidence` 提供 run 事實；`MigrationMapping.data_schemas` 提供 [`load_legacy_labber_payload`](../legacy_labber.py) 使用的 disk schema。Disk schema、兩個驗證 callbacks 和可選的 `run_payload_projections` 以 `(source tag, cfg_type)` 的明確歷史身分配對。投影只在讀入歷史 payload 時、分配 Run ID 之前執行。它保留原始 Labber group 及未更動的陣列；已 prepared 或 published 的產物按既有 hash 與 ownership 規則復原。缺 cfg identity、無對應 schema、typed-invalid cfg 或投影拒絕來源值時只 pending，不回退 tag-only。`native_tags` 只轉換新 RunMetadata 的 tag，不改歷史 raw 或正常 loader。
 
   有標記的檔案依檔內明示的變數身分配對。未標記檔按 root、`Log_2` 等 log 順序逐一對應 schema 變數。軸由內到外宣告，reader 將實讀軸長反序後核對訊號 shape。
 
-  [`declare_migration_experiment`](../experiment_declaration.py) 未收到 `schemas` 時，由 `_legacy_schemas` 按 Native spec 的全部變數建立 disk schema；歷史 log 與現行 Native 變數不同時，明列 `schemas`。MIST gain 在 [`migration_experiments.py`](../migration_experiments.py) 以 `_MIST_GAIN_SCHEMA` 固定 `mist/gain / PowerDepCfg` 的歷史單 log。Profile 版號查 [`storage_mapping.py`](../storage_mapping.py) 的 `_KIND_REVISIONS`，另見[遷移總覽的兩種 profile 摘要](../README.md#legacy-resultdatabase--native-storage)。[MIST gain 的等價驗收依據](../../docs/discussions/2026-11-23-mist-legacy-labber-equivalence.md#依據)只支持這次保留版號。
+  [`declare_migration_experiment`](../experiment_declaration.py) 未收到 `schemas` 時，由 `_legacy_schemas` 按 Native spec 的全部變數建立 disk schema；歷史 log 與現行 Native 變數不同時，明列 `schemas`。MIST gain 在 [`migration_experiments.py`](../migration_experiments.py) 以 `_MIST_GAIN_SCHEMA` 固定 `mist/gain / PowerDepCfg` 的歷史單 log。Profile 版號查 [`storage_mapping.py`](../storage_mapping.py) 的 `_KIND_REVISIONS`，另見[遷移總覽的兩種 profile 摘要](../README.md#legacy-resultdatabase--native-storage)。[MIST gain 的等價驗收依據](../../docs/discussions/2026-11-23-mist-legacy-labber-equivalence.md#依據)記錄當時保留版號的依據。
 
 - **現行 Native 驗證。** `declare_migration_experiment` 以目前的 Native spec 驗 cfg，並以 `load_run` 做 typed Native Load。Native 的必填與可選變數規則見 [ADR-0069〈Native 可選變數與 Labber 投影〉](../../docs/adr/0069-experiment-core-and-frontends.md#native-可選變數與-labber-投影)。
 

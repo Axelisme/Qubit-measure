@@ -27,9 +27,11 @@ Component 的 [版本與備份語意](../docs/parameter-upgrades.md) 與一次�
 
 CLI 以 `python -m migrations.migrate_storage` 執行。同來源、同宣告可直接重跑，中斷補缺，完成後逐項重驗；`--resume` 仍可使用。相同目的以 typed `skipped` 列出且不重寫，不同目的以 `MigrationInputError.differences` 定位並 exit 2，不改目的、manifest 或原報告。YAML／JSON 按 owner typed 語意比較並保留 unknown raw，binary／JSONL 按已驗 SHA256。操作授權、dry-run、pending 與 resume 步驟見 [operator CLI 指南](../docs/storage-migration.md)，框架邊界見 [storage migration README](storage_migration/README.md)。具體 mapping 在 `storage_mapping.py`，固定 native declarations 在 `migration_experiments.py`，兩者都只為遷移存在，跟本目錄一起保留或刪除。`lib` 與 `zcu_lab` 都不 import 本目錄。
 
-Mux Ramsey、Mux Echo 與單 qubit Echo 的三個歷史 Labber 宣告由 [`migration_experiments.py`](migration_experiments.py) 固定，不從現行 Native 或 Labber 匯出選集推導。[合成等價驗收](../docs/discussions/2026-11-23-coherence-native-shot-moments.md#依據)只支持本次維持原 profile 版本，不是一般免升版規則。
+Mux／單 qubit 的 Ramsey、Echo 共四個歷史 Labber 宣告由 [`migration_experiments.py`](migration_experiments.py) 固定，不從現行 Native 或 Labber 匯出選集推導。
+Mux 讀三個歷史 log，核對 Tone 原順序，把實際 detune 存入 Native 的 `docs/run_values`，保留原始 Labber carrier log，但 typed Load 的 carrier 只取歷史 cfg。單 qubit 讀一個歷史 log，將實際 detune 寫為 null，不以 cfg 名目值補入。
+Fluxonium profile 使用 `1.30`，transmon 使用 `1.31`。舊 revision 的 manifest 不續跑或重驗；用該 revision 對應的工具完成舊作業。
 
-MIST gain 的歷史 `mist/gain / PowerDepCfg` 單 log 宣告同樣由 [`migration_experiments.py`](migration_experiments.py) 固定；[兩種 profile 的合成等價驗收](../docs/discussions/2026-11-23-mist-legacy-labber-equivalence.md#依據)只支持本次維持 fluxonium `1.28`、transmon `1.29`，不是一般免升版規則。
+MIST gain 的歷史 `mist/gain / PowerDepCfg` 單 log 宣告同樣由 [`migration_experiments.py`](migration_experiments.py) 固定；[兩種 profile 的合成等價驗收](../docs/discussions/2026-11-23-mist-legacy-labber-equivalence.md#依據)當時維持 fluxonium `1.28`、transmon `1.29`，不是一般免升版規則。
 
 Operator 的路徑、授權、dry-run、備份與重跑程序見 [storage migration CLI 指南](../docs/storage-migration.md#確認路徑與授權)，欄位與單位宣告見 [先執行 dry-run](../docs/storage-migration.md#先執行-dry-run)。
 磁通與樣本的來源優先序、pending 與覆寫規則由 [storage mapping](storage_migration/README.md#meta-欄位對照) 和 [samples mapping](storage_migration/README.md#samples-mapping) 擁有。

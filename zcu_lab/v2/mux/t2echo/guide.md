@@ -26,7 +26,7 @@ Shot SEM bars show the expected error of each projected mean: the sample standar
 
 After loading a Native file with shot moments, run Analyze with the same options to see the same bars as before saving. Older Native files without shot moments still load; Analyze shows no bars for those files. Labber exports do not include shot moments.
 
-The ± on T2 echo or fringe rate is the fitted parameter's standard error. R² measures explained variation; normalized residual RMS is the residual RMS divided by the observed signal span. Match the experiment and Run ID in the Analyze summary to see the Run's configured Reps×Rounds and the actual quantized applied detune, not the nominal Form detune.
+The ± on T2 echo or fringe rate is the fitted parameter's standard error. R² measures explained variation; normalized residual RMS is the residual RMS divided by the observed signal span. Match the experiment and Run ID in the Analyze summary. It shows Reps×Rounds from the Run's available configuration and the actual quantized applied detune when saved. Older Native files without saved Run values omit the applied detune. Decay fitting does not need it.
 
 ### Multi-tone readout control
 

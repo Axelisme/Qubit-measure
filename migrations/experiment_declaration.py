@@ -8,6 +8,7 @@ from typing import TypeVar
 
 import numpy as np
 from zcu_tools.cfg_model import ConfigBase
+from zcu_tools.datafile import Container
 from zcu_tools.experiment import (
     AxesSpec,
     Axis,
@@ -36,7 +37,10 @@ class MigrationExperiment:
     unconvertible cfg.
     validate_native reads an exact native Path
     with the corresponding typed load_run, returns None and propagates failures.
-    These bindings perform no acquisition, registration or live-context capture.
+    project_payload optionally converts the historical disk payload before
+    publication; None keeps it unchanged. It performs no I/O and raises
+    ValueError for invalid source data. These bindings perform no acquisition,
+    registration or live-context capture.
     """
 
     source_tag: str
@@ -45,6 +49,7 @@ class MigrationExperiment:
     schemas: tuple[LegacyVariableSchema, ...]
     validate_cfg: Callable[[CfgSnapshot], None]
     validate_native: Callable[[Path], None]
+    project_payload: Callable[[Container], Container] | None = None
 
 
 ResultT = TypeVar("ResultT")
@@ -88,6 +93,7 @@ def declare_migration_experiment(
     *,
     source_tag: str | None = None,
     schemas: tuple[LegacyVariableSchema, ...] | None = None,
+    project_payload: Callable[[Container], Container] | None = None,
 ) -> MigrationExperiment:
     """Bind the current native spec to its explicit historical migration identity.
 
@@ -95,7 +101,8 @@ def declare_migration_experiment(
     source_tag defaults to the native tag. Pass schemas to retain an exact
     historical Labber disk declaration. An empty tuple raises ValueError.
     None derives the schemas from all native variables. No files are read
-    until a validator is called.
+    until a validator is called. project_payload optionally maps validated
+    historical data to the native payload before publication.
     """
     if spec is None:
         raise ValueError("Missing native experiment declaration")
@@ -124,4 +131,5 @@ def declare_migration_experiment(
         schemas=_legacy_schemas(spec) if schemas is None else schemas,
         validate_cfg=validate_cfg,
         validate_native=validate,
+        project_payload=project_payload,
     )
