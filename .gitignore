@@ -26,6 +26,7 @@ token.json
 Database/
 result/
 .result-transfer/
+.database-transfer/
 logs/
 scratch/
 .agent_state/

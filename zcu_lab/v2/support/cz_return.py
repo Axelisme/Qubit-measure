@@ -1,0 +1,195 @@
+"""Fit CZ return with phase fixed at zero gain scale, not a free phase.
+
+Select only the first positive full-cycle return (scale = period), requiring
+measured coverage from zero through that period rather than extrapolation.
+"""
+
+from __future__ import annotations
+
+from dataclasses import dataclass, replace
+
+import numpy as np
+from numpy.typing import NDArray
+from zcu_tools.analysis.failure import AnalysisFailed
+from zcu_tools.analysis.fitting import FitQuality, compute_fit_quality, fitcos
+from zcu_tools.analysis.fitting.shared import FitTrace, ParameterSpec, fit_shared
+
+
+@dataclass(frozen=True)
+class CZReturnFit:
+    """Single-frequency diagnostics and an optional measured first-return scale.
+
+    scale is the first positive period only when reason=None; otherwise no
+    calibration is available. period, offset and contrast retain finite fitted
+    diagnostics even if coverage prevents a proposal. error is the period's
+    finite standard error, not an acceptance threshold. curve matches the full
+    scale axis, with NaN outside the complete prefix used by the optimizer.
+    fit_quality describes those actual observations and transformed covariance.
+    No free phase, contrast/sigma, chi-square or fidelity gate is used.
+    """
+
+    scale: float | None
+    period: float | None
+    error: float | None
+    offset: float | None
+    contrast: float | None
+    curve: NDArray[np.float64]
+    fit_quality: FitQuality | None
+    reason: str | None
+
+    def evaluate(self, scales: NDArray[np.float64]) -> NDArray[np.float64]:
+        """Evaluate the same fixed-phase model at dimensionless gain multipliers.
+
+        Callers choose points inside the finite span of curve. Raise ValueError
+        if the fit has no model parameters.
+        """
+        if self.period is None or self.offset is None or self.contrast is None:
+            raise ValueError("No fixed-phase CZ return model was fitted")
+        return _cosine(scales, self.offset, self.contrast, 1 / self.period, 0.0)
+
+
+def fit_return(
+    scales: NDArray[np.float64],
+    probabilities: NDArray[np.float64],
+    complete: NDArray[np.bool_],
+    shots: NDArray[np.float64],
+) -> CZReturnFit:
+    """Fit complete prefix P00 to offset + contrast*cos(2π*scale/period).
+
+    Inputs are finite ascending uniform source scales, count-derived P00
+    including incomplete NaNs, its completion mask and accepted shot totals. No source is modified.
+    Require measured scale=0 and every requested point through the first positive
+    return. A cancelled suffix may be absent; a missing interior scale ends the
+    prefix. Numeric failure, zero contrast, rank deficiency or nonfinite standard
+    errors produce a reason, never a default amplitude. A finite diagnostic fit
+    beyond the measured span is retained but cannot supply a calibration.
+    """
+    answer = CZReturnFit(
+        None, None, None, None, None, np.full_like(scales, np.nan), None, None
+    )
+    if scales[0] != 0 or not complete[0]:
+        return replace(
+            answer, reason="Measured scale=0 is required for first-cycle return"
+        )
+    missing = np.flatnonzero(~complete)
+    count = int(missing[0]) if len(missing) else len(scales)
+    xs, ys = scales[:count], probabilities[:count]
+    if count <= 3:
+        return replace(
+            answer,
+            reason="Insufficient complete scales for a three-parameter return fit",
+        )
+    if np.ptp(ys) <= np.finfo(float).eps * max(1.0, float(np.max(np.abs(ys)))):
+        return replace(answer, reason="Zero return contrast; period is degenerate")
+    return _fit_complete_prefix(xs, ys, shots[:count], answer)
+
+
+def _fit_complete_prefix(
+    xs: NDArray[np.float64],
+    ys: NDArray[np.float64],
+    shots: NDArray[np.float64],
+    answer: CZReturnFit,
+) -> CZReturnFit:
+    """Fit the contiguous valid observations, transform uncertainty and check coverage."""
+    try:
+        seed, _ = fitcos(xs, ys, fixedparams=[None, None, None, 0.0])
+        # fitcos may canonicalize negative contrast with a 180-degree phase.
+        initial = (
+            float(seed[0]),
+            float(seed[1] * np.cos(np.deg2rad(seed[3]))),
+            float(seed[2]),
+            0.0,
+        )
+        names = ("offset", "contrast", "frequency", "phase_deg")
+        probability = (ys * shots + 0.5) / (shots + 1.0)
+        errors = np.sqrt(probability * (1.0 - probability) / (shots + 1.0))
+        weighted = fit_shared(
+            [FitTrace(xs, ys, _cosine, names, errors)],
+            [
+                ParameterSpec(name, value, fixed=name == "phase_deg")
+                for name, value in zip(names, initial, strict=True)
+            ],
+        )
+        if not weighted.diagnostics.valid:
+            raise ValueError("Weighted zero-phase return fit failed")
+        parameters = np.array([weighted.values[name] for name in names])
+        covariance = weighted.covariance
+    except (
+        AnalysisFailed,
+        ValueError,
+        RuntimeError,
+        FloatingPointError,
+        np.linalg.LinAlgError,
+    ) as exc:
+        return replace(answer, reason=f"Zero-phase return fit failed: {exc}")
+    offset, amplitude, frequency, phase = map(float, parameters)
+    if not np.all(np.isfinite(parameters)) or frequency <= 0:
+        return replace(
+            answer,
+            reason="Return fit has nonfinite parameters or nonpositive frequency",
+        )
+    # fitcos canonicalizes negative amplitudes with a 180° shift. Restore the
+    # signed zero-phase coefficient; phase was fixed, never a fitted parameter.
+    sign = float(np.cos(np.deg2rad(phase)))
+    contrast, period = sign * amplitude, 1.0 / frequency
+    jacobian = np.diag([1.0, sign, -1.0 / frequency**2])
+    transformed = jacobian @ covariance[:3, :3] @ jacobian.T
+    curve = offset + contrast * np.cos(2 * np.pi * frequency * xs)
+    quality = compute_fit_quality(
+        ys,
+        curve,
+        {"offset": offset, "contrast": contrast, "period": period},
+        transformed,
+    )
+    full_curve = answer.curve.copy()
+    full_curve[: len(xs)] = curve
+    answer = replace(
+        answer,
+        period=period,
+        offset=offset,
+        contrast=contrast,
+        curve=full_curve,
+        fit_quality=quality,
+    )
+    if not np.all(np.isfinite(transformed)) or np.any(np.diag(transformed) < 0):
+        return replace(
+            answer,
+            reason="Return fit uncertainty is not finite or covariance is invalid",
+        )
+    errors = np.sqrt(np.diag(transformed))
+    answer = replace(answer, error=float(errors[2]))
+    derivatives = np.column_stack(
+        (
+            np.ones_like(xs),
+            np.cos(2 * np.pi * frequency * xs),
+            contrast
+            * 2
+            * np.pi
+            * frequency**2
+            * xs
+            * np.sin(2 * np.pi * frequency * xs),
+        )
+    )
+    if contrast == 0 or np.linalg.matrix_rank(derivatives) < 3:
+        return replace(
+            answer, reason="Return model is degenerate; period is unidentifiable"
+        )
+    if period > xs[-1]:
+        return replace(
+            answer,
+            reason="First positive return is outside the complete measured span; no extrapolation",
+        )
+    return replace(answer, scale=period)
+
+
+def _cosine(
+    xs: NDArray[np.float64],
+    offset: float,
+    contrast: float,
+    frequency: float,
+    phase_deg: float,
+) -> NDArray[np.float64]:
+    """Preserve the original shared-fit model's floating-point operation order."""
+    return offset + contrast * np.cos(
+        2 * np.pi * frequency * xs + np.deg2rad(phase_deg)
+    )

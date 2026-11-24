@@ -245,7 +245,7 @@ Controller 在期限內回報 Run `failed` 時，工具先寫 `run-failure.json`
 
 若 Open 成功，但表單仍缺欄位或 slot，工具記 `missing_defaults`，不派送 Run。計時 fixture 附 R1 合成 GE classifier 和從少量 FTF shots 取得的雙 tone classifier。這些值只供路徑計時，不能用作校準或物理解讀。正式量測需要帶 radius 的 circle classifier 時，依各自 guide 在相同讀出條件下做 GE 與 GE Post。Constructive phase 在 Form 驗證時檢查 classifier，Singleshot AC Stark 在 Run 時檢查。
 
-`not_runnable` 只適用於場景明列的排除。`two_qubit/rb`、`two_qubit/rb_heralded` 和 `two_qubit/cz_optimize` 使用 fixture 的 Q1／Q2 有序 Local Z 配對，兩角都為 0°。只有 CZ optimize 的 Form 覆寫會用共用的 `cz_survey` arb。這些輸入只供路徑計時。JPA 不在這份清單內。
+`not_runnable` 只適用於場景明列的排除。`two_qubit/rb`、`heralded/rb` 和 `two_qubit/cz_optimize` 使用 fixture 的 Q1／Q2 有序 Local Z 配對，兩角都為 0°。只有 CZ optimize 的 Form 覆寫會用共用的 `cz_survey` arb。這些輸入只供路徑計時。JPA 不在這份清單內。
 
 已選場景的精確 adapter 不再註冊時，工具寫下 `missing_adapter`、scene ID、adapter key 和維護者待辦。不開 project、不派送 Run、不記耗時，也不算已判定。其他場景繼續，續跑不沿用該未量列。這不同於無效 selector，後者不開批次。
 

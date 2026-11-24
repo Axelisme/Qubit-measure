@@ -7,6 +7,10 @@ from .chain_t1 import DEFINITION as CHAIN_T1
 from .chain_t2echo import DEFINITION as CHAIN_T2ECHO
 from .chain_t2ramsey import DEFINITION as CHAIN_T2RAMSEY
 from .cpmg import DEFINITION as CPMG
+from .heralded_conditional_phase import (
+    DEFINITION as TWO_QUBIT_CONDITIONAL_PHASE_HERALDED,
+)
+from .heralded_rb import DEFINITION as TWO_QUBIT_RB_HERALDED
 from .lookback import DEFINITION as LOOKBACK
 from .mist_drive_frequency import DEFINITION as MIST_DRIVE_FREQUENCY
 from .mist_flux_dep import DEFINITION as MIST_FLUX_DEP
@@ -41,14 +45,10 @@ from .t2echo import DEFINITION as T2ECHO
 from .t2ramsey import DEFINITION as T2RAMSEY
 from .time_rabi import DEFINITION as TIME_RABI
 from .two_qubit_conditional_phase import DEFINITION as TWO_QUBIT_CONDITIONAL_PHASE
-from .two_qubit_conditional_phase_heralded import (
-    DEFINITION as TWO_QUBIT_CONDITIONAL_PHASE_HERALDED,
-)
 from .two_qubit_constructive_phase import DEFINITION as TWO_QUBIT_CONSTRUCTIVE_PHASE
 from .two_qubit_cz_amplitude import DEFINITION as TWO_QUBIT_CZ_AMPLITUDE
 from .two_qubit_local_z import DEFINITION as TWO_QUBIT_LOCAL_Z
 from .two_qubit_rb import DEFINITION as TWO_QUBIT_RB
-from .two_qubit_rb_heralded import DEFINITION as TWO_QUBIT_RB_HERALDED
 from .twotone_chain import DEFINITION as TWOTONE_CHAIN
 from .twotone_flux_dep import DEFINITION as TWOTONE_FLUX_DEP
 from .twotone_spectrum import DEFINITION as TWOTONE_SPECTRUM

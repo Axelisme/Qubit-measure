@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Annotated, ClassVar, TypeAlias
 
@@ -21,9 +20,7 @@ from zcu_tools.analysis.fitting import (
     expfunc,
     seed_standard_deviation,
 )
-from zcu_tools.analysis.fitting.shared import SharedFitResult
 from zcu_tools.analysis.shot_uncertainty import class_probability_covariance
-from zcu_tools.cfg_model import ConfigBase
 from zcu_tools.experiment import (
     Experiment,
     GroupedAxesSpec,
@@ -47,10 +44,14 @@ from zcu_tools.program.v2 import (
 )
 from zcu_tools.program.v2.modules import MuxReadout
 
-from .._rb_scheduling import compile_depth_sweep, emit_depth_sweep
-from .._rb_sequence import RBArm, make_rb_arms
-from .._sums import joint_probabilities
-from ._config import RBInputs
+from zcu_lab.v2.support import paired_rb_analysis
+from zcu_lab.v2.support.paired_counts import joint_probabilities
+from zcu_lab.v2.support.paired_rb_inputs import RBInputs
+from zcu_lab.v2.support.paired_rb_scheduling import (
+    compile_depth_sweep,
+    emit_depth_sweep,
+)
+from zcu_lab.v2.support.paired_rb_sequence import RBArm, make_rb_arms
 
 
 @dataclass(frozen=True)
@@ -69,41 +70,6 @@ class RBResult:
     sums: NDArray[np.float64]
 
 
-class RBOptions(ConfigBase):
-    """Analysis-only reproducible paired-seed bootstrap settings.
-
-    bootstrap_samples is at least 100 whole-seed resamples, not independent
-    shots. bootstrap_seed is the nonnegative RNG seed for this uncertainty
-    calculation, separate from the acquired sequence identities.
-    """
-
-    bootstrap_samples: int = Field(default=1000, ge=100)
-    bootstrap_seed: int = Field(default=42, ge=0)
-
-
-@dataclass(frozen=True)
-class RBEstimate:
-    """Unitless d=4 RB estimates, conditional on the exponential decay model.
-
-    p_reference/p_interleaved are per random Clifford (plus CZ for interleaved).
-    reference_epc=3/4*(1-p_reference). gate_error=3/4*(1-p_i/p_r), not clipped.
-    error_ci_low/error_ci_high is the 95% paired-seed percentile interval.
-    n_paired_seeds counts seeds with complete curves in both arms.
-    bootstrap_successes counts valid resampled fits; warning describes ratio
-    and model limitations. No field asserts calibrated physical fidelity.
-    """
-
-    p_reference: float
-    p_interleaved: float
-    reference_epc: float
-    gate_error: float
-    error_ci_low: float
-    error_ci_high: float
-    n_paired_seeds: int
-    bootstrap_successes: int
-    warning: str
-
-
 @dataclass(frozen=True)
 class RBAnalysis:
     """Fixed-size d=4 paired RB estimate and reference/interleaved fit quality.
@@ -113,7 +79,7 @@ class RBAnalysis:
     without a fit. Survival arrays and model curves stay inside analyze.
     """
 
-    estimate: RBEstimate | None
+    estimate: paired_rb_analysis.RBEstimate | None
     fit_quality: tuple[FitQuality, FitQuality] | None
     reason: str | None
 
@@ -132,16 +98,16 @@ class RBCfg(RBInputs[_RBResetCfg]):
     """
 
 
-def estimate_d4(fit: IRBAnalysis) -> RBEstimate:
+def estimate_d4(fit: IRBAnalysis) -> paired_rb_analysis.RBEstimate:
     """Convert numerical paired-IRB estimates and interval from d=2 to d=4.
 
     fit supplies reference/interleaved decays, d=2 confidence limits, paired counts
-    and bootstrap diagnostics. Return RBEstimate with unchanged decay/diagnostic
+    and bootstrap diagnostics. Return paired_rb_analysis.RBEstimate with unchanged decay/diagnostic
     fields and d=4 error quantities. Leave fit unchanged; do not acquire or draw.
     """
     # The shared owner fits and resamples paired curves; only d=4 interpretation
     # belongs here. Its d=2 error is affine in the same decay ratio.
-    return RBEstimate(
+    return paired_rb_analysis.RBEstimate(
         p_reference=fit.p_reference,
         p_interleaved=fit.p_interleaved,
         reference_epc=0.75 * (1 - fit.p_reference),
@@ -152,71 +118,6 @@ def estimate_d4(fit: IRBAnalysis) -> RBEstimate:
         bootstrap_successes=fit.bootstrap_successes,
         warning=fit.warning,
     )
-
-
-def estimate_joint_d4(
-    fit: SharedFitResult,
-    *,
-    ci_low: float,
-    ci_high: float,
-    bootstrap_successes: int,
-    paired_seeds: int,
-) -> RBEstimate:
-    """Convert joint arm decays and a seed-bootstrap interval to d=4 estimates.
-
-    fit supplies reference p_0 and interleaved p_1. ci_low/ci_high bound the
-    statistical gate-error interval; bootstrap_successes counts accepted fits.
-    paired_seeds counts the available seed identity union. Return
-    RBEstimate with unclipped error and a statistical-only warning. Mutate no
-    inputs, draw nothing and propagate missing decay keys or arithmetic errors.
-    """
-    pr, pi = fit.values["p_0"], fit.values["p_1"]
-    error = 0.75 * (1 - pi / pr)
-    warning = (
-        "Statistical CI only; gate-dependent/coherent noise can bias the IRB ratio."
-    )
-    if error < 0:
-        warning += " Interleaved decay exceeds reference: negative error estimate retained, not clipped."
-    return RBEstimate(
-        pr,
-        pi,
-        0.75 * (1 - pr),
-        error,
-        ci_low,
-        ci_high,
-        paired_seeds,
-        bootstrap_successes,
-        warning,
-    )
-
-
-def validate_counts(counts: NDArray[np.float64], class_axes: tuple[int, ...]) -> None:
-    """Reject negative counts or a cell that is neither all finite nor all NaN.
-
-    counts ends in the given class_axes (negative indices allowed).
-    All-NaN cells are unacquired. Leave counts unchanged.
-    """
-    finite = np.isfinite(counts).all(axis=class_axes)
-    missing = np.isnan(counts).all(axis=class_axes)
-    if not np.all(finite | missing) or np.any(counts < 0):
-        raise ValueError("RB sums contains invalid counts or a partial cell")
-
-
-def validate_axes(
-    axes: tuple[NDArray[np.int64], ...],
-    expected: tuple[Sequence[int] | NDArray[np.int64], ...],
-) -> None:
-    """Raise ValueError when persisted axis identities do not match saved cfg.
-
-    axes and expected list persisted and configured identities in the same axis
-    order (seed, depth). Compare exact values; unequal sequence lengths also
-    raise ValueError. Return None without modifying either sequence or drawing.
-    """
-    if any(
-        not np.array_equal(actual, wanted)
-        for actual, wanted in zip(axes, expected, strict=True)
-    ):
-        raise ValueError("RB count axes do not match saved cfg")
 
 
 def restore_result(data: GroupedLoadData[RBCfg]) -> RBResult:
@@ -369,7 +270,7 @@ class RBExp(Experiment[RBResult, RBCfg]):
         result_builder=restore_result,
     )
 
-    Options = RBOptions
+    Options = paired_rb_analysis.RBOptions
 
     def run(self, config: RBCfg, *, context: RunContext) -> RBResult:
         """Acquire optional reset → concurrent per-qubit sequence → terminal counts.
@@ -432,7 +333,7 @@ class RBExp(Experiment[RBResult, RBCfg]):
     def analyze(
         self,
         source: RunRecord[RBCfg, RBResult],
-        options: RBOptions,
+        options: paired_rb_analysis.RBOptions,
         *,
         plots: Plots,
     ) -> RBAnalysis:
@@ -450,10 +351,12 @@ class RBExp(Experiment[RBResult, RBCfg]):
         data, cfg = source.result, source.cfg
         shape = (len(data.seeds), 2, len(data.depths), 3, 3)
         if cfg is not None:
-            validate_axes((data.seeds, data.depths), (cfg.seed, cfg.depth))
+            paired_rb_analysis.validate_axes(
+                (data.seeds, data.depths), (cfg.seed, cfg.depth)
+            )
             if data.sums.shape != shape:
                 raise ValueError("Expected RB sums shape (seed,arm,depth,3,3)")
-            validate_counts(data.sums, (-2, -1))
+            paired_rb_analysis.validate_counts(data.sums, (-2, -1))
         survival = joint_probabilities(data.sums)[..., 0, 0]
         means = np.full((2, len(data.depths)), np.nan)
         seed_std = means.copy()

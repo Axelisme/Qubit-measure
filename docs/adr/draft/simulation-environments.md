@@ -85,6 +85,16 @@ FTF builder 明確選 V／A，flux helper 比對實際 driver 單位，不以預
 - Microwave：`H_d/h=Σ_i,s Re[c_is g_s w_s(t) exp(i(2π f_s t+θ_s))] n_i`。c 為 GHz/gain，f 用 GHz、t 用 ns、θ 用 radians，保留完整 charge operator 與 signed complex envelope。不得逐 waveform 重設峰值或以 n01／π-gain 隱藏校準；採 RWA 時由 backend 處理振幅的1/2。
 - Readout：`b_in=η g w exp(iθ)`，η 為 sqrt(photons/ns)/gain，program 另提供 carrier。模平方是入射 photon flux，腔內 photon number 是響應結果。Receiver gain／phase／offset／noise 獨立，接收增益不改物理驅動。
 
+### 演算法參數看證據，模擬器參數看測試目標
+
+**規則。** 分析、擬合、優化與波形生成的演算法參數，例如 FAST-DRAG β、擬合初值和 optimizer 設定，以文獻值為起點。本 repo 的模擬或量測有更好的證據就換，並在裁決中記下依據。模擬器參數映射環境，例如 FTF 的元件能量、耦合、損耗與驅動線強度。改這些參數要說明理由及其如何服務本次測試目標，並標明結果只適用於該模擬假設。
+
+**例子。** CZ 的 100 ns FAST-DRAG 波形比較將 β 從 Singh 公式的 −55.6 ns 換成離線試算中表現最好的 +69.2 ns（`4b571e33f`，R03 FTF 場景、R05 DC，離線單閘比較）。`cz-fast-drag` 只在該 task 的 FTF 環境把驅動線強度乘以 3，排除 gain 不足，測試演算法能否在短閘降低 coherence error。高 SNR 只用來判定可行性與上限；流程的流暢性與穩定性在正常 SNR 下測。
+
+**邊界。** 若測試要確認量測流程在真實環境能否順暢運作，不得為了讓測試更容易通過而調整模擬器環境。
+
+**依據。** 2026-11-24，使用者：「模拟器参数，这种是环境的映射，这不可以乱改。另外一种是算法上的参数，也就是解析资料或者是优化之类的，这可以用更好的，前者不行。」「模拟器参数要改需要有合理的理由啊。通常服务于需求……但如果我们今天的测试是这个测量流程能不能在真实环境中流畅运作，那你就不可以作弊，把模拟器环境调成好测试的。」同日就 CZ 測試說：「你可以在高 SNR 下确定可行性以及上限，然后在正常的情况下测试流畅性以及稳定性。」原始討論未入庫。
+
 ### 每 round 捕捉輸入，不承接前次量子態
 
 每次 acquire 固定一份 AcquireRequest，包含控制 timeline、量化座標、readout routes/windows、layout／mode 與 acquire 抽樣身份。每 round 真正執行前捕捉 EnvironmentSnapshot，包含裝置值與所用模型／校準設定版本；兩者加 round 身份組成 RoundRequest。這些具名型別由 `simulate.boundary` 提供，組合採具名欄位，不使用 dict 覆寫或 live device 引用。

@@ -119,7 +119,7 @@ class RBJointDecayFit:
     Its least-squares scale is reduced chi-square, not absolute supplied errors.
     """
     curves: NDArray[np.float64]
-    """A*p**depth+B, float64 (2,2,depth), group/arm/depth probability axes."""
+    """A*p**depth+B, float64 (G,2,depth), group/arm/depth probability axes."""
 
     def decay_time_and_variance(self, arm: int) -> tuple[float, float]:
         """Return the shared arm's 1/e length (Cliffords) and variance (Cliffords²).
@@ -146,21 +146,28 @@ def fit_joint_decay(
     means: NDArray[np.float64],
     errors: NDArray[np.float64],
 ) -> RBJointDecayFit:
-    """Fit two groups sharing one decay per arm, with local amplitude/offset.
+    """Fit G groups sharing one decay per arm, with local amplitude/offset.
 
     depths is int64 (depth,), in random Clifford counts. means and errors are
-    float64 (2,2,depth), axes group/reference-interleaved/depth, in probability
-    and one-sigma probability units. Errors must be finite and strictly positive.
-    Groups have independent A/B and share p by arm in A*p**depth+B; callers
-    supply equal-seed means. Inputs are not modified.
-    Measurable contrast in each arm, valid decaying minima and finite covariance
-    are required; otherwise raise ValueError. Non-two-group/two-arm means or
-    mismatched errors shape raise ValueError. Shared-fit errors propagate.
+    float64 (G,2,depth), G >= 2, with axes group/reference-interleaved/depth.
+    Means are equal-seed probabilities; errors are finite positive probability
+    standard errors. Groups have independent A/B and share p by arm in
+    A*p**depth+B. Return model curves in input group order and the shared fit.
+    Invalid shapes, no measurable contrast in an arm or no identifiable decay
+    with finite covariance raise ValueError. Shared-fit errors propagate.
+    Inputs are not modified.
     """
-    if means.shape[:2] != (2, 2) or errors.shape != means.shape:
+    if (
+        depths.ndim != 1
+        or not depths.size
+        or means.ndim != 3
+        or means.shape[0] < 2
+        or means.shape[1:] != (2, depths.size)
+        or errors.shape != means.shape
+    ):
         raise ValueError(
-            f"Expected means shape (2,2,depth) and matching errors; "
-            f"got means shape {means.shape}, errors shape {errors.shape}"
+            "Expected depths shape (depth,), means shape (G>=2,2,depth) and matching errors; "
+            f"got depths {depths.shape}, means {means.shape}, errors {errors.shape}"
         )
     parameters = []
     traces = []
@@ -169,7 +176,7 @@ def fit_joint_decay(
         if np.max(np.ptp(means[:, arm], axis=-1)) <= 1e-12:
             raise ValueError("IRB decay has no measurable contrast")
         parameters.append(ParameterSpec(f"p_{arm}", 0.95, limits=(1e-6, 1 - 1e-6)))
-        for group in range(2):
+        for group in range(means.shape[0]):
             curve = means[group, arm]
             amplitude = float(curve[0] - curve[-1])
             names = (f"p_{arm}", f"A_{group}_{arm}", f"B_{group}_{arm}")
@@ -188,7 +195,7 @@ def fit_joint_decay(
     ):
         raise ValueError("IRB joint decay fit is unidentifiable or non-decaying")
     curves = np.empty_like(means)
-    for group in range(2):
+    for group in range(means.shape[0]):
         for arm in range(2):
             curves[group, arm] = _decay_model(
                 xs,

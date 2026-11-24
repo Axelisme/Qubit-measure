@@ -19,6 +19,24 @@ from zcu_lab.v2.fastflux.distortion.phase.gui import DEFINITION as PHASE_DEFINIT
 from zcu_lab.v2.fastflux.mist.gui import DEFINITION as MIST_DEFINITION
 from zcu_lab.v2.fastflux.t1.gui import DEFINITION as FAST_FLUX_T1_DEFINITION
 from zcu_lab.v2.fastflux.twotone.gui import DEFINITION as TWO_TONE_DEFINITION
+from zcu_lab.v2.heralded.chevron.gui import DEFINITION as HERALDED_CHEVRON_DEFINITION
+from zcu_lab.v2.heralded.conditional_phase.gui import (
+    DEFINITION as CONDITIONAL_PHASE_HERALDED_DEFINITION,
+)
+from zcu_lab.v2.heralded.conditional_spectroscopy.gui import (
+    DEFINITION as SPECTROSCOPY_HERALDED_DEFINITION,
+)
+from zcu_lab.v2.heralded.cz_amplitude.gui import (
+    DEFINITION as HERALDED_CZAMPLITUDE_DEFINITION,
+)
+from zcu_lab.v2.heralded.cz_optimize.gui import (
+    DEFINITION as HERALDED_CZOPTIMIZE_DEFINITION,
+)
+from zcu_lab.v2.heralded.idle_zz.gui import DEFINITION as IDLE_ZZ_HERALDED_DEFINITION
+from zcu_lab.v2.heralded.local_z.gui import DEFINITION as LOCAL_Z_HERALDED_DEFINITION
+from zcu_lab.v2.heralded.rb.gui import (
+    DEFINITION as TWO_QUBIT_RB_HERALDED_DEFINITION,
+)
 from zcu_lab.v2.jpa.auto_optimize.gui import DEFINITION as JPA_AUTO_OPTIMIZE_DEFINITION
 from zcu_lab.v2.jpa.check.gui import DEFINITION as JPA_CHECK_DEFINITION
 from zcu_lab.v2.jpa.flux.gui import DEFINITION as JPA_FLUX_DEFINITION
@@ -86,14 +104,8 @@ from zcu_lab.v2.two_qubit.chevron.gui import DEFINITION as CHEVRON_DEFINITION
 from zcu_lab.v2.two_qubit.conditional_phase.gui import (
     DEFINITION as CONDITIONAL_PHASE_DEFINITION,
 )
-from zcu_lab.v2.two_qubit.conditional_phase.gui_heralded import (
-    DEFINITION as CONDITIONAL_PHASE_HERALDED_DEFINITION,
-)
 from zcu_lab.v2.two_qubit.conditional_spectroscopy.gui import (
     DEFINITION as SPECTROSCOPY_DEFINITION,
-)
-from zcu_lab.v2.two_qubit.conditional_spectroscopy.gui_heralded import (
-    DEFINITION as SPECTROSCOPY_HERALDED_DEFINITION,
 )
 from zcu_lab.v2.two_qubit.constructive_phase.gui import (
     DEFINITION as CONSTRUCTIVE_PHASE_DEFINITION,
@@ -106,9 +118,6 @@ from zcu_lab.v2.two_qubit.joint_readout.gui import (
 )
 from zcu_lab.v2.two_qubit.local_z.gui import DEFINITION as LOCAL_Z_DEFINITION
 from zcu_lab.v2.two_qubit.rb.gui import DEFINITION as TWO_QUBIT_RB_DEFINITION
-from zcu_lab.v2.two_qubit.rb.gui_heralded import (
-    DEFINITION as TWO_QUBIT_RB_HERALDED_DEFINITION,
-)
 from zcu_lab.v2.twotone.ac_stark.gui import DEFINITION as AC_STARK_DEFINITION
 from zcu_lab.v2.twotone.ac_stark_ramsey.gui import (
     DEFINITION as AC_STARK_RAMSEY_DEFINITION,
@@ -314,17 +323,22 @@ def register_all(
         "jpa/check": JPA_CHECK_DEFINITION,
         "two_qubit/joint_readout": JOINT_READOUT_DEFINITION,
         "two_qubit/conditional_spectroscopy": SPECTROSCOPY_DEFINITION,
-        "two_qubit/conditional_spectroscopy_heralded": SPECTROSCOPY_HERALDED_DEFINITION,
         "two_qubit/chevron": CHEVRON_DEFINITION,
         "two_qubit/cz_amplitude": CZAMPLITUDE_DEFINITION,
         "two_qubit/cz_optimize": CZOPTIMIZE_DEFINITION,
         "two_qubit/conditional_phase": CONDITIONAL_PHASE_DEFINITION,
-        "two_qubit/conditional_phase_heralded": CONDITIONAL_PHASE_HERALDED_DEFINITION,
         "two_qubit/local_z": LOCAL_Z_DEFINITION,
         "two_qubit/idle_zz": IDLE_ZZ_DEFINITION,
+        "heralded/idle_zz": IDLE_ZZ_HERALDED_DEFINITION,
         "two_qubit/constructive_phase": CONSTRUCTIVE_PHASE_DEFINITION,
         "two_qubit/rb": TWO_QUBIT_RB_DEFINITION,
-        "two_qubit/rb_heralded": TWO_QUBIT_RB_HERALDED_DEFINITION,
+        "heralded/conditional_spectroscopy": SPECTROSCOPY_HERALDED_DEFINITION,
+        "heralded/conditional_phase": CONDITIONAL_PHASE_HERALDED_DEFINITION,
+        "heralded/cz_amplitude": HERALDED_CZAMPLITUDE_DEFINITION,
+        "heralded/cz_optimize": HERALDED_CZOPTIMIZE_DEFINITION,
+        "heralded/local_z": LOCAL_Z_HERALDED_DEFINITION,
+        "heralded/rb": TWO_QUBIT_RB_HERALDED_DEFINITION,
+        "heralded/chevron": HERALDED_CHEVRON_DEFINITION,
         "fastflux/twotone": TWO_TONE_DEFINITION,
         "fastflux/t1": FAST_FLUX_T1_DEFINITION,
         "fastflux/distortion/freq": FAST_FLUX_FREQ_DEFINITION,

@@ -18,7 +18,9 @@
 
 ## Herald reset 與獨立 heralded 入口
 
-一般入口的 **Reset** 留空則無 reset。在支援 mux herald 的入口，選 `reset/mux_herald` 並用與終端相同的完整讀出；`keep` 的鍵是完整 tone 的零起算位置（不是 ADC），例如所選位置為 0、1 才填 `{'0': g, '1': g}`。一般入口只計通過篩選的終端分布。獨立 heralded 入口不再加一層 herald reset。RB 與 conditional phase 按 herald 分出 gg、ee 兩組做聯合分析。[Heralded conditional spectroscopy](conditional_spectroscopy/guide_heralded.md) 在名目準備後 herald，按實測類別分成 gg、ge、eg、ee 四支頻譜。**Pass fraction** 是 herald gg 數除以所有取得的 shots，不是純度。
+一般入口的 **Reset** 留空則無 reset。在支援 mux herald 的入口，選 `reset/mux_herald` 並用與終端相同的完整讀出；`keep` 的鍵是完整 tone 的零起算位置（不是 ADC），例如所選位置為 0、1 才填 `{'0': g, '1': g}`。一般入口只計通過篩選的終端分布。選 gg 時，**Pass fraction** 是通過的 shots 佔已取 shots 的比例，不是純度。
+
+要保留多個實測 herald 類別時，改在 New Tab 選並列的 [heralded 家族](../heralded/README.md)。八個入口各自做 herald 與終端讀出，不再加一層 herald reset。各入口的 guide 說明如何用保留的類別。
 
 從 `post_delay = 5/(2π·κ)` µs 開始。κ 是 [mux Onetone](../mux/onetone/guide.md) 量得的 linewidth（FWHM，MHz），共用等待取讀出中最小的 κ。等待從讀出波形結尾起算，不等 ADC 積分窗；herald 與終端共用此值。先用 [Joint readout](joint_readout/guide.md) 選 gg herald，對每顆取「該顆名目 Xπ、另一顆 I」的列，加總該顆終端為 e 的機率。只延長等待再比較。若較長等待仍提高 e 比例，先調等待再做 heralded 掃描；比例不是 gate fidelity。
 
@@ -31,7 +33,7 @@
 | 順序 | 用結果做什麼 |
 | --- | --- |
 | [Joint readout](joint_readout/guide.md) → [Idle ZZ](idle_zz/guide.md) | 先檢查四個名目準備的聯合計數，再比較 spectator I／Xπ 的 Ramsey 頻差。 |
-| [Conditional spectroscopy](conditional_spectroscopy/guide.md) 或 [heralded 入口](conditional_spectroscopy/guide_heralded.md) → [Constructive phase](constructive_phase/guide.md) → [Chevron](chevron/guide.md) | 先按名目準備或實測 herald 找候選 RF，再定兩條線的相對相位，最後用回返谷選頻率與時長窗口。 |
+| [Conditional spectroscopy](conditional_spectroscopy/guide.md) 或 [heralded 入口](../heralded/conditional_spectroscopy/guide.md) → [Constructive phase](constructive_phase/guide.md) → [Chevron](chevron/guide.md) | 先按名目準備或實測 herald 找候選 RF，再定兩條線的相對相位，最後用回返谷選頻率與時長窗口。 |
 | [CZ amplitude](cz_amplitude/guide.md) ↔ [Conditional phase](conditional_phase/guide.md) | 固定波形、時長與帶號 gain 比例，先量完整第一回返，再找唯一 π 交點。建議人工交替三輪；輪數不代替結果判準。 |
 | [Local Z](local_z/guide.md) → [Paired RB／IRB](rb/guide.md) | 分別測兩顆的每 gate phase，以其負值修正邏輯 frame，再用同 seed 成對序列比較衰減。 |
 
@@ -43,4 +45,4 @@ CZ 結果可提案更新 `$coupler.pulses.cz_qubit1`、`cz_qubit2` 及對應的�
 
 共用操作見 [`zcu_lab/v2/operator-workflow.md`](../operator-workflow.md)。Analyze 用來源 Run／Load 的 cfg 與計數，不用目前表單替代；沒有來源 capture 不能寫回。Load 不改現有表單。
 
-軸名、tag 或 layout 不合的舊檔（含舊獨立 heralded 入口、早期 IQ 格式、RB 的 round 軸）不自動轉換，保留原檔並用寫出版本開啟。結果相容但 cfg major 不合時保留結果和 metadata，不還原 cfg。需 cfg 的分析不能據此給提案。原生結果保存計數，不保存逐 shot IQ，見 [Two-qubit 實驗清單](../README.md#two-qubit-實驗清單)。
+搬移前同 schema 的 Native 結果用新入口 Load，不必轉檔。見 [registry key 與 Native tag 對照](../heralded/README.md#開新-tab-與載入搬移前的結果)。軸名、tag 或 layout 不相容的舊檔（例如早期 IQ 格式或 RB 的 round 軸）不自動轉換，保留原檔並用寫出版本開啟。結果相容但 cfg major 不合時保留結果和 metadata，不還原 cfg。需 cfg 的分析不能據此給提案。原生結果保存計數，不保存逐 shot IQ，見 [Two-qubit 實驗清單](../README.md#two-qubit-實驗清單)。

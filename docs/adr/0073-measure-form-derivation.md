@@ -48,7 +48,7 @@ status: accepted
 - `Range` 的字串端點轉成 `Expr`，數字與 `None` 不變。[Sweep 表示](../../lib/zcu_tools/gui/form_adapter/README.md#sweep-表示)列出四個 tagged branches。Range／Center 與 Expts／Step 各只保存 active 欄位，分別以 `n` 或 `step` 保存採樣，新表單用 Range + Expts。Center 的 span 是帶正負號的完整寬度，不另存端點。
 - `LogPoints(max, points, include_zero=True)` 宣告一個整數清單的初值。`cfg_model` 只保存宣告，`form_adapter` 擁有分支、換算與產生清單的規則。Core 只接收 `list[int]`。LogPoints 只用於整數次數；浮點的對數間距掃描不在此列，有實驗需要時再連同 core 的清單掃描一起設計。兩種 Log 的首尾、點數限制、去重與 List→Log 的 invalid draft 行為見 [Log／List 整數清單](../../lib/zcu_tools/gui/form_adapter/README.md#loglist-整數清單)，不影響普通 list 或 SweepCfg。
 - 唯讀限制作用於整棵被標記的子樹。Module 子欄位標唯讀不影響 library key 的選擇；module 本身標唯讀則固定 ref／inline 與所有子欄位。Designer 的實作選擇是不另設 selector-only 宣告或強制 inline。只為組 cfg 存在的固定值由 `run()` 補齊，例如單發的 `reps`／`rounds=1`，不放進 Form 或實驗 cfg 型別。要顯示的 mux tone name 保持唯讀。
-- Two-qubit 的 [`captured_qubits`](../../zcu_lab/v2/two_qubit/_measure.py) 從固定 capture 解析元件名。元件名不進表單欄位或 cfg，見 [ADR-0069 的 adapter 身分契約](0069-experiment-core-and-frontends.md#綁定身分留在-adapter)。表單以 `Hidden` 將按 `$mux.qubits` 順序推得的 `qubit1_tone`、`qubit2_tone` 填入 cfg。`TwoQubitForm` 提交時從同一次 capture 取 group 的 `resonators` 長度，核對 readout 的 tone 數。Tone 數不是表單欄位。
+- Two-qubit 與 heralded 表單的 [`captured_qubits`](../../zcu_lab/v2/support/measure/paired_qubits.py) 從固定 capture 解析元件名。元件名不進表單欄位或 cfg，見 [ADR-0069 的 adapter 身分契約](0069-experiment-core-and-frontends.md#綁定身分留在-adapter)。表單以 `Hidden` 將按 `$mux.qubits` 順序推得的 `qubit1_tone`、`qubit2_tone` 填入 cfg。`TwoQubitForm` 提交時從同一次 capture 取 group 的 `resonators` 長度，核對 readout 的 tone 數。Tone 數不是表單欄位。
 - Run 會覆寫的必填欄位由作者宣告 `Hidden(合法值)`。普通 core tree 和 `Template.set`／`Slot.set` 的 dotted Spec 路徑共用這個節點，填值仍受驗證。相反地，Bath reset 的 `tested_reset.pi2_cfg.phase` 由 Template 的 `set` 給可編輯的初值 90。`run()` 使用填入的 phase，不覆寫成 90，guide 將 90 說明為建議的 tomography offset。逐 tone 的 Hidden 路徑相同才可共享元素 model；各位置的值與來源仍獨立。`Hidden()` 的省略語意、共用路徑檢查與普通位置 tree 的限制見 [Hidden 填入值](../../lib/zcu_tools/gui/form_adapter/README.md#hidden-填入值)及 [Native model lists](../../lib/zcu_tools/gui/form_adapter/README.md#native-model-lists)。
 - Readout 使用平鋪欄位，例如 `Template("readout", set={"gain": 0.1, "ro_length": 2.0})`。`gen_ch`、`ro_ch` 必填且可編輯，generator 與 ADC 共用 `freq`，waveform 可保留 child key。生成器屏蔽不支援的硬體欄位，不推導通道、不補值，見 [[0074]] 與 [Form adapter README](../../lib/zcu_tools/gui/form_adapter/README.md)。
 
@@ -72,7 +72,7 @@ status: accepted
 
 **例子。** Chevron、Conditional phase 和 Conditional spectroscopy 引用兩條 CZ drive，Run 用掃頻座標覆寫 `freq`。CZ amplitude 和 Constructive phase 也預設引用兩條 drive。Bath reset 的 Xπ/2 初值設定 `phase=90`，Amplitude Rabi 設定 `waveform.length`，部分 mux readout 填入 tone 初值。這些值會進入 Run，所以有來源時保留副本。
 
-**邊界。** [掃頻 drive cfg](../../zcu_lab/v2/two_qubit/_drive.py) 不要求兩條 library carrier 相等；固定頻率入口保留等頻檢查。既有合法的 inline cfg 仍可載入。
+**邊界。** [掃頻 drive cfg](../../zcu_lab/v2/support/paired_drive.py) 不要求兩條 library carrier 相等；固定頻率入口保留等頻檢查。既有合法的 inline cfg 仍可載入。
 
 **依據。** 2026-11-23，使用者說：「CZ drive 必須複製，因為表單要把 freq 蓋成隱藏的 0，再由 Run 掃頻這是沒什麼意義的流程，因為不管頻率填什麼都會被覆寫，這是在這個實驗語義下非常合理的行為，類似的問題都要修正。」「連無理由的複製一起查」。2026-11-24 裁定：「form-ref-not-copy 票 02選全部ref」。見[表單預設引用 library 的討論](../discussions/2026-11-23-form-ref-not-copy.md)。
 

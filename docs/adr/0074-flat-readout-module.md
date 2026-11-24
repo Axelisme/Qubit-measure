@@ -43,7 +43,7 @@ status: accepted
 
 - Raman 與上述三個 STIRAP 的 Analyze 讀保存的 g/e/f counts，不再分類。它們要求合法完整的 saved cfg，錯 classifier 型別或未知 ADC 仍拒絕。合法 cfg 缺 classifier 時只畫分類比例；矩陣奇異或把有效點解成非有限值時，記一筆 warning 後走相同路徑。兩階段都不退回 circle、不查 live library，也不讀 simulator truth。Training confusion 包含準備污染。成功校正回到 preparation-label 座標，保留負值與大於 1 的結果，不代表 pure energy-state population 或 readout fidelity。
   Run 的嚴格 ADC lookup 見 [`centroid3_classifier`](../../lib/zcu_tools/program/v2/modules/readout.py)。[Analysis 子模組](../../lib/zcu_tools/analysis/README.md#子模組)說明 `analyze_centroid3_populations` 與 `Centroid3Summary.from_applied_matrix`；實際欄位見 [recipe 回報](../../zcu_lab/recipes/README.md#操作文件與驗收)。
-- 雙 qubit 分類實驗在 Run 前驗證兩個角色 tone 都有 circle 與 GE Post 的 radius，否則 cfg 驗證報錯。一般入口保存終端讀出的 9 類計數，獨立 heralded 入口保存含 herald 的 81 類計數。Result 存原 float64 總和，不存逐 shot IQ，也不在 Analyze 分類，見 [雙 qubit guide](../../zcu_lab/v2/two_qubit/guide.md)。Readout 的單 ADC circle lookup 不解讀 lab 角色。
+- 雙 qubit 分類實驗在 Run 前驗證兩個角色 tone 都有 circle 與 GE Post 的 radius，否則 cfg 驗證報錯。一般入口保存終端讀出的 9 格計數，[獨立 heralded 家族](../../zcu_lab/v2/heralded/README.md) 保存 herald × 終端的 81 格計數。Result 存原 float64 總和，不存逐 shot IQ，也不在 Analyze 分類。Readout 的單 ADC circle lookup 不解讀 lab 角色。
 - T1 需要 other，不收 linear 或 centroid3。舊 cfg 沒有 classifier 時略過 confusion 修正。需要 radius 的 consumer 提示做 Post。其餘 singleshot population consumers 在取數時分類，confusion correction 只用 saved cfg。Amplitude／Length Rabi 保留單 ADC raw IQ 與聯合 fit；未校準只略過 live population preview。有效 fit 透過同一中立 builder 更新捕捉的 resonator readout，Pulse 改 `classifier`，單 tone Mux 改 `tones.0.classifier`，不支援多 tone 分析。Check 的 raw Run 不要求 classifier，Analyze 才從 saved cfg 要求 circle 與 radius，見 [Check guide](../../zcu_lab/v2/singleshot/check/guide.md)。
 
 **依據。**
@@ -93,11 +93,11 @@ status: accepted
 
 #### Herald reset 與逐 shot 遮罩
 
-**規則。** 只需篩選初態時，使用既有 `reset` 欄位選 herald，不另設欄位或實驗入口，也不做 FPGA active reset。Herald 與終端發射共用 readout 設定。Module 或作者只註冊遮罩來源，`program` 的取數層在每個完成 round 算遮罩，與 round hook 同層。所有 ADC 共用同一張 bool `(points, reps)` 遮罩，沒有讀取軸。多個來源依註冊順序執行，以 AND 合併；沒有來源時全為 True，取數結果逐位不變。註冊位置與 owner 見 [[0083]]〈Builder 與 Schedule 的職責〉。取數時檢查索引未超出編譯後的讀取數，宣告與形狀見 [Registered shot masks](../../lib/zcu_tools/program/README.md#registered-shot-masks)。
+**規則。** 只需篩選初態時，在既有 `reset` 欄位選 `reset/herald` 或 `reset/mux_herald`。兩者只保留 `keep` 指定的一類，不另設欄位或實驗入口，也不做 FPGA active reset。Herald 與終端發射共用 readout 設定。Module 或作者只註冊遮罩來源，`program` 的取數層在每個完成 round 算遮罩，與 round hook 同層。所有 ADC 共用同一張 bool `(points, reps)` 遮罩，沒有讀取軸。多個來源依註冊順序執行，以 AND 合併；沒有來源時全為 True，取數結果逐位不變。註冊位置與 owner 見 [[0083]]〈Builder 與 Schedule 的職責〉。取數時檢查索引未超出編譯後的讀取數，宣告與形狀見 [Registered shot masks](../../lib/zcu_tools/program/README.md#registered-shot-masks)。
 
 **例子。** Mux 實驗以 `reset/mux_herald` 選 `keep: {'0': g, '2': g}`。鍵是完整 tones 清單的位置，不是 ADC 編號。只在兩個 tone 都是 g 時保留該 shot，所有 ADC 一起保留或排除。`reset/herald` 搭配 `readout/pulse`，`keep` 是單一態。可選 `prepare` 是一個 `pulse`、`reset/pulse`、`reset/two_pulse` 或 `reset/bath`，可 inline 或引用 library key。先 prepare，再做 herald 讀取、實驗序列和終端讀取。Herald 的 `readout` 可 inline 或引用 library key。Herald 沿用 readout 的 `pre_delay`／`post_delay`。共享 readout 物件的兩種建法見 [Herald resets](../../lib/zcu_tools/program/v2/modules/README.md#herald-resets)。
 
-**邊界。** `ResetWithHeraldCfg` 才包含兩種 herald，普通 `Reset.Cfg` 不含。一般入口的 RB、chevron、constructive phase、CZ amplitude、conditional spectroscopy、local Z、idle ZZ 與 joint readout 都用 mux 終端讀取，只收普通 reset 或 `reset/mux_herald`。T1 cov 不收 herald，遮罩會改變它用來自校準的聯合二階矩。獨立實驗入口的取捨見 [Two-qubit 實驗清單〈何時保留獨立 heralded 入口〉](../../zcu_lab/v2/README.md#何時保留獨立-heralded-入口)。
+**邊界。** `ResetWithHeraldCfg` 才包含兩種 herald，普通 `Reset.Cfg` 不含。支援 herald reset 的雙 qubit 入口用 `reset/mux_herald`，不收只搭配 `readout/pulse` 的 `reset/herald`。T1 cov 不收 herald，遮罩會改變它用來自校準的聯合二階矩。需要保留多類時，見[保留獨立 heralded 實驗的條件](#保留獨立-heralded-實驗的條件)。
 
 - Circle 可選 g、e、other，需 radius；linear 可選 g、e；不接受 centroid3。Mux `keep` 鍵須為非負十進位整數的字串，否則 cfg 驗證報錯。Build 拒絕與終端不同或有掃描的 herald readout、未知 tone、缺少 classifier 或 circle radius、非法 `keep` 態，以及各可行路徑消耗的實體讀取不一致。掃描會改變已校準 classifier 所對應的設定，所以不收 swept herald readout。
 - 硬體觸發照實計數。Mux 的 herald 讀取包括未列入 `keep` 的 tone；每個觸發的 ADC 都移除這一次讀取。實驗用可見的 label 和索引，`shot_sums` 按邏輯讀取數檢查，不必改實驗的 converter。平均、reducer、`ShotResult` 不含來源消耗的讀取，沒有剩餘讀取的 ADC 也省略。`get_raw()` 仍含全部 trigger。`run_acquire_shots` 給可見讀取的原始 int64 積分 IQ 與 bool mask，不由框架套遮罩；實驗決定如何使用。
@@ -116,7 +116,13 @@ status: accepted
 
 #### 保留獨立 heralded 實驗的條件
 
-實驗入口的決策見 [Two-qubit 實驗清單〈何時保留獨立 heralded 入口〉](../../zcu_lab/v2/README.md#何時保留獨立-heralded-入口)。
+**規則。** 分析需要保存一類以上的 herald 結果時，使用獨立的 `heralded/` 實驗。它取得可見的 herald 與終端讀出，在取數時分類並保存聯合計數，不把 herald 讀出交給 reset 遮罩。GUI New Tab 把 `heralded` 與 `two_qubit` 並列。Registry key 跟 `zcu_lab/v2/` 下的模組目錄一致；同一模組有多個入口時，在目錄後加變體名。分組目錄也出現在選單，不另設例外。
+
+**例子。** `heralded/rb` 放在 `zcu_lab/v2/heralded/rb/`，用四個 herald 類別估計每臂的共同衰減。`heralded/conditional_spectroscopy` 則在名目 I／Xπ 準備之後量 herald，按實測類別畫四支條件頻譜，不共用擬合參數。若只要選出 gg 再分析終端讀出，用支援 `reset/mux_herald` 的普通入口即可。
+
+**邊界。** 家族規則不指定一種共用擬合，也不要求每類都進主估計。各入口決定用途與資料不足時的發布條件，見 [家族 README](../../zcu_lab/v2/heralded/README.md)。Registry key 不是 Native tag。搬移既有入口不改 Native tag、cfg schema 或 HDF5 映射；用新入口載入同 schema 的舊結果，不加舊 key、import 轉接或舊 schema reader。Lab 與各家族的依賴沿用 [[0072]]，本節不設 import 例外。
+
+**依據。** 2026-11-24，使用者說：「如果是 reset herdering 的话，那就是真的就是只留一种。如果你想要全部保留，或是保留一种以上的，请独立的分化实验。」引文的「herdering」「分化」依語境指 heralding、heralded。對新增五個入口答「那就采用建议吧。」對選單與目錄一併改答「我会选 C two，我认为表单的结构应该要跟实际结构对应，或者说一致，这样才好维护啊。」對以目錄定 key、不為分組層開例外的提案答「採用建議吧，對於3，新名字你要叫什麼？」本次只處理 heralded 的 key。比較與先例見 [Heralded 獨立家族](../discussions/2026-11-24-heralded-family.md)。
 
 ### Owner 不變，caller 不重建舊配置
 

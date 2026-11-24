@@ -1,4 +1,30 @@
-from zcu_tools.utils.result_transfer.cli import build_copy_arguments
+import io
+import signal
+import sys
+from pathlib import Path
+
+import pytest
+from zcu_tools.utils.result_transfer.cli import build_copy_arguments, main
+
+
+def test_unconfigured_upload_names_the_invoked_entry_point(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+):
+    local_root = tmp_path / "Database"
+    (local_root / "Si001").mkdir(parents=True)
+    monkeypatch.setattr(
+        sys, "argv", ["scripts/transfer_database.py", "upload", "Si001"]
+    )
+    monkeypatch.setattr(sys, "stdin", io.StringIO())
+    previous_handler = signal.getsignal(signal.SIGTERM)
+
+    try:
+        exit_code = main(local_root, tmp_path / "settings")
+    finally:
+        signal.signal(signal.SIGTERM, previous_handler)
+
+    assert exit_code == 2
+    assert "transfer_database.py setup" in capsys.readouterr().err
 
 
 def _build(

@@ -17,14 +17,20 @@ class FigurePaneLayout(QStackedWidget):
 
     Page zero is the placeholder. Canvases remain direct stack members so the
     existing FigureContainer retains attachment, cleanup and current-page rules.
-    Call set_tiled after changing membership on the Qt owner thread. Interactive
-    presentations use ordinary single-page mode. No Figures are owned here.
+    Call set_tiled after changing membership on the Qt owner thread. _arrange
+    owns member geometry in both tiled and single-widget modes. No Figures are
+    owned here.
     presentationChanged fires after selection, membership removal or mode changes
     so the shared pager can refresh its count and button availability.
     """
 
     def __init__(self) -> None:
         super().__init__()
+        layout = self.layout()
+        if layout is None:
+            raise RuntimeError("FigurePaneLayout requires the native stack layout")
+        # Keep stack membership and selection without letting Qt resize members.
+        layout.setEnabled(False)
         self._tiled = False
         self.currentChanged.connect(self._presentation_changed)
         self.widgetRemoved.connect(self._presentation_changed)
@@ -67,14 +73,12 @@ class FigurePaneLayout(QStackedWidget):
         self.setCurrentIndex(1 + index * MAX_TILED_FIGURES)
 
     def eventFilter(self, a0: QObject | None, a1: QEvent | None) -> bool:
-        if (
-            self._tiled
-            and a1 is not None
-            and a1.type() == QEvent.Type.MouseButtonPress
-            and isinstance(a0, QWidget)
-            and self.indexOf(a0) > 0
-        ):
-            self.setCurrentWidget(a0)
+        if a1 is not None and isinstance(a0, QWidget) and self.indexOf(a0) > 0:
+            if a1.type() == QEvent.Type.LayoutRequest:
+                # A disabled native layout will not propagate a changed tile hint.
+                self.updateGeometry()
+            elif self._tiled and a1.type() == QEvent.Type.MouseButtonPress:
+                self.setCurrentWidget(a0)
         return super().eventFilter(a0, a1)
 
     def _presentation_changed(self) -> None:
@@ -114,14 +118,6 @@ class FigurePaneLayout(QStackedWidget):
                 widget.raise_()
             elif visible:
                 widget.setGeometry(self.rect())
-
-    def event(self, e: QEvent | None) -> bool:
-        handled = super().event(e)
-        if e is not None and e.type() == QEvent.Type.LayoutRequest:
-            # QStackedLayout may expand its current child when a size hint changes.
-            # Reapply the peer layout after that delivery.
-            self._arrange()
-        return handled
 
     def resizeEvent(self, a0: QResizeEvent | None) -> None:
         super().resizeEvent(a0)

@@ -40,11 +40,11 @@ from zcu_tools.program.v2 import (
 from zcu_tools.program.v2.modules import MuxReadout
 
 from zcu_lab.v2.support import live_errorbar
-
-from .._drive import SweptQubitDriveCfg
-from .._phase import (
+from zcu_lab.v2.support.paired_counts import POINT_ALIAS_DESCRIPTION, qubit_sigma
+from zcu_lab.v2.support.paired_drive import SweptQubitDriveCfg
+from zcu_lab.v2.support.paired_phase_inputs import validate_conditional_phase_inputs
+from zcu_lab.v2.support.paired_ramsey import (
     CountQuadratures,
-    PhaseCrossings,
     QuadraturePhase,
     complete_projections,
     conditional_phase_deg,
@@ -54,8 +54,11 @@ from .._phase import (
     quadrature_contrast_sem,
     quadrature_phase_sem,
     reference_frequency_index,
+    started_trains,
     update_complete_frequency_phases,
 )
+from zcu_lab.v2.support.phase_crossing import fitted_crossings
+
 from .._phase_plot import (
     BlochSeries,
     conditional_phase_plot_data,
@@ -66,9 +69,6 @@ from .._phase_plot import (
     reference_phase_series,
     wrapped_phase_plot_data,
 )
-from .._readout import POINT_ALIAS_DESCRIPTION
-from .._sums import qubit_sigma, validate_qubit_tones
-from .crossing import phase_crossings
 
 logger = logging.getLogger(__name__)
 
@@ -228,20 +228,14 @@ class ConditionalPhaseCfg(ConfigBase):
     @model_validator(mode="after")
     def validate_pair(self) -> Self:
         """Reject mismatched qubit generators, nonfinite frequencies and repeated n."""
-        validate_qubit_tones(self.readout, self.qubit1_tone, self.qubit2_tone)
-        for drive, x180, x90 in (
-            (self.drive.qubit1, self.x180_qubit1, self.x90_qubit1),
-            (self.drive.qubit2, self.x180_qubit2, self.x90_qubit2),
-        ):
-            if drive.ch != x180.ch or drive.ch != x90.ch:
-                raise ValueError("CZ, Xπ and X90 must use the same qubit generator")
-            if not isinstance(x90.phase, (int, float)) or not np.isfinite(x90.phase):
-                raise ValueError("X90 phase must be a finite scalar")
-        frequency = sweep2array(self.frequency)
-        if np.any(np.diff(frequency) <= 0):
-            raise ValueError("Common frequency coordinates must be strictly increasing")
-        if len(set(self.gate_count)) != len(self.gate_count):
-            raise ValueError("Gate counts must be unique")
+        validate_conditional_phase_inputs(
+            self.readout,
+            (self.qubit1_tone, self.qubit2_tone),
+            self.drive,
+            ((self.x180_qubit1, self.x90_qubit1), (self.x180_qubit2, self.x90_qubit2)),
+            self.frequency,
+            self.gate_count,
+        )
         return self
 
 
@@ -251,26 +245,6 @@ def _fit_group(sums: NDArray[np.float64], cfg: ConditionalPhaseCfg) -> CountQuad
     return measured.for_fit(
         complete_projections(measured.acquired, cfg.reps * cfg.rounds)
     )
-
-
-def fitted_crossings(
-    frequencies: NDArray[np.float64],
-    conditional_deg: NDArray[np.float64],
-    fit: PhaseSlopeFit,
-) -> PhaseCrossings:
-    """Find per-gate π crossings, preserving fit-unavailability reasons.
-
-    Inputs are the increasing frequency axis, its conditional slope difference,
-    and the fits that produced it. Any unavailable slope prevents selection.
-
-    Return PhaseCrossings with positions or the deduplicated unavailable-fit
-    reasons. Leave inputs unchanged; do not acquire or draw.
-    """
-    crossings = phase_crossings(frequencies, conditional_deg)
-    reasons = [reason for state in fit.reasons for reason in state if reason]
-    if reasons:
-        return PhaseCrossings((), "; ".join(dict.fromkeys(reasons)))
-    return crossings
 
 
 def phase_points(
@@ -313,17 +287,6 @@ def _projected_sem(counts: NDArray[np.float64], target: str) -> NDArray[np.float
     marginal = counts.sum(axis=-1 if target == "qubit1" else -2)
     cov = class_probability_covariance(marginal)
     return np.sqrt(np.maximum(0, cov[..., 0, 0] + cov[..., 1, 1] - 2 * cov[..., 0, 1]))
-
-
-def started_trains(train_sums: NDArray[np.float64]) -> NDArray[np.intp]:
-    """Return scan-order indices with any finite count, with train axis first.
-
-    Zero counts still mean the train started. NaN-only trains did not start.
-    Use the original count table, before any completeness or herald mask.
-    """
-    return np.flatnonzero(
-        np.isfinite(train_sums).any(axis=tuple(range(1, train_sums.ndim)))
-    )
 
 
 def _plot_terminal_quadratures(

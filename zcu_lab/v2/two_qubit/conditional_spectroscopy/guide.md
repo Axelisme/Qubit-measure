@@ -2,7 +2,7 @@
 
 # Conditional spectroscopy
 
-每發做 **可選 Reset → 名目 g,g／g,e／e,g／e,e 準備 → 同頻雙線弱 probe → 可選雙 Xπ 對比 → mux 終端讀出**。標籤按 Qubit1、Qubit2；g 用 I、e 用 Xπ，雙翻轉準備同時開始。沒有 reset 時仍有熱布居。若要按準備後的實測分類分支，使用 [Heralded conditional spectroscopy](guide_heralded.md)。
+每發做 **可選 Reset → 名目 g,g／g,e／e,g／e,e 準備 → 同頻雙線弱 probe → 可選雙 Xπ 對比 → mux 終端讀出**。標籤按 Qubit1、Qubit2；g 用 I、e 用 Xπ，雙翻轉準備同時開始。沒有 reset 時仍有熱布居。若要按準備後的實測分類分支，使用 [Heralded conditional spectroscopy](../../heralded/conditional_spectroscopy/guide.md)。
 
 ## 設定表單
 

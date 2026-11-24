@@ -11,7 +11,7 @@ from pathlib import Path
 import pytest
 from matplotlib.figure import Figure
 from PIL import Image, ImageChops
-from qtpy.QtCore import QCoreApplication, QEvent, QRect, QSize
+from qtpy.QtCore import QCoreApplication, QEvent, QObject, QPoint, QRect, QSize
 from qtpy.QtWidgets import QApplication, QLabel, QScrollArea, QWidget
 from zcu_tools.gui.app.measure.adapter import AdapterCapabilities, AnalysisMode
 from zcu_tools.gui.app.measure.figure_export import render_figure_reading_png
@@ -585,6 +585,96 @@ def test_gallery_aligns_first_thumbnail_across_uneven_named_groups(
     driver.click("Back to previews")
     assert driver.observe("Run tone 1").visible
     driver.screenshot(path.with_stem(f"{path.stem}-returned"))
+
+
+class _PreviewBounds(QObject):
+    """Observe intermediate Qt geometry as well as settled geometry."""
+
+    def __init__(self, gallery: QWidget) -> None:
+        super().__init__(gallery)
+        self._gallery = gallery
+        self._widgets = [
+            *gallery.findChildren(QWidget, "previewCard_run"),
+            *gallery.findChildren(QWidget, "previewCard_analysis"),
+            *gallery.findChildren(QWidget, "previewCard_post"),
+            *gallery.findChildren(QWidget, "previewCard_run_member"),
+            *gallery.findChildren(QWidget, "previewCard_analysis_member"),
+            *gallery.findChildren(QWidget, "previewImage_run_member"),
+            *gallery.findChildren(QWidget, "previewImage_analysis_member"),
+        ]
+        self._baseline = self.snapshot()
+        self.first_change: tuple[str, QRect, QRect] | None = None
+        for widget in self._widgets:
+            widget.installEventFilter(self)
+
+    def _bounds(self, widget: QWidget) -> QRect:
+        return QRect(widget.mapTo(self._gallery, QPoint()), widget.size())
+
+    def snapshot(self) -> dict[QWidget, QRect]:
+        return {widget: self._bounds(widget) for widget in self._widgets}
+
+    def eventFilter(self, a0: QObject | None, a1: QEvent | None) -> bool:
+        if (
+            self.first_change is None
+            and isinstance(a0, QWidget)
+            and a0.isVisible()
+            and a1 is not None
+            and a1.type() in (QEvent.Type.Move, QEvent.Type.Resize)
+        ):
+            baseline = self._baseline[a0]
+            bounds = self._bounds(a0)
+            if bounds != baseline:
+                self.first_change = (a0.objectName(), baseline, bounds)
+        return False
+
+
+def test_gallery_geometry_stays_still_when_reading_and_returning(
+    qapp: QApplication, tmp_path: Path
+) -> None:
+    """Reading one of six thumbnails leaves the scrollable three-stage grid still."""
+    run = FigureCollection()
+    analysis = FigureCollection()
+    for group, names in (
+        (run, ("measurement_0", "measurement_1")),
+        (analysis, ("fit_0", "diagnostic_0", "fit_1", "diagnostic_1")),
+    ):
+        for name in names:
+            group.adopt(name, Figure())
+        group.seal()
+
+    gallery = DataFigurePreviewGallery(
+        AdapterCapabilities(analysis=AnalysisMode.FIT, post_analysis=True),
+        renderer=renderer_640x480,
+        read_png=lambda _stage, _member: renderer_640x480(Figure()),
+    )
+    try:
+        gallery.update_collections(run, analysis)
+        gallery.resize(1334, 476)
+        gallery.show()
+        # Finish startup layouts before measuring the View/Back transitions.
+        for _ in range(4):
+            qapp.processEvents()
+        driver = ComponentDriver(gallery)
+        scroll = driver.scroll_area(object_name="previewGalleryScroll")
+        assert scroll.vertical_scrollable
+        watched = _PreviewBounds(gallery)
+        before = watched.snapshot()
+        assert len(before) == 3 + 2 * (len(run) + len(analysis))
+        for cycle in (1, 2):
+            driver.screenshot(tmp_path / f"{cycle}-before.png")
+            watched.first_change = None
+            driver.click(object_name="dataFigureView/analysis/diagnostic_1")
+            assert driver.observe("Analysis — diagnostic_1").visible
+            driver.screenshot(tmp_path / f"{cycle}-reading.png")
+            driver.click("Back to previews")
+            driver.screenshot(tmp_path / f"{cycle}-back.png")
+            assert driver.scroll_area(object_name="previewGalleryScroll") == scroll
+            assert watched.snapshot() == before
+            assert watched.first_change is None, watched.first_change
+    finally:
+        gallery.close()
+        gallery.deleteLater()
+        QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
 
 
 def test_gallery_narrow_single_column_three_cards(qapp):
