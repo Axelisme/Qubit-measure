@@ -74,14 +74,12 @@ from zcu_lab.v2.singleshot.qutrit_population.gui import (
 from zcu_lab.v2.singleshot.reset_check.gui import (
     DEFINITION as SS_RESET_CHECK_DEFINITION,
 )
-from zcu_lab.v2.singleshot.t1.t1.gui import DEFINITION as SS_T1_DEFINITION
-from zcu_lab.v2.singleshot.t1.t1_with_tone.gui import (
-    DEFINITION as SS_T1_TONE_DEFINITION,
-)
-from zcu_lab.v2.singleshot.t1.t1_with_tone_sweep.gui import (
+from zcu_lab.v2.singleshot.t1.gui import DEFINITION as SS_T1_DEFINITION
+from zcu_lab.v2.singleshot.t1_tone.gui import DEFINITION as SS_T1_TONE_DEFINITION
+from zcu_lab.v2.singleshot.t1_tone_sweep.gui import (
     FREQ_DEFINITION as SS_T1_TONE_SWEEP_FREQ_DEFINITION,
 )
-from zcu_lab.v2.singleshot.t1.t1_with_tone_sweep.gui import (
+from zcu_lab.v2.singleshot.t1_tone_sweep.gui import (
     GAIN_DEFINITION as SS_T1_TONE_SWEEP_GAIN_DEFINITION,
 )
 from zcu_lab.v2.two_qubit.chevron.gui import DEFINITION as CHEVRON_DEFINITION
@@ -261,8 +259,8 @@ def register_all(
         "singleshot/ac_stark": SS_AC_STARK_DEFINITION,
         "singleshot/reset_check": SS_RESET_CHECK_DEFINITION,
         "singleshot/t1_tone": SS_T1_TONE_DEFINITION,
-        "singleshot/t1_tone_sweep_gain": SS_T1_TONE_SWEEP_GAIN_DEFINITION,
-        "singleshot/t1_tone_sweep_freq": SS_T1_TONE_SWEEP_FREQ_DEFINITION,
+        "singleshot/t1_tone_sweep/gain": SS_T1_TONE_SWEEP_GAIN_DEFINITION,
+        "singleshot/t1_tone_sweep/freq": SS_T1_TONE_SWEEP_FREQ_DEFINITION,
         "twotone/dispersive": DISPERSIVE_DEFINITION,
         "twotone/ac_stark": AC_STARK_DEFINITION,
         "twotone/ac_stark_ramsey": AC_STARK_RAMSEY_DEFINITION,

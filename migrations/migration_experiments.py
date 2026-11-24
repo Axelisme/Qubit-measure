@@ -52,9 +52,9 @@ from zcu_lab.v2.singleshot.mist.power import core as singleshot_mist_power
 from zcu_lab.v2.singleshot.mist.power_freq import core as singleshot_mist_power_freq
 from zcu_lab.v2.singleshot.mist.pre_freq import core as singleshot_mist_pre_freq
 from zcu_lab.v2.singleshot.reset_check import core as singleshot_reset_check
-from zcu_lab.v2.singleshot.t1.t1 import core as singleshot_t1_t1
-from zcu_lab.v2.singleshot.t1.t1_with_tone import core as singleshot_t1_t1_with_tone
-from zcu_lab.v2.singleshot.t1.t1_with_tone_sweep import core as singleshot_t1_tone_sweep
+from zcu_lab.v2.singleshot.t1 import core as singleshot_t1
+from zcu_lab.v2.singleshot.t1_tone import core as singleshot_t1_tone
+from zcu_lab.v2.singleshot.t1_tone_sweep import core as singleshot_t1_tone_sweep
 from zcu_lab.v2.two_qubit.chevron import core as ftf_chevron
 from zcu_lab.v2.two_qubit.conditional_phase import core as ftf_conditional_phase
 from zcu_lab.v2.two_qubit.conditional_spectroscopy import (
@@ -208,8 +208,8 @@ MIGRATION_EXPERIMENTS = (
     _declaration(singleshot_mist_power_freq.FreqPowerExp.AXES_SPEC),
     _declaration(singleshot_mist_pre_freq.PreFreqExp.AXES_SPEC),
     _declaration(singleshot_reset_check.ResetCheckExp.AXES_SPEC),
-    _declaration(singleshot_t1_t1.T1Exp.AXES_SPEC),
-    _declaration(singleshot_t1_t1_with_tone.T1WithToneExp.AXES_SPEC),
+    _declaration(singleshot_t1.T1Exp.AXES_SPEC),
+    _declaration(singleshot_t1_tone.T1WithToneExp.AXES_SPEC),
     _declaration(singleshot_t1_tone_sweep.T1WithToneSweepExp.AXES_SPEC),
     _declaration(twotone_ac_stark.AcStarkExp.AXES_SPEC),
     _declaration(twotone_ac_stark_ramsey.AcStarkRamseyExp.AXES_SPEC),

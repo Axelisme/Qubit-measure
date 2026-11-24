@@ -627,9 +627,9 @@ T1 with tone 的掃描終點依序使用歷史 t1_with_tone、普通 T1、30 µs
 自然等待仍用普通 T1，不用 tone T1。這些初值不保證熱平衡或指定保真度。
 Reps、rounds、shots、點數與其他特殊時序不因等待政策改動。
 
-固定 tone T1 的[寫回](singleshot/t1/t1_with_tone/guide.md#next-step)提供 `ext.t1_with_tone`。
-三個表單用這個值作為 Stop 初值來源：[固定 tone 的 Probe exposure time Stop](singleshot/t1/t1_with_tone/guide.md#key-settings)，
-以及[增益掃描的 Probe length Stop](singleshot/t1/t1_with_tone_sweep/guide.gain.md#key-settings)與[頻率掃描的 Probe length Stop](singleshot/t1/t1_with_tone_sweep/guide.freq.md#key-settings)。
+固定 tone T1 的[寫回](singleshot/t1_tone/guide.md#next-step)提供 `ext.t1_with_tone`。
+三個表單用這個值作為 Stop 初值來源：[固定 tone 的 Probe exposure time Stop](singleshot/t1_tone/guide.md#key-settings)，
+以及[增益掃描的 Probe length Stop](singleshot/t1_tone_sweep/guide.gain.md#key-settings)與[頻率掃描的 Probe length Stop](singleshot/t1_tone_sweep/guide.freq.md#key-settings)。
 在程式中搜尋 `ext.t1_with_tone` 找寫回與來源選擇，搜尋 `with_tone=True` 找表單呼叫點。
 
 ### Probe 與 Rabi

@@ -1,7 +1,7 @@
 """Single-shot T1 versus probe length and either gain or frequency.
 
-GAIN_DEFINITION exposes length + gain at 'singleshot/t1_tone_sweep_gain'.
-FREQ_DEFINITION exposes length + frequency at 'singleshot/t1_tone_sweep_freq'.
+GAIN_DEFINITION exposes length + gain at 'singleshot/t1_tone_sweep/gain'.
+FREQ_DEFINITION exposes length + frequency at 'singleshot/t1_tone_sweep/freq'.
 Each form supplies exactly one outer sweep, as required by the core run.
 Analysis shares the captured correction inputs but labels its own outer axis.
 """
@@ -20,13 +20,13 @@ from zcu_tools.gui.app.measure.adapter import (
 )
 from zcu_tools.plotting.plots import Plots
 
-from zcu_lab.v2.singleshot.t1.t1_with_tone_sweep.core import (
+from zcu_lab.v2.singleshot.t1_tone_sweep.core import (
     T1WithToneSweepAnalyzeOptions,
     T1WithToneSweepCfg,
     T1WithToneSweepExp,
     T1WithToneSweepResult,
 )
-from zcu_lab.v2.singleshot.t1.t1_with_tone_sweep.form import (
+from zcu_lab.v2.singleshot.t1_tone_sweep.form import (
     make_form_freq,
     make_form_gain,
 )

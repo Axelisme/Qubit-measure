@@ -86,7 +86,7 @@ Cfg 的建構驗證與 `run`／`analyze` 的使用分開。不要在 `run`／`an
 
 參數過多時，先拿掉可由其他參數取得的值。總是成對出現、對應同一個具名概念的值，可以用同檔私有 frozen dataclass 表達，每個欄位有型別與一句說明。不把剩下的參數全部包成雜項型別。顯示用數值可以從擬合結果少量重算；檢查仍放在 caller 或名稱清楚說明會 raise 的 helper。不改公開 `Result`／`Analysis`，不新增 suppression 或改品質門檻。
 
-只轉傳參數的包裝、本體 5 行以內的 helper，一律內聯。被當成 callback 傳出去的函式、有兩個以上呼叫者的函式不適用這套內聯規則，例如 `run` 與 `analyze` 都用的 `*_signal2real`。已內聯且沒有跨過品質門檻的區塊維持現狀，不為了內聯新增 suppression 或改門檻。CPMG 的加權 log-log 回歸與 `t1_with_tone_sweep` 的批次 transition-rate 擬合保留為各自 core 的 helper。
+只轉傳參數的包裝、本體 5 行以內的 helper，一律內聯。被當成 callback 傳出去的函式、有兩個以上呼叫者的函式不適用這套內聯規則，例如 `run` 與 `analyze` 都用的 `*_signal2real`。已內聯且沒有跨過品質門檻的區塊維持現狀，不為了內聯新增 suppression 或改門檻。CPMG 的加權 log-log 回歸與 `t1_tone_sweep` 的批次 transition-rate 擬合保留為各自 core 的 helper。
 
 **Docstring 與註解。** `run` 的 docstring 用二到四句：播放什麼序列、回傳什麼、使用時要注意什麼。範例見 [`AmpRabiExp.run`](twotone/rabi/amp_rabi/core.py)。保留的 helper 一定有 docstring，交代輸入、輸出與副作用。
 

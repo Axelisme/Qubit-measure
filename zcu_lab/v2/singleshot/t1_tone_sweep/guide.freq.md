@@ -8,7 +8,7 @@ For each frequency and exposure time: optional **Reset** → no pulse for g prep
 
 ## Key settings
 
-- Before Run, use Pulse **Readout** (not Mux) with a circle classifier and positive radius under **Advanced**. Obtain a missing radius from [GE Post-Analysis](../../ge/guide.md); linear cannot report Other. Calibrate the π pulse before comparing preparations.
+- Before Run, use Pulse **Readout** (not Mux) with a circle classifier and positive radius under **Advanced**. Obtain a missing radius from [GE Post-Analysis](../ge/guide.md); linear cannot report Other. Calibrate the π pulse before comparing preparations.
 - **Frequency** sweeps the probe RF frequency, starting at resonator frequency ± 1.5 × resonator linewidth. Confirm the fixed **Probe Pulse** gain. Keep the outer grid coarse enough to repeat a full exposure sweep at each point.
 - Set a finite, strictly positive **Probe length** Start. Stop starts at 5 × the stored tone T1, falling back to ordinary T1 and then 30 µs as the time scale. An invalid stored value leaves the required Stop blank. **Relax delay** is separate: it starts at 5 × ordinary T1 (150 µs if absent; blank if invalid) and is not shortened automatically by reset.
 - **Sampling** `linear` (default) spaces the exposures evenly; `decay` concentrates points early without changing the window or point count.
@@ -23,4 +23,4 @@ Analyze drops incomplete outer rows and applies the saved readout correction if 
 
 If the populations have not approached a plateau, extend **Probe length** and keep enough early points to resolve the slope. Compare rates only where both preparations constrain the fit. No calibration is written. Older files without class counts cannot be converted on Load.
 
-For general operations, see [`zcu_lab/v2/operator-workflow.md`](../../../operator-workflow.md).
+For general operations, see [`zcu_lab/v2/operator-workflow.md`](../../operator-workflow.md).
