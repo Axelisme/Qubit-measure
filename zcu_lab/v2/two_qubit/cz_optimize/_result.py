@@ -11,6 +11,7 @@ from zcu_tools.datafile import DataVariable
 from zcu_tools.experiment.axes_spec import (
     GroupedAxesSpec,
     GroupedLoadData,
+    RunValueSpec,
     VariableAxisSpec,
     VariableSpec,
     VariableZSpec,
@@ -126,7 +127,7 @@ def _restore[CfgT: ConfigBase](data: GroupedLoadData[CfgT]) -> CZOptimizeResult:
         sums=sums.z,
         start_iq=data.variable("start_iq").z,
         start_style=StartStyle(data.variable("start_style").z.item()),
-        start_duration_s=float(data.variable("start_duration_s").z.item()),
+        start_duration_s=data.run_values.scalar("start_duration_s"),
         cycle_period_s=float(data.variable("cycle_period_s").z.item()),
         samples_per_cycle=int(data.variable("samples_per_cycle").z.item()),
         carrier_hz=float(data.variable("carrier_hz").z.item()),
@@ -190,7 +191,6 @@ def axes_spec[CfgT: ConfigBase](
                 required=False,
             ),
             _scalar("start_style", "Start style ID", "", dtype=np.int64),
-            _scalar("start_duration_s", "Start duration", "s"),
             _scalar("cycle_period_s", "Generator fabric period", "s"),
             _scalar(
                 "samples_per_cycle", "DAC samples per fabric cycle", "", dtype=np.int64
@@ -212,6 +212,9 @@ def axes_spec[CfgT: ConfigBase](
         tag="two_qubit/cz_optimize",
         result_builder=_restore,
         result_validator=_validate_evaluations,
+        run_values=(
+            RunValueSpec(field_name="start_duration_s", wire_name="duration", unit="s"),
+        ),
         cfg_schema_version="4.0",
         labber_layout="independent",
         labber_variables=(*(param.name for param in PARAMETERS), "peak"),
