@@ -4,13 +4,13 @@ from pydantic import Field
 from zcu_tools.analysis.fitting import FitQuality
 from zcu_tools.mcp.measure.recipe_api import RecipeSession, recipe
 
-from zcu_lab.v2.two_qubit.rb.core_heralded import RBHeraldedAnalysis
+from zcu_lab.v2.heralded.rb.core import RBHeraldedAnalysis
 
 from .two_qubit_rb_helpers import RBEstimateReport, RBRecipeInputs, rb_estimate_fields
 
 
 class RBHeraldedReport(RBEstimateReport):
-    """Joint gg/ee estimate and fit diagnostics in the owner's herald/arm order."""
+    """Four-class joint estimate with gg and ee fit diagnostics in the report."""
 
     gg_reference_fit_quality: FitQuality | None = Field(
         default=None, description="gg herald, reference arm fit diagnostics, or null."
@@ -29,22 +29,22 @@ class RBHeraldedReport(RBEstimateReport):
 
 
 @recipe(
-    "two_qubit_rb_heralded",
-    description="Compare gg- and ee-conditioned return for reference and CZ-interleaved two-qubit RB, report the shared CZ error estimate, and save without writeback.",
+    "heralded_rb",
+    description="Fit gg, ge, eg and ee return jointly for paired two-qubit RB. Report the shared CZ error estimate and gg/ee diagnostics, then save without writeback.",
 )
-async def two_qubit_rb_heralded(
+async def heralded_rb(
     session: RecipeSession, inputs: RBRecipeInputs
 ) -> RBHeraldedReport:
-    """Fit gg/ee return survival jointly for paired reference and interleaved RB.
+    """Fit four herald classes jointly and report the gg and ee diagnostics.
 
-    See [Joint decay and uncertainty](../v2/two_qubit/rb/guide_heralded.md#joint-decay-and-uncertainty).
+    See [Joint decay and uncertainty](../v2/heralded/rb/guide.md#joint-decay-and-uncertainty).
     Set depths (random Cliffords) and seeds (paired sequence identities).
     Omission keeps the Reset value; explicit null goes to the Form.
     Every shot includes a herald read. Optional reset overrides accept ordinary
     reset only. Save after a completed Run even if analysis fails; no writeback.
     """
     tab = session.open_tab(
-        "two_qubit/rb_heralded",
+        "heralded/rb",
         target=inputs.target.aliases() if inputs.target is not None else None,
         reuse=inputs.reuse_tab_id,
     )
@@ -64,11 +64,20 @@ async def two_qubit_rb_heralded(
             )
 
         result = analysis.result
-        gg_reference, gg_interleaved, ee_reference, ee_interleaved = (
-            result.fit_quality
-            if result.fit_quality is not None
-            else (None, None, None, None)
-        )
+        if result.fit_quality is None:
+            gg_reference = gg_interleaved = ee_reference = ee_interleaved = None
+        else:
+            # Analysis orders gg, ge, eg, ee, each reference then interleaved.
+            (
+                gg_reference,
+                gg_interleaved,
+                _ge_reference,
+                _ge_interleaved,
+                _eg_reference,
+                _eg_interleaved,
+                ee_reference,
+                ee_interleaved,
+            ) = result.fit_quality
         return RBHeraldedReport(
             **rb_estimate_fields(result.estimate),
             reason=result.reason,
@@ -82,4 +91,4 @@ async def two_qubit_rb_heralded(
         tab.save()
 
 
-DEFINITION = two_qubit_rb_heralded
+DEFINITION = heralded_rb

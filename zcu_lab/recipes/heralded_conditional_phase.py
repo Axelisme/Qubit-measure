@@ -2,7 +2,7 @@
 
 from zcu_tools.mcp.measure.recipe_api import Keep, RecipeSession, recipe, report_number
 
-from zcu_lab.v2.two_qubit.conditional_phase.core_heralded import (
+from zcu_lab.v2.heralded.conditional_phase.core import (
     ConditionalPhaseHeraldedAnalysis,
 )
 
@@ -11,15 +11,15 @@ from .two_qubit_helpers import apply_selected_writeback
 
 
 @recipe(
-    "two_qubit_conditional_phase_heralded",
-    description="Scan common CZ frequency after mux heralding, review a joint gg/ee π crossing for writeback and save.",
+    "heralded_conditional_phase",
+    description="Scan common CZ frequency after mux heralding, review a four-class joint π crossing for writeback and save.",
 )
-async def two_qubit_conditional_phase_heralded(
+async def heralded_conditional_phase(
     session: RecipeSession, inputs: ConditionalPhaseInputs
 ) -> ConditionalPhaseReport:
-    """Scan CZ frequency with a mux herald and use the joint gg/ee crossing.
+    """Scan CZ frequency with a mux herald and use the four-class joint crossing.
 
-    See [Read the joint conditional phase](../v2/two_qubit/conditional_phase/guide_heralded.md#read-the-joint-conditional-phase).
+    See [Read the joint conditional phase](../v2/heralded/conditional_phase/guide.md#read-the-joint-conditional-phase).
     Set ramsey_role (Form target), positive gate_count values, frequency_range
     in MHz and frequency_points (frequency.n → Expts). Omission keeps the Reset
     value. Null frequency_range clears both endpoints; other nulls go to the Form.
@@ -28,7 +28,7 @@ async def two_qubit_conditional_phase_heralded(
     Save after a completed Run, even if analysis fails.
     """
     tab = session.open_tab(
-        "two_qubit/conditional_phase_heralded",
+        "heralded/conditional_phase",
         target=inputs.target.aliases() if inputs.target is not None else None,
         reuse=inputs.reuse_tab_id,
     )
@@ -69,4 +69,4 @@ async def two_qubit_conditional_phase_heralded(
         tab.save()
 
 
-DEFINITION = two_qubit_conditional_phase_heralded
+DEFINITION = heralded_conditional_phase

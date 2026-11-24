@@ -14,26 +14,20 @@ from zcu_tools.gui.app.measure.adapter import (
     WritebackItem,
     WritebackRequest,
 )
-from zcu_tools.gui.form_adapter import Form, FormContext
 from zcu_tools.plotting.plots import Plots
 
 from ...support.measure.writeback_helpers import module_writeback
-from .core_heralded import (
+from .config import ConditionalPhaseHeraldedCfg
+from .core import (
     ConditionalPhaseHeraldedAnalysis,
-    ConditionalPhaseHeraldedCfg,
     ConditionalPhaseHeraldedExp,
     ConditionalPhaseHeraldedResult,
 )
-from .form import phase_form
+from .form import make_form
 
 ConditionalPhaseHeraldedRun: TypeAlias = RunRecord[
     ConditionalPhaseHeraldedCfg, ConditionalPhaseHeraldedResult
 ]
-
-
-def make_form(ctx: FormContext) -> Form[ConditionalPhaseHeraldedCfg]:
-    """Seed the independent heralded experiment from fixed qubit and coupler bindings."""
-    return phase_form(ctx, ConditionalPhaseHeraldedCfg)
 
 
 def _analyze(
@@ -105,7 +99,7 @@ DEFINITION = Adapter(
     spec=ConditionalPhaseHeraldedExp.AXES_SPEC,
     make_form=make_form,
     run=run,
-    guide=Path(__file__).with_name("guide_heralded.md"),
+    guide=Path(__file__).with_name("guide.md"),
     analysis=Analysis(
         fn=_analyze, writeback=_get_writeback_items, summary_lines=_summary_lines
     ),

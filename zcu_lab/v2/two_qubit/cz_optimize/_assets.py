@@ -8,7 +8,7 @@ from numpy.typing import NDArray
 from pydantic import TypeAdapter
 from zcu_tools.program.v2.modules import ArbWaveformCfg, FlatTopWaveformCfg
 
-from .._drive import QubitDriveCfg
+from zcu_lab.v2.support.paired_drive import QubitDriveCfg
 
 _FINGERPRINTS = TypeAdapter(dict[str, str])
 

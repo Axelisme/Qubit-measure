@@ -40,8 +40,8 @@ from zcu_tools.program.v2 import (
 from zcu_tools.program.v2.modules import MuxReadout
 
 from zcu_lab.v2.support import live_errorbar
-
-from .._phase import (
+from zcu_lab.v2.support.paired_counts import qubit_sigma
+from zcu_lab.v2.support.paired_ramsey import (
     CountQuadratures,
     complete_projections,
     conditional_phase_deg,
@@ -51,9 +51,13 @@ from .._phase import (
     quadrature_contrast_sem,
     quadrature_phase_sem,
     reference_frequency_index,
+    started_trains,
     update_complete_frequency_phases,
 )
-from .._phase_plot import (
+from zcu_lab.v2.support.phase_crossing import fitted_crossings
+
+from ..counts import herald_probabilities, terminal_counts
+from ._plot import (
     AccumulatedPhaseSeries,
     BlochSeries,
     conditional_phase_plot_data,
@@ -64,13 +68,7 @@ from .._phase_plot import (
     reference_phase_series,
     wrapped_phase_plot_data,
 )
-from .._sums import herald_probabilities, qubit_sigma, terminal_counts
-from .core import (
-    ConditionalPhaseAnalysis,
-    ConditionalPhaseCfg,
-    fitted_crossings,
-    started_trains,
-)
+from .config import ConditionalPhaseHeraldedCfg
 
 logger = logging.getLogger(__name__)
 
@@ -85,7 +83,7 @@ _HERALD_LABELS = tuple("".join(pair) for pair in _HERALDS)
 
 @dataclass(frozen=True)
 class ConditionalPhaseHeraldedResult:
-    """Scan coordinates follow ConditionalPhaseResult; sums retains all 81 classes.
+    """Independent CZ train lengths and RF frequencies in MHz, with all 81 classes.
 
     sums is float64 (2,2,Nn,Nf,3,3,3,3), ordered herald Qubit1/Qubit2 then terminal
     Qubit1/Qubit2, each g/e/other. No selection or normalization precedes persistence.
@@ -98,16 +96,15 @@ class ConditionalPhaseHeraldedResult:
 
 
 @dataclass(frozen=True)
-class ConditionalPhaseHeraldedAnalysis(ConditionalPhaseAnalysis):
-    """Unique π crossing from four-group shared slopes, or its failure reason."""
+class ConditionalPhaseHeraldedAnalysis:
+    """Unique π crossing from four-group shared slopes, or its failure reason.
 
-
-class ConditionalPhaseHeraldedCfg(ConditionalPhaseCfg):
-    """Conditional phase preceded by optional reset and a mux herald.
-
-    All fields and units follow ConditionalPhaseCfg. Both reads use the same mux
-    object and classifiers. readout.post_delay is the wait after herald.
+    frequency_mhz is the unique complete crossing in MHz, or None with a
+    diagnostic in frequency_reason. Per-frequency diagnostics stay in the plots.
     """
+
+    frequency_mhz: float | None
+    frequency_reason: str | None
 
 
 def restore_result(

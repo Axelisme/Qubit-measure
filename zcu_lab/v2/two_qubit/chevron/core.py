@@ -41,14 +41,16 @@ from zcu_tools.program.v2.modules import (
     Reset,
 )
 
-from .._drive import SweptQubitDriveCfg
-from .._rabi_analysis import RabiRate, ReturnData, cosine, fit_duration_rates
-from .._rabi_scan import RabiScanResult
-from .._readout import POINT_ALIAS_DESCRIPTION, MuxResetCfg
-from .._sums import (
+from zcu_lab.v2.support.paired_counts import (
+    POINT_ALIAS_DESCRIPTION,
     joint_probabilities,
     validate_qubit_tones,
 )
+from zcu_lab.v2.support.paired_drive import SweptQubitDriveCfg
+
+from .._rabi_analysis import RabiRate, ReturnData, cosine, fit_duration_rates
+from .._rabi_scan import RabiScanResult
+from .._readout import MuxResetCfg
 
 
 @dataclass(frozen=True)

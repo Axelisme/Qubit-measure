@@ -11,7 +11,7 @@ from numpy.typing import NDArray
 from zcu_tools.analysis.fitting.phase_slopes import PhaseSlopeFit, fit_phase_slopes
 from zcu_tools.analysis.shot_uncertainty import contrast_shot_sem
 
-from ._sums import qubit_marginal_probabilities, qubit_sigma
+from zcu_lab.v2.support.paired_counts import qubit_marginal_probabilities, qubit_sigma
 
 
 @dataclass(frozen=True)
@@ -269,4 +269,15 @@ def phase_variance(
             where=radius_squared > 0,
         )
         * (180 / np.pi) ** 2
+    )
+
+
+def started_trains(train_sums: NDArray[np.float64]) -> NDArray[np.intp]:
+    """Return scan-order indices with any finite count, with train axis first.
+
+    Zero counts still mean the train started. NaN-only trains did not start.
+    Use the original count table, before any completeness or herald mask.
+    """
+    return np.flatnonzero(
+        np.isfinite(train_sums).any(axis=tuple(range(1, train_sums.ndim)))
     )

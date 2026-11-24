@@ -3,7 +3,7 @@
 from zcu_tools.cfg_model import Expr
 from zcu_tools.gui.form_adapter import FormContext
 
-from ._measure import CapturedQubits
+from .paired_qubits import CapturedQubits
 
 
 def captured_phase_pair(ctx: FormContext, qubits: CapturedQubits) -> dict[str, Expr]:

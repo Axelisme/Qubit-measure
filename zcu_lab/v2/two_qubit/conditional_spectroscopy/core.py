@@ -36,12 +36,15 @@ from zcu_tools.program.v2 import (
 from zcu_tools.program.v2.modules import MuxReadout
 
 from zcu_lab.v2.support import live_errorbar
+from zcu_lab.v2.support.conditional_spectra import (
+    excitation_sem,
+    summarize_spectra,
+)
 from zcu_lab.v2.support.device import set_flux
+from zcu_lab.v2.support.paired_counts import validate_qubit_tones
+from zcu_lab.v2.support.paired_drive import SweptQubitDriveCfg
 
-from .._drive import SweptQubitDriveCfg
 from .._readout import MuxResetCfg
-from .._sums import qubit_marginal_probabilities, validate_qubit_tones
-from ._common import excitation_sem
 
 
 @dataclass(frozen=True)
@@ -57,22 +60,6 @@ class SpectroscopyResult:
 
     frequencies: NDArray[np.float64]
     sums: NDArray[np.float64]
-
-
-@dataclass(frozen=True)
-class SpectroscopyAnalysis:
-    """Count-derived spectra on (DC, prepared_qubit1, prepared_qubit2, frequency).
-
-    excitation adds a final Qubit1/Qubit2 axis. acquired_shots is the per-point sum
-    after any herald selection. complete marks DC/preparation rows with at
-    least one completed round at every frequency. Zero totals give NaN
-    excitation. Other stays in the denominator; probabilities are not
-    corrected for state-preparation or readout error.
-    """
-
-    excitation: NDArray[np.float64]
-    acquired_shots: NDArray[np.float64]
-    complete: NDArray[np.bool_]
 
 
 class SpectroscopyCfg(ConfigBase):
@@ -217,37 +204,6 @@ class SpectroscopyCfg(ConfigBase):
         if self.dc_device is not None and not self.dc_device.strip():
             raise ValueError("DC source must name a connected device or be None")
         return self
-
-
-def summarize_spectra(counts: NDArray[np.float64]) -> SpectroscopyAnalysis:
-    """Compute Qubit1/Qubit2 excitation, accepted totals and all-frequency coverage.
-
-    counts ends in terminal (3,3), with g/e/other on each axis and frequency
-    immediately before them. Counts accumulate over completed rounds. Whole
-    missing points may be NaN. Invalid counts or partly missing points raise
-    ValueError. Zero totals yield NaN excitation.
-    """
-    if counts.ndim < 3 or counts.shape[-2:] != (3, 3):
-        raise ValueError("Expected a frequency axis and terminal class axes (3,3)")
-    finite = np.all(np.isfinite(counts) & (counts >= 0), axis=(-2, -1))
-    missing = np.all(np.isnan(counts), axis=(-2, -1))
-    if not np.all(finite | missing):
-        raise ValueError("Spectroscopy contains invalid or partially missing counts")
-    acquired_shots = counts.sum(axis=(-2, -1))
-    if not np.all(np.isfinite(acquired_shots) | missing):
-        raise ValueError("Acquired shots must be nonnegative totals or NaN")
-    excitation = np.stack(
-        [
-            qubit_marginal_probabilities(counts, target)[..., 1]
-            for target in ("qubit1", "qubit2")
-        ],
-        axis=-1,
-    )
-    return SpectroscopyAnalysis(
-        excitation,
-        acquired_shots,
-        np.all(finite, axis=-1),
-    )
 
 
 def restore_result(data: GroupedLoadData[SpectroscopyCfg]) -> SpectroscopyResult:

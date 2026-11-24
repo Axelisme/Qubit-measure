@@ -48,7 +48,7 @@ Program／emission owner 配置每次 lower 的內部名稱。Scope 每次 compi
 
 **規則。** 一般實驗把 round 數交給 acquire。Reducer 加總或平均已完成的 rounds，Result 不留 round 軸。這是建議，不是強制。
 
-**例子。** `two_qubit/rb` 與 `two_qubit/rb_heralded` 加總分類計數，`twotone/rb` 平均 IQ。每支 seed／arm program 只取數一次。
+**例子。** `two_qubit/rb` 與 `heralded/rb` 加總分類計數，`twotone/rb` 平均 IQ。每支 seed／arm program 只取數一次。
 
 **邊界。** 需要逐輪資料，例如 trace by trace 平均時，作者可以把 round 迴圈放在最外層。
 

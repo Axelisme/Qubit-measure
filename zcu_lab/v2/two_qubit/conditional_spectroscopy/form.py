@@ -9,21 +9,13 @@ from zcu_lab.v2.support.measure.ctx_helpers import source
 from zcu_lab.v2.support.measure.mux_forms import (
     mux_readout_initial,
 )
+from zcu_lab.v2.support.measure.paired_qubits import TwoQubitForm, captured_qubits
 
-from .._measure import TwoQubitForm, captured_qubits
 from .core import SpectroscopyCfg
-from .core_heralded import HeraldedSpectroscopyCfg
 
 
 def make_form(ctx: FormContext) -> Form[SpectroscopyCfg]:
-    """Seed the ordinary spectroscopy form from the fixed capture."""
-    return spectroscopy_form(ctx, SpectroscopyCfg)
-
-
-def spectroscopy_form[Cfg: SpectroscopyCfg | HeraldedSpectroscopyCfg](
-    ctx: FormContext, cfg_type: type[Cfg]
-) -> Form[Cfg]:
-    """Seed either spectroscopy form from GUI aliases $qubit1, $qubit2 and $mux.
+    """Seed the spectroscopy form from GUI aliases $qubit1, $qubit2 and $mux.
 
     The fixed capture seeds hidden tone indices; no $coupler binding is needed.
     Notebook bindings of the same names are separate. Missing or inconsistent
@@ -57,7 +49,7 @@ def spectroscopy_form[Cfg: SpectroscopyCfg | HeraldedSpectroscopyCfg](
         drive[position] = replace(pulse, set={**pulse.set, "freq": Hidden(0.0)})
     readout = mux_readout_initial(ctx)
     return TwoQubitForm(
-        cfg_type,
+        SpectroscopyCfg,
         readout_of=lambda cfg: cfg.readout,
         tree={
             "reps": 1000,

@@ -4,8 +4,9 @@ from math import ceil, floor
 
 import numpy as np
 from numpy.typing import NDArray
+from zcu_tools.analysis.fitting.phase_slopes import PhaseSlopeFit
 
-from .._phase import PhaseCrossings
+from .paired_ramsey import PhaseCrossings
 
 
 def phase_crossings(
@@ -63,3 +64,23 @@ def phase_crossings(
         else "Multiple π crossings in scanned frequency window"
     )
     return PhaseCrossings(values, reason)
+
+
+def fitted_crossings(
+    frequencies: NDArray[np.float64],
+    conditional_deg: NDArray[np.float64],
+    fit: PhaseSlopeFit,
+) -> PhaseCrossings:
+    """Find per-gate π crossings, preserving fit-unavailability reasons.
+
+    Inputs are the increasing frequency axis, its conditional slope difference,
+    and the fits that produced it. Any unavailable slope prevents selection.
+
+    Return PhaseCrossings with positions or the deduplicated unavailable-fit
+    reasons. Leave inputs unchanged; do not acquire or draw.
+    """
+    crossings = phase_crossings(frequencies, conditional_deg)
+    reasons = [reason for state in fit.reasons for reason in state if reason]
+    if reasons:
+        return PhaseCrossings((), "; ".join(dict.fromkeys(reasons)))
+    return crossings

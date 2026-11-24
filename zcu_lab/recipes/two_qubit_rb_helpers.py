@@ -14,7 +14,7 @@ from zcu_tools.mcp.measure.recipe_api import (
     report_number,
 )
 
-from zcu_lab.v2.two_qubit.rb.core import RBEstimate
+from zcu_lab.v2.support.paired_rb_analysis import RBEstimate
 
 from .two_qubit_helpers import TwoQubitTarget
 

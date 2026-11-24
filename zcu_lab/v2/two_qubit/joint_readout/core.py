@@ -32,8 +32,9 @@ from zcu_tools.program.v2 import (
 )
 from zcu_tools.program.v2.modules import MuxReadout
 
+from zcu_lab.v2.support.paired_counts import joint_probabilities, validate_qubit_tones
+
 from .._readout import MuxResetCfg
-from .._sums import joint_probabilities, validate_qubit_tones
 
 PREPARED_STATES = (("g", "g"), ("g", "e"), ("e", "g"), ("e", "e"))
 PREPARED_LABELS = tuple(",".join(states) for states in PREPARED_STATES)

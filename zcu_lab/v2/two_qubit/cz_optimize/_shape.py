@@ -20,7 +20,7 @@ from zcu_tools.program.v2 import (
 )
 from zcu_tools.program.v2.modules.waveform import InMemoryArbWaveformCfg, WaveformCfg
 
-from .._drive import QubitDriveCfg
+from zcu_lab.v2.support.paired_drive import QubitDriveCfg
 
 KNOTS = 3
 KNOT_COLUMNS = 2 * KNOTS

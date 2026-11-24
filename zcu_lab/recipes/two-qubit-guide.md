@@ -126,13 +126,13 @@ Recipe 的 `target` 物件仍用來綁定 aliases。
 有交點時，Primary 提出兩筆 CZ 脈衝頻率更新和兩筆 coupler slot 更新。
 [脈衝與 slot 各自套用](../v2/two_qubit/conditional_phase/guide.md#select-a-frequency-and-apply)，回答前請確認兩路需要更新的項目。
 
-## two_qubit_conditional_phase_heralded
+## heralded_conditional_phase
 
-`two_qubit_conditional_phase_heralded` 執行一次 `two_qubit/conditional_phase_heralded`。
-使用同一組輸入欄位。Gate count 的間距須符合 [heralded adapter 的輸入條件](../v2/two_qubit/conditional_phase/guide_heralded.md#inputs-and-sequence)，例如 `[1, 2, 3]`。
+`heralded_conditional_phase` 執行一次 `heralded/conditional_phase`。
+使用同一組輸入欄位。Gate count 的間距須符合 [heralded adapter 的輸入條件](../v2/heralded/conditional_phase/guide.md#inputs-and-sequence)，例如 `[1, 2, 3]`。
 每發都在相位序列前做 mux herald。兩個 conditional phase adapter 的 `reset` 只接受一般 reset，不能套用上文的 mux-herald reset override。
 
-`frequency_mhz` 來自 [joint gg/ee 斜率的 π 交點](../v2/two_qubit/conditional_phase/guide_heralded.md#read-the-joint-conditional-phase)，不以只有 gg 的交點替代。
+`frequency_mhz` 來自 [四類共同擬合斜率的 π 交點](../v2/heralded/conditional_phase/guide.md#read-the-joint-conditional-phase)，不以只有 gg 的交點替代。
 沒有唯一交點時同樣回 null 與 `frequency_reason`，不詢問寫回。
 有交點時，候選同樣是兩筆脈衝頻率和兩筆 slot 更新。
 
@@ -183,14 +183,14 @@ Form 檢查 `$coupler.ext.cz_phase` 的元件名是否依序符合 `qubit1`、`q
 沒有估計時，估計欄位為 null，`reason` 說明原因。分析拋錯時，執行回失敗與原錯誤。
 完成 Run 後即使分析失敗也保存。不詢問寫回。
 
-## two_qubit_rb_heralded
+## heralded_rb
 
-`two_qubit_rb_heralded` 執行一次 `two_qubit/rb_heralded`。
-每個 shot 自帶 [herald readout](../v2/two_qubit/rb/guide_heralded.md#shot-sequence)。
+`heralded_rb` 執行一次 `heralded/rb`。
+每個 shot 自帶 [herald readout](../v2/heralded/rb/guide.md#shot-sequence)。
 `reset` 只接受一般 reset，不選 `reset/mux_herald`。
 沿用 [RB 的輸入](#two_qubit_rb)。長序列也可用上面的 [const 波形覆寫](#長序列改用-const-波形)。
 
-估計欄位和失敗原因與 RB 相同，但衰減來自 [gg/ee 聯合擬合](../v2/two_qubit/rb/guide_heralded.md#joint-decay-and-uncertainty)。
-`n_paired_seeds` 計算兩組有效 seed 的聯集。
+估計欄位和失敗原因與 RB 相同，但衰減來自 [gg／ge／eg／ee 聯合擬合](../v2/heralded/rb/guide.md#joint-decay-and-uncertainty)。
+`n_paired_seeds` 計算四組有效 seed 的聯集。Analyze 顯示四組診斷；recipe report 只列 gg 和 ee。
 四欄診斷依序是 `gg_reference_fit_quality`、`gg_interleaved_fit_quality`、`ee_reference_fit_quality`、`ee_interleaved_fit_quality`。
 基底 `fit_quality` 為 null。完成 Run 後即使分析失敗也保存。不詢問寫回。

@@ -3,10 +3,10 @@
 from zcu_tools.cfg_model import Hidden, Slot
 from zcu_tools.gui.form_adapter import Form, FormContext
 
+from zcu_lab.v2.support.measure.cz_phase import captured_phase_pair
 from zcu_lab.v2.support.measure.mux_forms import mux_readout_seed_metadata
+from zcu_lab.v2.support.measure.paired_qubits import TwoQubitForm, captured_qubits
 
-from .._cz_phase_form import captured_phase_pair
-from .._measure import TwoQubitForm, captured_qubits
 from .core import CZOptimizeCfg
 
 

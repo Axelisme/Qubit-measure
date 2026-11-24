@@ -9,11 +9,13 @@ from zcu_tools.cfg_model import ConfigBase, FieldMeta
 from zcu_tools.program.v2 import Pulse
 from zcu_tools.program.v2.modules import MuxReadout
 
-from .._cz_phase import CZPhasePair
-from .._drive import QubitDriveCfg
-from .._rb_scheduling import validate_x_pulses
-from .._readout import POINT_ALIAS_DESCRIPTION
-from .._sums import validate_qubit_tones
+from zcu_lab.v2.support.cz_phase import CZPhasePair
+from zcu_lab.v2.support.paired_counts import (
+    POINT_ALIAS_DESCRIPTION,
+    validate_qubit_tones,
+)
+from zcu_lab.v2.support.paired_drive import QubitDriveCfg
+from zcu_lab.v2.support.paired_rb_scheduling import validate_x_pulses
 
 
 class RBInputs[ResetT](ConfigBase):

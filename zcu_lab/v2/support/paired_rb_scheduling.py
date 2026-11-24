@@ -11,9 +11,9 @@ from zcu_tools.program.v2 import (
     TProcMemoryError,
 )
 
-from ._cz_phase import CZPhasePair
-from ._drive import QubitDriveCfg
-from ._rb_sequence import RBArm, TwoQubitGate
+from zcu_lab.v2.support.cz_phase import CZPhasePair
+from zcu_lab.v2.support.paired_drive import QubitDriveCfg
+from zcu_lab.v2.support.paired_rb_sequence import RBArm, TwoQubitGate
 
 _QUBIT_TIMELINES = ("rb_qubit1_time", "rb_qubit2_time")
 

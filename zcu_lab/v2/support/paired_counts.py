@@ -13,6 +13,11 @@ from numpy.typing import NDArray
 from zcu_tools.program.v2.modules import MuxReadout
 from zcu_tools.program.v2.modules.readout import circle_classifier
 
+POINT_ALIAS_DESCRIPTION = (
+    "The GUI uses the point aliases $qubit1 and $qubit2. "
+    "Notebook's built-in qubit1 and qubit2 bindings are separate and do not set GUI aliases."
+)
+
 
 def validate_qubit_tones(
     readout: MuxReadout.Cfg, qubit1_tone: int, qubit2_tone: int
@@ -85,25 +90,3 @@ def qubit_sigma(
 
 def _sigma(marginal: NDArray[np.float64]) -> NDArray[np.float64]:
     return marginal[..., 1] - marginal[..., 0]
-
-
-def terminal_counts(
-    sums: NDArray[np.float64],
-    herald: tuple[Literal["g", "e", "other"], Literal["g", "e", "other"]],
-) -> NDArray[np.float64]:
-    """Select terminal (...,3,3) counts for the named herald (Qubit1,Qubit2) classes.
-
-    sums ends in herald Qubit1/Qubit2 then terminal Qubit1/Qubit2, each g/e/other. Leading
-    scan dimensions remain unchanged. This returns a view without normalization.
-    Invalid class names raise ValueError. Unmeasured NaNs propagate.
-    """
-    qubit1_class, qubit2_class = (("g", "e", "other").index(state) for state in herald)
-    return sums[..., qubit1_class, qubit2_class, :, :]
-
-
-def herald_probabilities(sums: NDArray[np.float64]) -> NDArray[np.float64]:
-    """Return (..., 3, 3) herald probabilities from 81 counts.
-
-    Sum over terminal Qubit1/Qubit2 first. The returned (g,g) cell is pass fraction.
-    """
-    return joint_probabilities(sums.sum(axis=(-2, -1)))

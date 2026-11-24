@@ -19,6 +19,7 @@ from zcu_tools.analysis.fitting import (
     seed_standard_deviation,
     seed_statistics,
 )
+from zcu_tools.analysis.fitting.shared import SharedFitResult
 from zcu_tools.analysis.shot_uncertainty import class_probability_covariance
 from zcu_tools.experiment import (
     Experiment,
@@ -41,17 +42,15 @@ from zcu_tools.program.v2 import (
 )
 from zcu_tools.program.v2.modules import MuxReadout
 
-from .._rb_scheduling import compile_depth_sweep, emit_depth_sweep
-from .._rb_sequence import RBArm, make_rb_arms
-from .._sums import herald_probabilities
-from ._config import RBInputs
-from .core import (
-    RBEstimate,
-    RBOptions,
-    estimate_joint_d4,
-    validate_axes,
-    validate_counts,
+from zcu_lab.v2.support import paired_rb_analysis
+from zcu_lab.v2.support.paired_rb_inputs import RBInputs
+from zcu_lab.v2.support.paired_rb_scheduling import (
+    compile_depth_sweep,
+    emit_depth_sweep,
 )
+from zcu_lab.v2.support.paired_rb_sequence import RBArm, make_rb_arms
+
+from ..counts import herald_probabilities
 
 _HERALDS = ((0, 0), (0, 1), (1, 0), (1, 1))
 _HERALD_LABELS = tuple("ge"[q1] + "ge"[q2] for q1, q2 in _HERALDS)
@@ -82,7 +81,7 @@ class RBHeraldedAnalysis:
     across herald groups for each arm. Per-depth survival and counts stay in analyze.
     """
 
-    estimate: RBEstimate | None
+    estimate: paired_rb_analysis.RBEstimate | None
     fit_quality: tuple[FitQuality, ...] | None
     reason: str | None
 
@@ -90,10 +89,46 @@ class RBHeraldedAnalysis:
 class RBHeraldedCfg(RBInputs[Reset.Cfg]):
     """Optional reset → herald → paired sequence → terminal, per shot.
 
-    Fields and units match RBCfg. Both reads share the saved full mux cfg and
+    See RBInputs for acquisition and scan fields. Both reads share the saved full mux cfg and
     circle radii. Its post_delay supplies the wait after herald. reset=None
     emits no reset. The reducer sums finished acquisition rounds.
     """
+
+
+def estimate_joint_d4(
+    fit: SharedFitResult,
+    *,
+    ci_low: float,
+    ci_high: float,
+    bootstrap_successes: int,
+    paired_seeds: int,
+) -> paired_rb_analysis.RBEstimate:
+    """Convert joint arm decays and a seed-bootstrap interval to d=4 estimates.
+
+    fit supplies reference p_0 and interleaved p_1. ci_low/ci_high bound the
+    statistical gate-error interval; bootstrap_successes counts accepted fits.
+    paired_seeds counts the available seed identity union. Return
+    paired_rb_analysis.RBEstimate with unclipped error and a statistical-only warning. Mutate no
+    inputs, draw nothing and propagate missing decay keys or arithmetic errors.
+    """
+    pr, pi = fit.values["p_0"], fit.values["p_1"]
+    error = 0.75 * (1 - pi / pr)
+    warning = (
+        "Statistical CI only; gate-dependent/coherent noise can bias the IRB ratio."
+    )
+    if error < 0:
+        warning += " Interleaved decay exceeds reference: negative error estimate retained, not clipped."
+    return paired_rb_analysis.RBEstimate(
+        pr,
+        pi,
+        0.75 * (1 - pr),
+        error,
+        ci_low,
+        ci_high,
+        paired_seeds,
+        bootstrap_successes,
+        warning,
+    )
 
 
 def restore_result(data: GroupedLoadData[RBHeraldedCfg]) -> RBHeraldedResult:
@@ -543,7 +578,7 @@ def _fit_with_seed_interval(
     errors: NDArray[np.float64],
     survival: NDArray[np.float64],
     totals: NDArray[np.float64],
-    options: RBOptions,
+    options: paired_rb_analysis.RBOptions,
 ) -> tuple[RBHeraldedAnalysis, RBJointDecayFit | None]:
     """Publish the shared fit only when both main fit and seed interval succeed."""
     try:
@@ -634,7 +669,7 @@ class RBHeraldedExp(Experiment[RBHeraldedResult, RBHeraldedCfg]):
         )
     )
 
-    Options = RBOptions
+    Options = paired_rb_analysis.RBOptions
 
     def run(self, config: RBHeraldedCfg, *, context: RunContext) -> RBHeraldedResult:
         """Acquire optional reset → herald → concurrent per-qubit sequence → terminal.
@@ -700,7 +735,7 @@ class RBHeraldedExp(Experiment[RBHeraldedResult, RBHeraldedCfg]):
     def analyze(
         self,
         source: RunRecord[RBHeraldedCfg, RBHeraldedResult],
-        options: RBOptions,
+        options: paired_rb_analysis.RBOptions,
         *,
         plots: Plots,
     ) -> RBHeraldedAnalysis:
@@ -718,7 +753,7 @@ class RBHeraldedExp(Experiment[RBHeraldedResult, RBHeraldedCfg]):
         shape = (len(data.seeds), 2, len(data.depths))
         if data.sums.shape != (*shape, 3, 3, 3, 3):
             raise ValueError("Expected heralded RB sums (seed,2,depth,3,3,3,3)")
-        validate_counts(data.sums, (-4, -3, -2, -1))
+        paired_rb_analysis.validate_counts(data.sums, (-4, -3, -2, -1))
         rendered_fit = None
         if cfg is None:
             analysis = RBHeraldedAnalysis(
@@ -729,7 +764,9 @@ class RBHeraldedExp(Experiment[RBHeraldedResult, RBHeraldedCfg]):
             means = np.full((len(_HERALDS), 2, len(data.depths)), np.nan)
             seed_std = np.full_like(means, np.nan)
         else:
-            validate_axes((data.seeds, data.depths), (cfg.seed, cfg.depth))
+            paired_rb_analysis.validate_axes(
+                (data.seeds, data.depths), (cfg.seed, cfg.depth)
+            )
             returns, totals = _return_counts(data.sums)
             survival = _survival(returns, totals)
             paired = np.asarray(np.isfinite(survival).all(axis=(2, 3)))
