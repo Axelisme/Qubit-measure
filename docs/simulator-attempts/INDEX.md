@@ -74,6 +74,7 @@ superseded_by: null
 
 ## 跨點重用與快取
 
+- 2026-11-24，[Shaped Sambe 在一次 cutoff 決策內重用峰值 Fourier 陣列](./2026-11-24-shaped-sambe-peak-cutoff-reuse.md)，`adopted`。只在同一決策重用精確同 key 的 cutoff-3 陣列。Spectroscopy 為 9.6173 → 9.1434 core s／格（`addd6c8fb` → `d1408edb4`，manifest `c2b6b9e0522e`，11 格的 `conditional_spectroscopy_heralded`，排他單 worker，phase 暖機後各一次完整 Run）。
 - 2026-11-23，[放寬 RB 跨 depth 的前綴候選](./2026-11-23-rb-prefix-candidates.md)，`rejected`。允許更多共同邊界未顯示整輪收益。放寬及只留最長邊界都約 103.4 s，原規則 97.6 s（`8cd18afcd`，離線 plain RB depth `[0,12,24]`、兩臂，單 worker，每規則一次 `run_stage` 牆鐘，Numba 暖度不同）。
 - 2026-11-23，[FTF sampled RWA 探針快取](./2026-11-23-ftf-rwa-probe-memo.md)，`adopted`。一次 preparation 內重用完全相同的 sampled RWA 探針結果，每次 evolve 仍獨立選路。基準的 full-drive DOP853 探針用 175.29 CPU s（`ffd2a0c6`，離線 `two_qubit/chevron` 四點、單 worker 的一次 warm Run，呼叫執行緒 CPU 總和）。這不是快取後的耗時。
 - 2026-11-22，[ADC raw plan 在 acquire 內重用](./2026-11-22-adc-raw-plan-acquire-owner.md)，`adopted`。把確定性的 ADC raw plan 綁到 acquire session，換批或結束才退役。Raw materialize 343.737 → 159.082 s（`e602f0dc6` → `a4cd9f1bd`，同 fixture 的完整 `chain_power`，非排他單 worker、各一個 Run 的 materialize 累計）。
@@ -97,6 +98,7 @@ superseded_by: null
 
 ## 表示與合併
 
+- 2026-11-24，[不同載波雙線的 gate 端點交互作用框架](./2026-11-24-multitone-gate-interaction-frame.md)，`rejected`。在局部交互作用框架建 gate 端點，兩場的結果陣列不變，但未量到加速。暖態 `constructive_phase` 1.7692 → 1.8065 core s／格（`addd6c8fb` → `45d465a5a`，同離線 fixture、FTF seed 123、單 worker，兩側均先跑 `chevron`，各一次完整 121 格 Run）。
 - 2026-11-24，[異形同載波的 shaped Sambe](./2026-11-24-same-carrier-shaped-sambe.md)，`paused`。保留各線包絡，在共同載波座標加總 Fourier block；兩場 guard 均拒收。既有 DP5(4) 0.592 CPU s（`fd160e255`，FAST-DRAG／cosine 雙線，8 態、100 ns，一次 Engine 演化）。
 - 2026-11-23，[同頻多線摺成單 tone](./2026-11-23-same-carrier-merge.md)，`adopted`。同載波同形線合成一對 I/Q 算符，交給單 tone family。Plain RB 16.401 → 0.892 CPU s（`2b8f628c3` 對 `0d851985`，depth `[0,4,8]`、seed 701、sim seed 123、2 reps、1 round，單 worker 暖機後各一次）。
 - 2026-11-22，[FTF 真空續演化與 Markov chain](./2026-11-22-ftf-projective-markov.md)，`partial`。投影後清零腔場，讓同點、同層、同 DC 態只續演化一次。獨立同模型參考通過 41／75 個 key（`e602f0dc6`，兩個 floor，兩個縮樣讀出掃描及 heralded conditional phase 的首讀）。
