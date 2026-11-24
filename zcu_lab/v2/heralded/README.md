@@ -31,7 +31,7 @@ Registry key 是 `zcu_lab/v2/` 下的實驗目錄。GUI New Tab 與 MCP 的 `ope
 | `heralded/conditional_phase` | `two_qubit/conditional_phase_heralded` |
 | `heralded/conditional_spectroscopy` | `two_qubit/conditional_spectroscopy_heralded` |
 
-以上三個舊 tag 也是搬移前的 registry keys。現在不註冊這些 key，不留舊 Python import 路徑，也不新增舊 schema reader。搬移不改 cfg schema 或 HDF5 映射。開新入口後，用既有 **Load** 讀入同 schema 的搬移前 Native 檔。不相容的舊格式不因此變得可讀。五個新入口各自的 Native tag 與自己的 key 相同。
+以上三個舊 tag 也是搬移前的 registry keys。現在不註冊這些 key，不留舊 Python import 路徑，也不新增舊 schema reader。搬移不改 cfg schema 或 HDF5 映射。開新入口後，用既有 **Load** 讀入同 schema 的搬移前 Native 檔。不相容的舊格式不因此變得可讀。五個新入口中，`heralded/cz_optimize` 使用 Native tag `heralded/cz_optimize/fourier-v2`，其餘四個 tag 等於 registry key。CZ optimize 的舊節點格式不相容，請用原寫檔版本開啟。
 
 既有 MCP recipes 改名為 [`heralded_rb`](../../recipes/two-qubit-guide.md#heralded_rb) 和 [`heralded_conditional_phase`](../../recipes/two-qubit-guide.md#heralded_conditional_phase)。RB recipe 仍只回報 gg、ee 兩類各兩臂的品質欄位，主估計仍用四類。Conditional spectroscopy 沒有對應 recipe，直接開 tab。
 

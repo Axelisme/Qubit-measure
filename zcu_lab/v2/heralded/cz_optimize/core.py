@@ -39,11 +39,14 @@ from zcu_tools.program.v2.modules import MuxReadout
 from zcu_lab.v2.support import live_errorbar
 from zcu_lab.v2.support.cz_optimize_assets import capture_start_assets
 from zcu_lab.v2.support.cz_optimize_waveform import (
+    BETA_INDEX,
     GAIN_INDEX,
-    KNOT_COLUMNS,
+    I_RATIO_COUNT,
     PARAM_COUNT,
+    SEARCH_PARAM_COUNT,
     Z1,
     Z2,
+    FastDragStartCfg,
     StartShape,
     prepare_start,
 )
@@ -121,6 +124,13 @@ class HeraldedCZOptimizeCfg(ConfigBase):
             description="Use the same shape and duration on both lines. Evaluation 0 plays the original pulses.",
         ),
     ]
+    fast_drag_start: Annotated[
+        FastDragStartCfg | None,
+        FieldMeta(
+            label="FAST-DRAG start weights",
+            description="For a calibrated FAST-DRAG asset, enter its original Fourier weights and β. Evaluation 0 still plays the selected asset.",
+        ),
+    ] = None
     readout: Annotated[
         MuxReadout.Cfg,
         FieldMeta(
@@ -180,15 +190,24 @@ class HeraldedCZOptimizeCfg(ConfigBase):
             unit="count",
             description="How many CZ shapes to compare in each complete CMA-ES batch.",
         ),
-    ] = Field(default=4 + math.floor(3 * math.log(PARAM_COUNT)), strict=True, ge=2)
-    sigma_knot: Annotated[
+    ] = Field(
+        default=4 + math.floor(3 * math.log(SEARCH_PARAM_COUNT)), strict=True, ge=2
+    )
+    sigma_i_ratio: Annotated[
         float,
         FieldMeta(
-            label="Initial I/Q control-point spread",
-            unit="a.u.",
-            description="Initial standard deviation of each I/Q envelope control point around the baseline.",
+            label="Initial I harmonic ratio spread",
+            description="Initial standard deviation of each of the two free I weights relative to the fixed starting harmonic.",
         ),
     ] = Field(gt=0, allow_inf_nan=False)
+    sigma_beta_ns: Annotated[
+        float,
+        FieldMeta(
+            label="Initial FAST-DRAG β spread",
+            unit="ns",
+            description="Initial standard deviation of the signed derivative quadrature coefficient.",
+        ),
+    ] = Field(default=10.0, gt=0, allow_inf_nan=False)
     sigma_z_deg: Annotated[
         float,
         FieldMeta(
@@ -284,21 +303,14 @@ def _gain_coordinate(value: float, *, physical: bool) -> float:
 def _make_strategy(
     cfg: HeraldedCZOptimizeCfg, mean: NDArray[np.float64]
 ) -> tuple[cma.CMAEvolutionStrategy, NDArray[np.bool_]]:
-    """Set bounded knot/gain coordinates and unconstrained local Z."""
-    lower = np.r_[
-        [-1.0] * KNOT_COLUMNS,
-        _gain_coordinate(cfg.g_min, physical=False),
-        -np.inf,
-        -np.inf,
-    ]
-    upper = np.r_[
-        [1.0] * KNOT_COLUMNS,
-        _gain_coordinate(cfg.g_max, physical=False),
-        np.inf,
-        np.inf,
-    ]
+    """Set bounded log gain, with free I ratios, β and local Z."""
+    lower = np.full(SEARCH_PARAM_COUNT, -np.inf)
+    upper = np.full(SEARCH_PARAM_COUNT, np.inf)
+    lower[I_RATIO_COUNT + 1] = _gain_coordinate(cfg.g_min, physical=False)
+    upper[I_RATIO_COUNT + 1] = _gain_coordinate(cfg.g_max, physical=False)
     spread = np.r_[
-        [cfg.sigma_knot] * KNOT_COLUMNS,
+        [cfg.sigma_i_ratio] * I_RATIO_COUNT,
+        cfg.sigma_beta_ns,
         cfg.sigma_gain,
         cfg.sigma_z_deg,
         cfg.sigma_z_deg,
@@ -324,7 +336,8 @@ def _initial_coordinates(
     cfg: HeraldedCZOptimizeCfg, start: StartShape
 ) -> NDArray[np.float64]:
     return np.r_[
-        start.knots,
+        start.i_ratios,
+        start.beta_s * 1e9,
         0.0,
         cfg.phase_pair.correction_qubit1_deg,
         cfg.phase_pair.correction_qubit2_deg,
@@ -332,15 +345,22 @@ def _initial_coordinates(
 
 
 def _physical_params(
-    cfg: HeraldedCZOptimizeCfg, coordinates: NDArray[np.float64], *, wrap_angles: bool
+    cfg: HeraldedCZOptimizeCfg,
+    start: StartShape,
+    coordinates: NDArray[np.float64],
+    *,
+    wrap_angles: bool,
 ) -> NDArray[np.float64]:
     if not np.all(np.isfinite(coordinates)):
         raise ValueError("CZ optimizer coordinates must be finite")
-    params = coordinates.copy()
-    gain = _gain_coordinate(coordinates[GAIN_INDEX], physical=True)
+    params = np.r_[
+        start.expand_i(coordinates[:I_RATIO_COUNT]), coordinates[I_RATIO_COUNT:]
+    ]
+    params[BETA_INDEX] *= 1e-9
+    gain = _gain_coordinate(params[GAIN_INDEX], physical=True)
     # Preserve the physical endpoints despite ln/exp roundoff.
     params[GAIN_INDEX] = min(cfg.g_max, max(cfg.g_min, gain))
-    angles = coordinates[Z1:]
+    angles = params[Z1:]
     if wrap_angles:
         angles = 180.0 - (180.0 - angles) % 360.0
     params[Z1:] = np.deg2rad(angles)
@@ -465,6 +485,8 @@ def _plot_seed_returns(
 
 
 def _display_value(index: int, value: float) -> tuple[float, str]:
+    if index == BETA_INDEX:
+        return value * 1e9, "ns"
     if index in (Z1, Z2):
         return math.degrees(value), "deg"
     return value, ""
@@ -652,7 +674,9 @@ class HeraldedCZOptimizeExp(
         an incomplete generation. Zero envelopes are unmeasured with loss 1.
         """
         start_assets = capture_start_assets(cfg.drive)
-        start = prepare_start(cfg.drive, context.soccfg, g_max=cfg.g_max)
+        start = prepare_start(
+            cfg.drive, context.soccfg, g_max=cfg.g_max, fast_drag=cfg.fast_drag_start
+        )
         initial = _initial_coordinates(cfg, start)
         strategy, active = _make_strategy(cfg, initial)
         # ADR-0072: share the sequence, not RB's acquisition or analysis.
@@ -682,8 +706,8 @@ class HeraldedCZOptimizeExp(
         )
 
         # Measure the calibrated pair as provided. The saved row-zero parameters
-        # describe the separate symmetric fit used to seed the optimizer.
-        result.params[0] = _physical_params(cfg, initial, wrap_angles=False)
+        # describe the separate Fourier shape used to seed the optimizer.
+        result.params[0] = _physical_params(cfg, start, initial, wrap_angles=False)
         population: list[NDArray[np.float64]] = []
         losses: list[float] = []
         best_target = np.nan
@@ -699,7 +723,7 @@ class HeraldedCZOptimizeExp(
                     coordinates = initial.copy()
                     coordinates[active] = population[member]
                     result.params[index] = _physical_params(
-                        cfg, coordinates, wrap_angles=True
+                        cfg, start, coordinates, wrap_angles=True
                     )
                     result.peak[index], candidate = _render_candidate_cfg(
                         cfg, result, index
