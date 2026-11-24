@@ -169,7 +169,7 @@ The warm follow-up compares `381ce160` → `387b988e`, manifest `3b73a371d789355
 
 The [paused attempt](2026-11-24-sampled-rwa-predicted-rejection.md#實測) recorded one complete Run per scene at `234bf075f` with the block 2 manifest `c2b6b9e0522e`. It used the offline `ftf-demo:initial` fixture, seed 123, `time_scale=0`, CPU affinity 0–3, one worker and one native thread, with OpenCL off. Chevron was the first Run in the first runner, after a reconstructed positive Engine check. Heralded RB was the first Run in a second runner that reused the first batch's private cache. Both rows carry `cold_start=true`, which marks runner order, not an empty cache.
 
-These are the completed Result point counts and whole-Run `core_s` and `wall_s` totals from each case's `row.json`. They include capture instrumentation. There was no candidate or before/after measurement, so the audit establishes no time savings. Shaped Sambe changed between `234bf075f` and `af299a176`. The readings describe only the pinned revision, not current main. They do not change the survey scores, order or timeouts.
+These are the completed Result point counts and whole-Run `core_s` and `wall_s` totals from each case's `row.json`. They include capture instrumentation. There was no candidate or before/after measurement, so the audit establishes no time savings. Shaped Sambe changed between `234bf075f` and `af299a176`. The readings describe only the pinned revision, not current main. Audit runners A and B both used `--row-timeout 360` to set the per-Run limit. The original survey used a 180 s Run limit, so the audit does not replace its timeout rows or change its scores or order.
 
 | Scene | Result points | Core s total | Wall s total |
 | --- | ---: | ---: | ---: |
