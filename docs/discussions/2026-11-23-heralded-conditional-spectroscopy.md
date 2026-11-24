@@ -35,3 +35,7 @@ basis: 8cd18afcda65bba24a81f0b7e6c03b8e7f56e613
 ## 依據
 
 2026-11-23 使用者裁決。原始決策前工作檔未入庫。[一般條件頻譜 guide](../../zcu_lab/v2/two_qubit/conditional_spectroscopy/guide.md) 記錄名目準備入口的行為。
+
+## 後記
+
+2026-11-24，入口移到 [`heralded/conditional_spectroscopy`](../../zcu_lab/v2/heralded/conditional_spectroscopy/guide.md)，保留原 Native tag 與 schema。名目準備在前、按實測類別分開分析的做法不變。保留多類已成為家族規則，不再視為共同擬合規則的例外。見[獨立 heralded 家族的討論](2026-11-24-heralded-family.md)。

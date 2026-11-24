@@ -41,3 +41,7 @@ Heralded conditional spectroscopy 的四個分支是各自的分析對象，維�
 ## 依據
 
 本 repo `2b8f628c3` 的兩個 heralded 入口、[v2 README](../../zcu_lab/v2/README.md)〈gg／ee 共用參數〉與 2026-11-23 的使用者裁決。當時的裁決原檔未入庫；本文保留顯示取捨及不變的分析行為。
+
+## 後記
+
+2026-11-24，RB 與 conditional phase 搬入 heralded 家族。主估計用 gg、ge、eg、ee，兩類的舊描述不再適用。保留分組診斷；主圖用當點實收計數合併量測，擬合線用相應的權重組合各類預測，不另擬合合併點。見[獨立 heralded 家族的討論](2026-11-24-heralded-family.md)及 [RB](../../zcu_lab/v2/heralded/rb/guide.md)、[conditional phase](../../zcu_lab/v2/heralded/conditional_phase/guide.md) 的現行 guides。

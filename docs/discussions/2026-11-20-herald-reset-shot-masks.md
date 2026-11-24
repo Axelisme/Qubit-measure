@@ -286,3 +286,5 @@ Two-qubit 實驗要排除初始化不在指定態的 shot 時，只能改用另�
 - plain `two_qubit/rb` 的終端讀取是 mux readout，所以只接受 `reset/mux_herald`。`reset/herald` 在 cfg 驗證時就被拒收。
 
 2026-11-20，使用者推翻保留全部九個獨立入口的裁決。只保留 RB 與 conditional phase 的獨立 heralded 入口，其餘七個在一般入口選 `reset/mux_herald`。取數遮罩與 reset 的放置不變。分析只看已完成 rounds 的計數，不要求跑完所有指定 rounds，見 [ADR-0074〈分類計數〉](../adr/0074-flat-readout-module.md#herald-reset-與逐-shot-遮罩)。分化入口的判斷依據見[只為共用參數保留獨立 heralded 實驗](2026-11-20-heralded-experiment-pruning.md)。
+
+2026-11-24，[獨立 heralded 家族的討論](2026-11-24-heralded-family.md)更新了入口的保留條件。這只改需要保存多類時的實驗入口，不改 reset 遮罩。`reset/herald` 與 `reset/mux_herald` 仍只保留 `keep` 指定的一類。

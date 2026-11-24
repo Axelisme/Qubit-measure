@@ -2,7 +2,7 @@
 
 **讀者：** lab-author、agent。查找實驗的檔案分工、作者契約與各家族入口。
 
-**Last updated:** 2026-11-24，新增 heralded CZ optimize
+**Last updated:** 2026-11-24，heralded 家族
 
 先從 [tutorial](../tutorial/README.md) 新增實驗，再按下列入口查契約與操作。
 實驗定義改動的驗收方式與命令範例見 [離線驗收](../README.md#實驗定義的離線驗收)。
@@ -12,7 +12,7 @@
 - 寫或改實驗：讀 [實驗寫法指南](experiment-style.md)，從其中的範本開始寫。
 - 設計 liveplot 與 Analyze 圖、檢查操作員能否判讀：讀 [實驗呈現指南](figure-style.md)。圖顯示後的 artist 更新與 refresh 契約見 [plotting〈原生 matplotlib 更新〉](../../lib/zcu_tools/plotting/README.md#原生-matplotlib-更新)。
 - [Two-qubit bring-up 與 CZ 校準](two_qubit/guide.md) 說明 Qubit1、Qubit2 的單 qubit 校準、位置綁定、舊 point 重綁與資料保存。FTF 控制鏈可執行仍不代表物理校準或 fidelity 已驗收。
-  - 一般入口用 reset 選擇 herald。獨立 `heralded/` 家族的 RB 與 conditional phase 聯合分析 gg、ge、eg、ee；heralded conditional spectroscopy 改在名目準備後分類，分出四個實測分支。見[完整清單](#two-qubit-實驗清單)。
+- [Heralded 實驗家族](heralded/README.md) 列出八個保留多類 herald 計數的入口。用各入口的 guide 判讀主估計和診斷。
 - [K-cycle 讀出鏈 amp Rabi](chain/amp_rabi/guide.md)、[len Rabi](chain/len_rabi/guide.md)、[T1](chain/t1/guide.md)、[T2 Ramsey](chain/t2ramsey/guide.md) 與 [T2 echo](chain/t2echo/guide.md) 說明每個 rep 是一個 cycle（K 後 (D, 讀, 讀) × 8）、兩條 live 曲線、聯合擬合與 joint residual 的判讀方式。數值契約見 [analysis〈Readout chain K-cycle〉](../../lib/zcu_tools/analysis/README.md#readout-chain-k-cycle)。
 - [`twotone/t1_cov`](twotone/time_domain/t1_cov/guide.md) 用兩次單 tone 讀出的二階矩自校準，擬合狀態改變機率以估計 T1。可選脈衝 reset，不需 classifier。
 - [Experiment authoring](experiment-authoring.md) 說明核心 records 與資料形狀，新實驗從[寫法慣例](experiment-authoring.md#寫法慣例)選 cfg、分析與圖 API 的寫法。
@@ -24,46 +24,28 @@
 
 ## Two-qubit 實驗清單
 
-Open／Defaults 使用 point aliases `qubit1`、`qubit2` 和 `mux`。表單不限制 qubit 的物理子種類或 coupler 的種類，仍要求 `group/mux` 並檢查有序的 qubit／resonator 綁定。兩個位置須綁不同元件，且都在 `$mux.qubits` 中。`joint_readout`、`idle_zz` 和兩個 conditional spectroscopy 入口不要求 `$coupler`。其餘入口須綁 `$coupler`，它是這對 qubit 的 CZ 校準來源或寫回目標。
+Open／Defaults 使用 point aliases `qubit1`、`qubit2` 和 `mux`。表單要求 `group/mux`，並檢查有序的 qubit／resonator 綁定。兩個位置須綁不同元件，且都在 `$mux.qubits` 中。表單不限制 qubit 的物理子種類或 coupler 的種類。`joint_readout`、`idle_zz` 和 `conditional_spectroscopy` 不要求 `$coupler`。其餘入口要求 `$coupler` 作為這對 qubit 的 CZ 校準來源或寫回目標。
 
-下表列出雙 qubit 實驗的 GUI／MCP registry keys。每個連結指向該入口的 guide。
+下表列出 `two_qubit/` 的 GUI／MCP registry keys。每個連結指向該入口的 guide。
 
-| 實驗 | 一般 key／guide | Heralded key／guide |
-| --- | --- | --- |
-| Joint readout | [`two_qubit/joint_readout`](two_qubit/joint_readout/guide.md) | — |
-| Conditional phase | [`two_qubit/conditional_phase`](two_qubit/conditional_phase/guide.md) | [`heralded/conditional_phase`](heralded/conditional_phase/guide.md) |
-| Chevron | [`two_qubit/chevron`](two_qubit/chevron/guide.md) | — |
-| Conditional spectroscopy | [`two_qubit/conditional_spectroscopy`](two_qubit/conditional_spectroscopy/guide.md) | [`heralded/conditional_spectroscopy`](heralded/conditional_spectroscopy/guide.md) |
-| Constructive phase | [`two_qubit/constructive_phase`](two_qubit/constructive_phase/guide.md) | — |
-| CZ amplitude | [`two_qubit/cz_amplitude`](two_qubit/cz_amplitude/guide.md) | — |
-| Idle ZZ | [`two_qubit/idle_zz`](two_qubit/idle_zz/guide.md) | — |
-| Local Z | [`two_qubit/local_z`](two_qubit/local_z/guide.md) | — |
-| Paired RB／IRB | [`two_qubit/rb`](two_qubit/rb/guide.md) | [`heralded/rb`](heralded/rb/guide.md) |
-| CZ optimize | [`two_qubit/cz_optimize`](two_qubit/cz_optimize/guide.md) | [`heralded/cz_optimize`](heralded/cz_optimize/guide.md) |
+| 實驗 | Registry key／guide |
+| --- | --- |
+| Joint readout | [`two_qubit/joint_readout`](two_qubit/joint_readout/guide.md) |
+| Conditional phase | [`two_qubit/conditional_phase`](two_qubit/conditional_phase/guide.md) |
+| Chevron | [`two_qubit/chevron`](two_qubit/chevron/guide.md) |
+| Conditional spectroscopy | [`two_qubit/conditional_spectroscopy`](two_qubit/conditional_spectroscopy/guide.md) |
+| Constructive phase | [`two_qubit/constructive_phase`](two_qubit/constructive_phase/guide.md) |
+| CZ amplitude | [`two_qubit/cz_amplitude`](two_qubit/cz_amplitude/guide.md) |
+| Idle ZZ | [`two_qubit/idle_zz`](two_qubit/idle_zz/guide.md) |
+| Local Z | [`two_qubit/local_z`](two_qubit/local_z/guide.md) |
+| Paired RB／IRB | [`two_qubit/rb`](two_qubit/rb/guide.md) |
+| CZ optimize | [`two_qubit/cz_optimize`](two_qubit/cz_optimize/guide.md) |
 
-一般入口保存兩個位置的 9 類 terminal 聯合計數。除了 `conditional_phase`，表內一般入口可用 `reset/mux_herald` 在序列前篩選 shot，仍只保存這 9 類終端計數。`heralded/` 入口保存 81 類 herald × 終端計數。RB 與 conditional phase 用 herald gg、ge、eg、ee 聯合擬合；conditional spectroscopy 合併名目準備後畫 herald gg、ge、eg、ee 四支頻譜。採樣與保存量見 [two-qubit guide](two_qubit/guide.md#採樣數與成本)。
+一般入口保存兩個位置的 9 格終端聯合計數。除了 `conditional_phase`，表內入口可用 `reset/mux_herald` 在序列前篩選 shot，仍只保存這 9 格終端計數。採樣與保存量見 [Two-qubit guide](two_qubit/guide.md#採樣數與成本)。
 
 ### 何時保留獨立 heralded 入口
 
-#### 多分類共同擬合
-
-需要保留多個 herald 分類時，在 New Tab 選獨立的 `heralded/` 入口。一般入口的 `reset/mux_herald` 只保留 `keep` 指定的單一分類。
-
-[Heralded RB](heralded/rb/guide.md) 的 gg、ge、eg、ee 各自擬合振幅與偏移，每個 arm 共用衰減參數 `p`。[Heralded conditional phase](heralded/conditional_phase/guide.md) 先對齊各類的實際 spectator 和投影符號，再共同擬合斜率。兩個入口都不拿缺類結果當作共同估計。2026-11-20 的[共用參數討論](../../docs/discussions/2026-11-20-heralded-experiment-pruning.md)記錄原先只擬合 gg 和 ee 的取捨。
-
-#### 固定深度回返率搜尋
-
-[Heralded CZ optimize](heralded/cz_optimize/guide.md) 用同一組固定深度的 interleaved 序列比較原 CZ 與等長 arb 候選。它不加名目準備，將四個實測 herald 類別的回返率等權平均，再對設定的 seeds 等權平均。任一 seed 缺類就不能給該評估分數。搜尋不估衰減參數或閘誤差。
-
-#### 依 probe 前實測類別分開分析
-
-**規則。** 分析要依 probe 前的實測類別分開，且 gg、ge、eg、ee 各自都是分析對象時，保留獨立 heralded 入口，不要求各分支共用擬合參數。先做四種名目 I／Xπ 準備，使各類取得相近的 shot 數，再做 herald 分類。不要用 reset 先丟掉其他類別。
-
-**例子。** [`heralded/conditional_spectroscopy`](heralded/conditional_spectroscopy/guide.md) 依準備後的 herald 類別畫四支頻譜，不做聯合擬合。
-
-**邊界。** 只需要篩選初態的實驗使用 `reset/mux_herald`，不另開入口。
-
-**依據。** 2026-11-23，使用者說：「我覺得你應該安排的不是準備在gg/ge/eg/ee，而是post-selection分類gg/ge/eg/ee」、「你還是可以用pi來製備來是分類比例與熱態無關」、「你搞錯了…當然是先打Xpi然後在herald讀出」，並對更正後的獨立入口方案答「可以」。見[以準備後的 herald 分支量條件頻譜](../../docs/discussions/2026-11-23-heralded-conditional-spectroscopy.md)。
+`reset/herald` 和 `reset/mux_herald` 只保留 `keep` 指定的單一類。要保存多個 herald 分類，選與 `two_qubit` 並列的 [heralded 實驗家族](heralded/README.md)。家族 README 列出八個入口的用途、各自的 guide，以及搬移前 Native 檔如何載入。跨實驗的規則見 [ADR-0074](../../docs/adr/0074-flat-readout-module.md#保留獨立-heralded-實驗的條件)。
 
 ### Two-qubit 持久名稱
 
@@ -77,7 +59,7 @@ Open／Defaults 使用 point aliases `qubit1`、`qubit2` 和 `mux`。表單不�
 | CZ phase 校準 | `$coupler.ext.cz_phase.qubit1`、`$coupler.ext.cz_phase.qubit2`；`$coupler.ext.cz_phase.correction_qubit1_deg`、`$coupler.ext.cz_phase.correction_qubit2_deg` | [Local Z](two_qubit/local_z/gui.py) 與 兩個 CZ optimize 入口的 writeback 提案；Apply 後同一筆參數記錄有序元件名與兩個角度。 | RB 與 CZ optimize 的兩個版本表單共用 [`captured_phase_pair`](support/measure/cz_phase.py)，核對來源元件名再取角度初值。 |
 | Native HDF5 變數名 | `sums`；CZ optimize 另存具名參數（如 `i_knot_1`、`q_knot_1`、`gain_scale`）、`peak` 和起點顯示資料（如 `start_iq`、`start_style`） | 各 core 的 `AXES_SPEC` 宣告 `VariableSpec.variable`，例如 [joint readout](two_qubit/joint_readout/core.py) 與 [CZ optimize](two_qubit/cz_optimize/core.py)；[`save_run`](../../lib/zcu_tools/experiment/native_persistence.py) 寫入 `/vars`。 | Native Load 的 [`restore_run`](../../lib/zcu_tools/experiment/native_persistence.py) 按同一宣告讀取，再交給實驗的 `result_builder`。 |
 | CZ 起點時長 | `/docs/run_values` 的 `duration`（秒） | CZ optimize 的 [普通](two_qubit/cz_optimize/_result.py)與 [heralded](heralded/cz_optimize/_result.py) Result spec 均宣告必填 `RunValueSpec`。 | Native Load 還原 `start_duration_s`；缺欄或缺文件時拒讀。 |
-| Heralded registry key 與 Native tag | New Tab 用 `heralded/<實驗名>`。三個從 two-qubit 搬出的入口保留各自的 Native tag。 | 寫檔用各 core 的 `AXES_SPEC.tag`。新 CZ optimize 入口用 `heralded/cz_optimize`。 | 搬移前同 schema 的結果用新入口 Load。兩個 CZ optimize 入口的 Native tag 和計數映射不同。 |
+| Heralded registry key 與 Native tag | [入口與 Native tag 對照](heralded/README.md#開新-tab-與載入搬移前的結果) | New Tab／MCP 用 registry key。寫檔用該實驗的 `AXES_SPEC.tag`。 | 搬移前同 schema 的結果用新入口 Load。普通與 heralded CZ optimize 的 Native tag 和計數映射不同。 |
 | Native HDF5 的分類軸名 | `terminal_qubit1`、`terminal_qubit2`；`heralded/` 入口另有 `herald_qubit1`、`herald_qubit2`。普通 CZ optimize 的分類軸是 `Qubit1 class`、`Qubit2 class`。 | 各 core 的 `AXES_SPEC` 宣告 `VariableAxisSpec.label`，例如 [heralded RB](heralded/rb/core.py)、[heralded CZ optimize](heralded/cz_optimize/_result.py) 與 [普通 CZ optimize](two_qubit/cz_optimize/core.py)。 | Native Load 用 [`VariableSpec.loaded_from_variable`](../../lib/zcu_tools/experiment/axes_spec.py) 核對同一宣告的軸名。 |
 
 ## 套件邊界
@@ -110,7 +92,7 @@ AC Stark／CKP 的連續共振中心擷取在 [support/resonance.py](support/res
 [Duration fit](support/rabi_duration.py) 擁有普通 Chevron、Constructive Phase 與 heralded Chevron 的加權餘弦擬合，普通 CZ amplitude 只用該餘弦畫首週擬合線。
 各實驗保留自己的序列和圖。[paired_counts.py](support/paired_counts.py) 檢查分類校準並換算計數，不讀 alias 或元件。
 Two-qubit 與 heralded RB 共用 [paired RB analysis](support/paired_rb_analysis.py) 的 `RBOptions` 與 `RBEstimate`。Notebook 從該模組 import 這兩個型別。
-Two-qubit 的 conditional phase 與 heralded conditional phase 呼叫 `fit_phase_slopes`；斜率的單位與週期代表值見 [fitting〈Phase regressions〉](../../lib/zcu_tools/analysis/fitting/README.md#phase-regressions)。
+Conditional phase 的斜率單位與週期代表值見 [fitting〈Phase regressions〉](../../lib/zcu_tools/analysis/fitting/README.md#phase-regressions)。`two_qubit` 與 `heralded` 不互相 import；共用的 Lab 支援與擬合 owner 見 [Heralded 家族的共用規則](heralded/README.md#共用規則在哪裡)。
 Readout-chain 的 chain_power／chain_freq／chain_length 各自在 `run()` 寫出掃描與 16-read shot，
 並在自己的 core 建立及更新 live／metric 三 panel，數值分數交給 `zcu_tools.analysis.readout_chain`。
 [\_chain_common.py](twotone/ro_optimize/_chain_common.py) 只保留保存映射、完成點篩選與最佳 setting 摘要型別。

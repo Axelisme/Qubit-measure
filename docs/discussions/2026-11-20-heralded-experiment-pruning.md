@@ -1,7 +1,7 @@
 ---
 date: 2026-11-20
-status: active
-superseded_by: null
+status: superseded
+superseded_by: 2026-11-24-heralded-family.md
 related:
   - docs/adr/0074-flat-readout-module.md
   - docs/discussions/2026-11-20-herald-reset-shot-masks.md
@@ -82,3 +82,5 @@ Idle ZZ 的核對對每個實際 spectator 態用單一阻尼 cosine 擬合。�
 ## 後記
 
 2026-11-23，[heralded conditional spectroscopy](2026-11-23-heralded-conditional-spectroscopy.md) 新增一個例外：分析需要依 probe 前的實測類別分開，不共用擬合參數。原共用參數原則與新例外均移到 [Two-qubit 實驗清單〈何時保留獨立 heralded 入口〉](../../zcu_lab/v2/README.md#何時保留獨立-heralded-入口)。先前的取數層遮罩決策仍在 [ADR-0074](../adr/0074-flat-readout-module.md#herald-reset-與逐-shot-遮罩)。
+
+2026-11-24，使用者以「分析需要保留一類以上」取代「只為共用參數保留入口」的限制。兩種 herald reset 仍只留 `keep` 指定的一類。保留先前的準備污染分析；新的 Idle ZZ 仍不把 spectator herald e 用於主估計。實驗不再限於原先兩個入口，見[獨立 heralded 家族的討論](2026-11-24-heralded-family.md)與 [ADR-0074](../adr/0074-flat-readout-module.md#保留獨立-heralded-實驗的條件)。

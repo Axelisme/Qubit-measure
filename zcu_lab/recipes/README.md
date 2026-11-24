@@ -180,7 +180,7 @@ Runtime 回覆 `status="cancelled"`、`report=null` 與各次 `runs`。
 用 `recipe_guide(adapter="twotone/t1")` 依 adapter 名查 operator guide。
 Recipe 可以串多個 adapter，宣告不另設單一 adapter mapping。
 十二個 mux 的輸入、原始 tone 位置與報告見 [mux guide](mux-guide.md)。
-Two-qubit 的位置綁定、舊 point 重綁、herald reset、寫回與 RB 波形覆寫見 [two-qubit guide](two-qubit-guide.md)。
+Two-qubit 的位置綁定、舊 point 重綁、herald reset、寫回與 RB 波形覆寫見 [two-qubit guide](two-qubit-guide.md)。[Heralded 家族](../v2/heralded/README.md) 列出八個可直接開啟的 tab；下表的 `heralded_rb` 和 `heralded_conditional_phase` 是這個家族的兩個 recipes，名稱不同於 registry key。
 
 三個 thermal-chain ro_optimize recipe 以 K 等待熱平衡，再無 drive 連讀 16 次。
 `relax_delay` 設 K，單位 µs。K 後熱態不同於 readout-driven steady state。
