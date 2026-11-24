@@ -1,6 +1,6 @@
 # FTF environment composition
 
-**Last updated:** 2026-11-24, per-evolve segment budget
+**Last updated:** 2026-11-24, sampled RWA probe lifetime and simulator optimization index
 
 **讀者：** framework-dev、agent。FTF 環境的組裝接縫、數值接線與 acquisition 契約。
 
@@ -274,24 +274,6 @@ Other calls own a threading pool only during `evolve`; no idle pool survives.
 It clears source-owned routing history but preserves caller-borrowed history.
 Dropping the environment also releases this in-memory state; no disk cache is involved.
 
-For each acquisition call to `Engine.evolve`, FTF sets the per-segment accuracy
-budget to `clamp(1e-2 / N, 1e-3, 1e-2)`. N is the largest **segment count of
-any one point** across the batches in that call. FTF computes it at the Engine
-handoff using `segment_spans`, the Engine's public partition. It counts
-positive-length spans from each point's continuation start, or zero, to its
-readout start. Idle spans count because they apply a propagator. Flux events,
-active microwave edges and plateaus, and explicit boundaries can split a
-span. Inactive, zero-gain and zero-length microwave controls add no edges.
-A call with N=0 gets `1e-2`; a call with N ≥ 10 keeps `1e-3`.
-
-Each isolated dimension pilot solve and its remaining production batch use
-their own geometry. Cavity and projective continuations already submit at most
-one evolving span per point per call and use `1e-2` without repartitioning.
-In a mixed cavity acquire the plain batch gets its own budget. An acquire with
-a long original timeline may still make short calls after splitting. FTF
-keeps each production solve's budget with its digest and supplies the same
-pair to `Engine.reuse`. Standalone startup warm-up budgets do not change.
-
 ### Physical facts and conditional readout
 
 The source retains at most one snapshot's `FTFModelFacts` across acquires.
@@ -389,8 +371,6 @@ The decision does not require telemetry to be enabled.
 If the check pays back, FTF evolves the pilot once at k. It accepts k only when
 the zero-padded density differs from the upper reference by at most `1e-3` in
 every entry. This checks accuracy on the pilot, not on untested sweep points.
-The drop cutoff and basis check stay at `5e-4` and `1e-3`: they limit the
-error from changing the basis, not the error allowance for routing each span.
 
 The reduced model projects the initial state onto the energy prefix and
 renormalizes it. The first successful selection fixes the batch dimension across
@@ -440,9 +420,8 @@ A later round at a changed snapshot keeps its session's N and can reuse that
 round's preparation locally. A new acquire at that snapshot runs its own pilot. These caches never retain request seeds,
 acquire sequences, noisy IQ or round results. Hits update
 numeric-use identity and repeat report-only accuracy warnings through evolution's
-`PathDiagnostics.warn_exceeded()`. Hits pass each solve's original digest and
-budget to `Engine.reuse` to resolve the current selection from immutable
-inventory and pricing facts. FTF neither inspects
+`PathDiagnostics.warn_exceeded()`. Hits ask `Engine.reuse` to resolve the current
+selection from immutable inventory and pricing facts. FTF neither inspects
 cumulative source counters nor infers history sensitivity from count increments. An unchanged
 selection returns the saved preparation without template conversion, geometry,
 WorkPlan construction, numerical preparation, population conversion or cache put.
@@ -723,9 +702,9 @@ Engine exceptions retain their type and get a note with the batch context.
 See [ADR-0078](../../../../../docs/adr/0078-evolution-module-boundary.md#黑盒邊界是-simulateevolution)
 and [Debug capture](#debug-capture).
 
-Each cavity-driven preparation retains all span reuse keys and their budgets.
-Cache hits pass each pair to `Engine.reuse`. Projective span keys include the
-node row IDs, initial densities and span shifts. A failed or cancelled batch publishes
+Each cavity-driven preparation retains all span reuse keys. Cache hits check
+every key through `Engine.reuse`. Projective span keys include the node row
+IDs, initial densities and span shifts. A failed or cancelled batch publishes
 no partial preparation.
 
 One ADC `CavityAverageCache` serves each cavity span composition. FTF sets a

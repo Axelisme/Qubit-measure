@@ -83,7 +83,7 @@ from zcu_tools.simulators.ftf.environment.dimension import (
     pilot_size,
 )
 from zcu_tools.simulators.ftf.environment.drift import FTFCoherenceDrift
-from zcu_tools.simulators.ftf.environment.numeric import EvolutionReuse
+from zcu_tools.simulators.ftf.environment.numeric import EVOLUTION_BUDGET
 from zcu_tools.simulators.ftf.environment.preparation import (
     EnvelopeEncoder,
     PreparationCache,
@@ -137,7 +137,7 @@ class _Prepared:
     paths: PathDiagnostics
     sampler: PreparedStatistics | None
     raw: PreparedRawShots
-    reuse: tuple[EvolutionReuse, ...]
+    reuse_keys: tuple[bytes, ...]
     projection_continued_states: tuple[tuple[int, ...], ...]
     projection_identity_weight: tuple[tuple[float, ...], ...]
     projective_spans: tuple[ProjectiveNodeSpan, ...]
@@ -537,8 +537,8 @@ class FTFAcquire:
                 )
                 # Reprice the original solve shape before reusing its populations.
                 if all(
-                    owner.engine.reuse(model, solve.key, budget=solve.budget)
-                    for solve in previous.reuse
+                    owner.engine.reuse(model, reuse_key, budget=EVOLUTION_BUDGET)
+                    for reuse_key in previous.reuse_keys
                 ):
                     self._remember_dimension(key, dimension)
                     return self._reuse(previous, index, len(model.initial_density))
@@ -613,13 +613,11 @@ class FTFAcquire:
         options: CavityEvolutionOptions,
         model: ModelSource,
         reference: EvolutionResult | None,
-    ) -> tuple[
-        EvolutionResult, tuple[EvolutionReuse, ...], ProjectionChainEvolution | None
-    ]:
+    ) -> tuple[EvolutionResult, tuple[bytes, ...], ProjectionChainEvolution | None]:
         owner = self._source
         settings = owner.effective_settings
         if model is not facts.source or reference is not None:
-            evolved, reuse = evolve_terminal(
+            evolved, keys = evolve_terminal(
                 owner.engine,
                 model,
                 plans,
@@ -627,16 +625,16 @@ class FTFAcquire:
                 upper=len(facts.source.initial_density),
                 reference=reference,
             )
-            return evolved, reuse, None
+            return evolved, keys, None
         if any(any(plan.projective_reads) for plan in plans):
             projection = evolve_projection_chain(
                 owner.engine, plans, facts, settings, options=options
             )
-            return projection.result, projection.reuse, projection
-        evolved, reuse = evolve_plans(
+            return projection.result, projection.reuse_keys, projection
+        evolved, keys = evolve_plans(
             owner.engine, plans, facts, settings, options=options
         )
-        return evolved, reuse, None
+        return evolved, keys, None
 
     def _prepare(
         self,
@@ -662,7 +660,7 @@ class FTFAcquire:
         )
         _validate_event_layouts(plans)
         model, reference = self._round_model(plans, facts, options)
-        evolved, reuse, projection = self._evolve(
+        evolved, reuse_keys, projection = self._evolve(
             plans, facts, options, model, reference
         )
         if owner.telemetry is not None:
@@ -733,7 +731,7 @@ class FTFAcquire:
             evolved.paths.for_reuse(telemetry=False),
             sampler,
             raw,
-            reuse,
+            reuse_keys,
             continued,
             identity_weight,
             report.projective_spans,

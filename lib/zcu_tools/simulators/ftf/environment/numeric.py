@@ -1,13 +1,10 @@
-"""FTF numeric input translation and evolution budget policy."""
-
-from collections.abc import Sequence
-from dataclasses import dataclass
+"""Named resource-to-numeric translation; no YAML or solver internals."""
 
 import numpy as np
 from numpy.typing import NDArray
 
 from zcu_tools.simulate.boundary import EnvironmentSnapshot
-from zcu_tools.simulate.evolution import DriveSource, TimelineBatch, segment_spans
+from zcu_tools.simulate.evolution import DriveSource
 from zcu_tools.simulators.ftf.config import FTFSettings
 from zcu_tools.simulators.ftf.config.schema import Fluxonium, FluxoniumTruncation
 from zcu_tools.simulators.ftf.config.schema import Resonator as ResourceResonator
@@ -19,44 +16,8 @@ from zcu_tools.simulators.ftf.physics import (
     SquidCircuit,
 )
 
-_MIN_EVOLUTION_BUDGET = 1e-3
-SINGLE_SPAN_BUDGET = 1e-2
-
-
-@dataclass(frozen=True)
-class EvolutionReuse:
-    """One production evolve's content digest and per-segment budget for reuse.
-
-    key is the original caller-owned reuse_key. budget is the same positive
-    absolute allowance passed to that evolve, not a fresh budget for the acquire.
-    """
-
-    key: bytes
-    budget: float
-
-
-def evolution_budget(batches: Sequence[TimelineBatch]) -> float:
-    """Return the clamped per-segment allowance for the supplied evolve inputs.
-
-    Count positive-length spans from each point's continuation start (or time
-    zero), using the public Engine partition (ADR-0078). Divide 1e-2 by the
-    largest point count, capped to [1e-3, 1e-2]. Empty work gets 1e-2.
-    """
-    longest = 0
-    for batch in batches:
-        spans = segment_spans(batch)
-        if batch.start_ns is None:
-            count = max(map(len, spans), default=0)
-        else:
-            count = max(
-                (
-                    sum(1 for left, _ in point_spans if left >= start)
-                    for point_spans, start in zip(spans, batch.start_ns, strict=True)
-                ),
-                default=0,
-            )
-        longest = max(longest, count)
-    return max(_MIN_EVOLUTION_BUDGET, SINGLE_SPAN_BUDGET / max(1, longest))
+# Absolute allowance shared by FTF acquisition and its dimension verification.
+EVOLUTION_BUDGET = 1e-3
 
 
 def circuit(value: Fluxonium, truncation: FluxoniumTruncation) -> FluxoniumCircuit:

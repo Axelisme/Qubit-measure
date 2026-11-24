@@ -33,12 +33,7 @@ from zcu_tools.simulate.evolution import (
     segment_spans,
 )
 from zcu_tools.simulators.ftf.config import FTFSettings
-from zcu_tools.simulators.ftf.environment.numeric import (
-    SINGLE_SPAN_BUDGET,
-    EvolutionReuse,
-    evolution_budget,
-    resonators,
-)
+from zcu_tools.simulators.ftf.environment.numeric import EVOLUTION_BUDGET, resonators
 from zcu_tools.simulators.ftf.environment.template import FTFModelFacts, FTFTemplatePlan
 from zcu_tools.simulators.ftf.physics import CavityDrive
 
@@ -131,11 +126,7 @@ class _CavityTimeline:
     def advance(
         self, step: int, *, points: NDArray[np.int64] | None = None
     ) -> TimelineBatch:
-        """Advance fields and build a batch with at most one evolved span per point.
-
-        Completed points have equal start and end times. The optional points
-        array labels the returned rows without changing their timeline order.
-        """
+        """Build this span's inputs and advance fields; points can label the solve."""
         starts = self.batch.end_ns.copy()
         ends = self.batch.end_ns.copy()
         shifts = []
@@ -215,7 +206,7 @@ class ProjectiveSpan:
 
 @dataclass(frozen=True)
 class _ProjectiveSpanResult:
-    reuse: EvolutionReuse
+    key: bytes
     paths: PathDiagnostics
     diagnostic: ProjectiveSpan
 
@@ -227,7 +218,7 @@ class ProjectionEvolution:
     result: final density mixtures and merged evolution diagnostics.
     readout: normalized weights and conditional populations for every ordered
         logical event, including an unobserved terminal event.
-    reuse: continuation digests and budgets for all solves, including projected inputs.
+    reuse_keys: all engine continuation digests, including projected densities.
     outcomes: retained history count per point, including zeros when floor=0.
     pruned_weight: cumulative removed probability per point before redistribution.
     spans: author diagnostics for every completed span, with Engine row IDs.
@@ -235,7 +226,7 @@ class ProjectionEvolution:
 
     result: EvolutionResult
     readout: ProjectionReadout
-    reuse: tuple[EvolutionReuse, ...]
+    reuse_keys: tuple[bytes, ...]
     outcomes: tuple[int, ...]
     pruned_weight: tuple[float, ...]
     spans: tuple[ProjectiveSpan, ...]
@@ -409,7 +400,7 @@ def _evolve_outcomes(
                 result = engine.evolve(
                     facts.source,
                     batches,
-                    budget=SINGLE_SPAN_BUDGET,
+                    budget=EVOLUTION_BUDGET,
                     cancel=options.cancel,
                     telemetry=options.telemetry,
                     capture=options.capture,
@@ -440,7 +431,7 @@ def _evolve_outcomes(
             rows[row_id].timeline.density = density[None]
         results.append(
             _ProjectiveSpanResult(
-                EvolutionReuse(key, SINGLE_SPAN_BUDGET),
+                key,
                 result.paths,
                 ProjectiveSpan(
                     point,
@@ -544,7 +535,7 @@ def evolve_projective_plans(
     return ProjectionEvolution(
         EvolutionResult(points, densities, paths),
         ProjectionReadout(weights, tuple(populations)),
-        tuple(span.reuse for span in spans),
+        tuple(span.key for span in spans),
         tuple(map(len, rows)),
         tuple(pruned),
         tuple(span.diagnostic for span in spans),
@@ -574,16 +565,15 @@ class ProjectionChainEvolution:
     """FTF projective result in result.points order.
 
     result includes the full density at terminal read start before projection.
-    readout includes the terminal event even if no ADC observes it. reuse holds
-    the digest and budget of every Engine solve. continued_states and
-    identity_weight record the number of solved source states and total skipped
-    marginal per point and transition, respectively. spans gives provenance for
-    each Engine solve.
+    readout includes the terminal event even if no ADC observes it. reuse_keys
+    cover each Engine solve. continued_states and identity_weight record the
+    number of solved source states and total skipped marginal per point and
+    transition, respectively. spans gives provenance for each Engine solve.
     """
 
     result: EvolutionResult
     readout: ProjectionChain
-    reuse: tuple[EvolutionReuse, ...]
+    reuse_keys: tuple[bytes, ...]
     continued_states: tuple[tuple[int, ...], ...]
     identity_weight: tuple[tuple[float, ...], ...]
     spans: tuple[ProjectiveNodeSpan, ...]
@@ -602,7 +592,7 @@ class _ChainSolves:
     engine: Engine
     facts: FTFModelFacts
     options: CavityEvolutionOptions
-    reuse: list[EvolutionReuse] = field(default_factory=list)
+    keys: list[bytes] = field(default_factory=list)
     paths: list[PathDiagnostics] = field(default_factory=list)
     spans: list[ProjectiveNodeSpan] = field(default_factory=list)
     identities: dict[int, tuple[int, int | None, int | None]] = field(
@@ -664,7 +654,7 @@ class _ChainSolves:
                 result = engine.evolve(
                     self.facts.source,
                     batches,
-                    budget=SINGLE_SPAN_BUDGET,
+                    budget=EVOLUTION_BUDGET,
                     cancel=options.cancel,
                     telemetry=options.telemetry,
                     capture=options.capture,
@@ -689,7 +679,7 @@ class _ChainSolves:
                 raise
         for row_id, density in zip(result.points, result.densities, strict=True):
             layer.nodes[row_id][1].density = density[None]
-        self.reuse.append(EvolutionReuse(key, SINGLE_SPAN_BUDGET))
+        self.keys.append(key)
         self.paths.append(result.paths)
         self.spans.append(
             ProjectiveNodeSpan(
@@ -833,7 +823,7 @@ def evolve_projection_chain(
                 for layer in zip(*(row.transitions for row in rows), strict=True)
             ),
         ),
-        tuple(solves.reuse),
+        tuple(solves.keys),
         tuple(row.continued for row in rows),
         tuple(row.skipped for row in rows),
         tuple(solves.spans),
@@ -847,7 +837,7 @@ def evolve_plans(
     settings: FTFSettings,
     *,
     options: CavityEvolutionOptions,
-) -> tuple[EvolutionResult, tuple[EvolutionReuse, ...]]:
+) -> tuple[EvolutionResult, tuple[bytes, ...]]:
     """Advance cavity-driven templates through evolution-owned final spans.
 
     plans share facts.source and contain absolute common-origin numeric controls.
@@ -861,9 +851,9 @@ def evolve_plans(
     With no cavity drives, retains the original single evolve call without
     continuation inputs. Undriven templates in mixed acquires also evolve once.
     Returns the final point-aligned EvolutionResult with merged author diagnostics
-    and every solve's reuse digest and budget. Call Engine.reuse with each pair
-    before reusing a retained result. Density validation and propagation
-    failures pass through unchanged, without normalization, clipping or retries.
+    and every span reuse digest. Call Engine.reuse for all digests before reusing
+    a retained result. Density validation and propagation failures pass through
+    unchanged; no normalization, clipping or solver correction is performed.
     No engine model source, drive phase, envelope origin or flux is rebuilt.
     options.cancel is forwarded to every evolution span's chunk checkpoints; None
     disables cancellation. Cancelled propagates without a partial result.
@@ -872,20 +862,17 @@ def evolve_plans(
     its contents. The engine and long-lived acquisition source retain no owner.
     """
     if not any(any(plan.cavity_drives) for plan in plans):
-        batches = tuple(plan.batch for plan in plans)
         with options.evolving():
-            budget = evolution_budget(batches)
-            result = engine.evolve(
+            return engine.evolve(
                 facts.source,
-                batches,
-                budget=budget,
+                tuple(plan.batch for plan in plans),
+                budget=EVOLUTION_BUDGET,
                 cancel=options.cancel,
                 telemetry=options.telemetry,
                 capture=options.capture,
                 probe_memo=options.probe_memo,
                 reuse_key=options.key,
-            )
-        return result, (EvolutionReuse(options.key, budget),)
+            ), (options.key,)
     # ADR-0078: this composition alone owns the ADC memo's lifetime.
     cache = CavityAverageCache(max_bytes=_CAVITY_SPAN_CACHE_BYTES)
     try:
@@ -918,20 +905,19 @@ def _evolve_cavities(
     timelines: list[_CavityTimeline],
     *,
     options: CavityEvolutionOptions,
-) -> tuple[EvolutionResult, tuple[EvolutionReuse, ...]]:
+) -> tuple[EvolutionResult, tuple[bytes, ...]]:
     plain = tuple(plan.batch for plan in plans if not any(plan.cavity_drives))
     paths = []
-    reuse = []
+    reuse_keys = []
     output_points = []
     output_densities = []
     if plain:
         plain_key = sha256(b"ftf-no-cavity\0" + options.key).digest()
         with options.evolving():
-            budget = evolution_budget(plain)
             result = engine.evolve(
                 facts.source,
                 plain,
-                budget=budget,
+                budget=EVOLUTION_BUDGET,
                 cancel=options.cancel,
                 telemetry=options.telemetry,
                 capture=options.capture,
@@ -939,7 +925,7 @@ def _evolve_cavities(
                 reuse_key=plain_key,
             )
         paths.append(result.paths)
-        reuse.append(EvolutionReuse(plain_key, budget))
+        reuse_keys.append(plain_key)
         output_points.append(result.points)
         output_densities.append(result.densities)
     points = np.concatenate([plan.batch.points for plan in plans])
@@ -954,7 +940,7 @@ def _evolve_cavities(
             result = engine.evolve(
                 facts.source,
                 batches,
-                budget=SINGLE_SPAN_BUDGET,
+                budget=EVOLUTION_BUDGET,
                 cancel=options.cancel,
                 telemetry=options.telemetry,
                 capture=options.capture,
@@ -962,7 +948,7 @@ def _evolve_cavities(
                 reuse_key=reuse_key,
             )
         paths.append(result.paths)
-        reuse.append(EvolutionReuse(reuse_key, SINGLE_SPAN_BUDGET))
+        reuse_keys.append(reuse_key)
         offset = 0
         for timeline in timelines:
             count = len(timeline.batch.points)
@@ -979,5 +965,5 @@ def _evolve_cavities(
             np.concatenate(output_densities)[positions],
             merge_path_diagnostics(paths),
         ),
-        tuple(reuse),
+        tuple(reuse_keys),
     )
