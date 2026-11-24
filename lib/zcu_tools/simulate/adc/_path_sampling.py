@@ -27,15 +27,17 @@ type _EventPlans = dict[tuple[int, int], IntegratedPaths]
 
 
 class EventPlanMemo:
-    """Publish only complete event plans for one live batch generation."""
+    """Publish deterministic event plans and chain CDFs for one live batch."""
 
     def __init__(self) -> None:
         self._lock = Lock()
         self._events: dict[int, _EventPlans] | None = {}
+        self._chain_cdfs: dict[int, RealArray] | None = {}
 
     def retire(self) -> None:
         with self._lock:
             self._events = None
+            self._chain_cdfs = None
 
     def plans(self, prepared: "PreparedRawShots", event_index: int) -> _EventPlans:
         with self._lock:
@@ -47,6 +49,21 @@ class EventPlanMemo:
             if self._events is not None:
                 return self._events.setdefault(event_index, plans)
         return plans
+
+    def chain_cdf(self, event_index: int, probabilities: RealArray) -> RealArray | None:
+        """Get the event's row-wise CDF, or None if already retired on lookup."""
+        with self._lock:
+            cdfs = self._chain_cdfs
+            if cdfs is None:
+                return None
+            if (cdf := cdfs.get(event_index)) is not None:
+                return cdf
+        cdf = probabilities.cumsum(axis=-1)
+        with self._lock:
+            # Retirement may have dropped the memo while this CDF was built.
+            if self._chain_cdfs is not None:
+                return self._chain_cdfs.setdefault(event_index, cdf)
+        return cdf
 
 
 def physical_shots(
@@ -92,7 +109,7 @@ def physical_shots(
     ]
     ordered = sorted(range(len(keys)), key=keys.__getitem__)
     offsets = dict.fromkeys((channel for channel, _ in batches), 0)
-    for event_index, states in enumerate(_event_states(readout, reps, rng)):
+    for event_index, states in enumerate(_event_states(readout, reps, rng, memo=memo)):
         if cancel is not None and cancel.is_set():
             raise Cancelled()
         plans = (
@@ -161,32 +178,50 @@ def _build_event_plans(prepared: "PreparedRawShots", event_index: int) -> _Event
     }
 
 
+def _chain_event_states(
+    readout: ProjectionChain,
+    reps: int,
+    rng: np.random.Generator,
+    memo: EventPlanMemo | None,
+) -> Iterator[NDArray[np.int64]]:
+    """Draw successive projection states, reusing CDF rows only within the memo."""
+    state_count = readout.initial.shape[-1]
+    initial = readout.initial.reshape((-1, 1, state_count))
+    shot_shape = (len(initial), reps)
+    cdf = memo.chain_cdf(0, initial) if memo is not None else None
+    if cdf is None:
+        initial = np.broadcast_to(initial, (*shot_shape, state_count))
+    states = np.sum(
+        rng.random(shot_shape)[..., None]
+        >= (initial.cumsum(axis=-1) if cdf is None else cdf)[..., :-1],
+        axis=-1,
+    )
+    yield states
+    points = np.arange(len(initial))[:, None]
+    for event_index, transition in enumerate(readout.transitions, start=1):
+        rows = transition.reshape((len(initial), state_count, state_count))
+        cdf = memo.chain_cdf(event_index, rows) if memo is not None else None
+        # The cached route cumulates before gathering; both use the same float64
+        # addition order within the state axis. Cold sources only sum selected rows.
+        selected = (
+            rows[points, states].cumsum(axis=-1)[..., :-1]
+            if cdf is None
+            else cdf[points, states, :-1]
+        )
+        states = np.sum(rng.random(shot_shape)[..., None] >= selected, axis=-1)
+        yield states
+
+
 def _event_states(
-    readout: ProjectionReadout | ProjectionChain, reps: int, rng: np.random.Generator
+    readout: ProjectionReadout | ProjectionChain,
+    reps: int,
+    rng: np.random.Generator,
+    *,
+    memo: EventPlanMemo | None = None,
 ) -> Iterator[NDArray[np.int64]]:
     """Yield projection states, interleaving each event draw with its CTMC draws."""
     if isinstance(readout, ProjectionChain):
-        initial = readout.initial.reshape((-1, readout.initial.shape[-1]))
-        selected = np.broadcast_to(
-            initial[:, None, :], (len(initial), reps, initial.shape[-1])
-        )
-        states = np.sum(
-            rng.random((len(initial), reps))[..., None]
-            >= selected.cumsum(axis=-1)[..., :-1],
-            axis=-1,
-        )
-        yield states
-        for transition in readout.transitions:
-            rows = transition.reshape(
-                (len(initial), initial.shape[-1], initial.shape[-1])
-            )
-            selected = rows[np.arange(len(initial))[:, None], states]
-            states = np.sum(
-                rng.random((len(initial), reps))[..., None]
-                >= selected.cumsum(axis=-1)[..., :-1],
-                axis=-1,
-            )
-            yield states
+        yield from _chain_event_states(readout, reps, rng, memo)
     else:
         weights = readout.weights.reshape((-1, readout.weights.shape[-1]))
         if weights.shape[-1] == 1:

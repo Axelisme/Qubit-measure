@@ -328,6 +328,58 @@ def test_raw_rounds_reuse_noiseless_setup_only_in_the_active_batch():
     assert calls > after_replay
 
 
+def test_owned_chain_raw_matches_direct_rounds_after_batch_changes():
+    receiver = adc.Receiver(gain=200, noise_covariance=np.diag([4.0, 9.0]))
+    rates = np.array([[0, 0.04, 0.02], [0.02, 0, 0.03], [0, 0.01, 0]])
+    content = batch(model(rates, receiver=receiver))
+    (event,) = content.events[0]
+    (pulse,) = event.pulses
+    events = tuple(
+        replace(event, pulses=(replace(pulse, phase_rad=phase),))
+        for phase in (0.2, 0.8, -0.4)
+    )
+    content = replace(
+        content, events=(events,), content_index=np.zeros(4, dtype=np.int64)
+    )
+    initial = np.array(
+        [[[0.2, 0.7, 0.1], [0.6, 0.0, 0.4]], [[0.1, 0.3, 0.6], [0.0, 0.8, 0.2]]]
+    )
+    forward = np.stack(
+        [np.roll(initial, shift, axis=-1) for shift in range(3)], axis=-2
+    )
+    backward = np.flip(forward, axis=-1)
+    reps = 24
+    first = adc.PreparedRawShots(
+        adc.ProjectionChain(initial, (forward, backward)), {0: content}, reps=reps
+    )
+    second = adc.PreparedRawShots(
+        adc.ProjectionChain(np.roll(initial, 1, axis=-1), (backward, forward)),
+        {0: content},
+        reps=reps,
+    )
+    round_one = SamplingIdentity(123, (0, 0, 1))
+    round_two = SamplingIdentity(123, (0, 1, 1))
+    expected_first = first.bind(round_one).materialize(reps, 1)[0]
+    expected_next = first.bind(round_two).materialize(reps, 1)[0]
+    expected_second = second.bind(round_two).materialize(reps, 1)[0]
+    assert not np.array_equal(expected_first, expected_next)
+    assert not np.array_equal(expected_next, expected_second)
+
+    owner = adc.RawPlanOwner()
+    old = owner.bind(first, round_one)
+    assert_array_equal(old.materialize(reps, 1)[0], expected_first)
+    next_source = owner.bind(first, round_two)
+    assert_array_equal(next_source.materialize(reps, 1)[0], expected_next)
+    second_source = owner.bind(second, round_two)
+    assert_array_equal(second_source.materialize(reps, 1)[0], expected_second)
+    # A retained source still samples its own batch, before and after rebinding A.
+    assert_array_equal(old.materialize(reps, 1)[0], expected_first)
+    rebound = owner.bind(first, round_two)
+    assert_array_equal(rebound.materialize(reps, 1)[0], expected_next)
+    owner.retire()
+    assert_array_equal(rebound.materialize(reps, 1)[0], expected_next)
+
+
 def test_retiring_a_batch_during_raw_setup_does_not_publish_its_late_plan():
     watchdog = 30
     building_or_done = Event()
