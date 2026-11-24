@@ -1,4 +1,4 @@
-"""Observe official GUI folder browsing and save an explicitly confirmed parent.
+"""Observe official GUI folder browsing and confirm the cloud root and source.
 
 The local authenticated bridge forwards account configuration and reads only.
 It never copies or deletes cloud data. There is no custom HTML or frontend.
@@ -16,7 +16,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 from .rclone import GuiEndpoint, gui_session
-from .settings import TransferSettings, save_settings, validate_remote_parent
+from .settings import validate_remote_root
 
 
 def _parameters(path: str, body: bytes, content_type: str) -> dict[str, object]:
@@ -74,29 +74,29 @@ class SelectionBridge(ThreadingHTTPServer):
         combined = "/".join(
             part.strip("/") for part in (base, folder) if part.strip("/")
         )
-        candidate = validate_remote_parent(remote_name + ":" + combined)
+        candidate = validate_remote_root(remote_name + ":" + combined)
         with self.selection_lock:
             if sequence != self.sequence:
                 return
             self.candidate = candidate
             print(
-                f"\nSelected cloud parent: {candidate}\nVerify this location, then press Enter here to save it.",
+                f"\nSelected cloud root: {candidate}\nVerify this location, then press Enter here to confirm it.",
                 flush=True,
             )
 
-    def confirmed_candidate(self) -> TransferSettings:
+    def confirmed_candidate(self) -> str:
         """Snapshot the selected folder; fail after local, pending or failed navigation."""
         with self.selection_lock:
             candidate = self.candidate
         if candidate is None:
             raise ValueError(
-                "Browse a cloud folder in Explorer first; no cloud parent is selected."
+                "Browse a cloud folder in Explorer first; no cloud root is selected."
             )
         self.endpoint.call(
             "operations/list",
             {"fs": candidate, "remote": "", "opt": {"dirsOnly": True}},
         )
-        return TransferSettings(candidate)
+        return candidate
 
 
 def _allowed_operation(operation: str, parameters: dict[str, object]) -> bool:
@@ -176,7 +176,7 @@ class _SelectionHandler(BaseHTTPRequestHandler):
                 # The official GUI treats 401/403 as expired session credentials.
                 self._send(
                     409,
-                    b'{"error":"Setup only: browse your cloud parent, then press Enter in the terminal. Use the CLI for transfers."}',
+                    b'{"error":"Setup only: browse your cloud root, then press Enter in the terminal. Use the CLI for transfers."}',
                 )
                 return
             sequence = (
@@ -194,20 +194,14 @@ class _SelectionHandler(BaseHTTPRequestHandler):
             self._send(502, b'{"error":"Cannot reach the local rclone setup server"}')
 
 
-def run_setup(
-    binary: Path,
-    config_dir: Path,
-    cache_dir: Path,
-    settings_dir: Path,
-    *,
-    no_browser: bool,
-) -> TransferSettings:
-    """Use official GUI for OAuth and folder browsing; Enter confirms and saves.
+def select_remote_root(
+    binary: Path, config_dir: Path, cache_dir: Path, *, no_browser: bool
+) -> str:
+    """Open setup with the verified binary, account directory and GUI cache.
 
-    config_dir holds the per-user rclone.conf account; settings_dir receives
-    this checkout's transfer.json. Existing transfer.json is preserved on
-    cancellation/failure. Returns only after the selected remote parent has
-    passed a fresh directory listing.
+    Return the named remote and folder verified in the official GUI, or raise if
+    startup fails or the operator does not confirm. no_browser prints the link
+    without launching a browser.
     """
     with (
         gui_session(binary, config_dir, cache_dir) as endpoint,
@@ -223,7 +217,7 @@ def run_setup(
                 gui._replace(query=urllib.parse.urlencode(query, doseq=True))
             )
             print(
-                "In Remotes, connect your account. In Explorer, open the cloud parent and click Refresh.",
+                "In Remotes, connect your account. In Explorer, open the cloud root and click Refresh.",
                 flush=True,
             )
             print(
@@ -238,26 +232,22 @@ def run_setup(
             )
             if not no_browser:
                 webbrowser.open(login_url)
-            while True:
-                try:
-                    input(
-                        "Click Refresh in the chosen cloud folder, verify the printed location, then press Enter to save (Ctrl+C cancels): "
-                    )
-                except EOFError as exc:
-                    raise RuntimeError(
-                        "Setup cancelled: no confirmation was received; no location was saved."
-                    ) from exc
-                try:
-                    selection = bridge.confirmed_candidate()
-                except ValueError as exc:
-                    print(str(exc), flush=True)
-                    continue
-                save_settings(settings_dir, selection)
-                print(
-                    f"Saved cloud parent: {selection.remote_parent}. Future upload/download commands do not need the GUI.",
-                    flush=True,
-                )
-                return selection
+            return _confirm_root(bridge)
+        except EOFError as exc:
+            raise RuntimeError(
+                "Setup cancelled: no confirmation was received; no location was saved."
+            ) from exc
         finally:
             bridge.shutdown()
             worker.join(timeout=5)
+
+
+def _confirm_root(bridge: SelectionBridge) -> str:
+    while True:
+        input(
+            "Verify the refreshed cloud root, then press Enter to confirm (Ctrl+C cancels): "
+        )
+        try:
+            return bridge.confirmed_candidate()
+        except ValueError as exc:
+            print(exc, flush=True)

@@ -258,6 +258,8 @@
 - 2026-11-24 [CZ 最佳化的具名 Native 與 Labber 欄位](2026-11-24-cz-optimize-native-labber-format.md)：資料格式。逐欄保存參數及單位；cfg 無法還原時保留量測和分析，舊格式用原版本開啟。
 - 2026-11-24 [Run 時固定值另存 Native 文件](2026-11-24-run-values-native-document.md)：資料格式。Run 時固定值另存獨立的 `docs/run_values` 文件，由實驗層宣告與編解碼；缺文件等同缺欄。
 
+- 2026-11-25 [多台電腦使用同構資料樹](2026-11-25-multi-machine-data-sync.md)：資料格式。每個來源 prefix 自成 project root，push 只寫設定的雲端前綴，彙整機分開開啟各來源。
+
 ## 量測策略
 
 - 2026-11-22 [K-cycle chain 只留主擬合](2026-11-22-chain-joint-fit-only.md)：刪除或收窄。移除巢狀擬合與 `CycleCheck`，用白化殘差和 live 方向投影判讀，不讓第一讀估計或投影缺席蓋掉 joint 結果。

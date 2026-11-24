@@ -25,8 +25,9 @@ token.json
 /measure_knowledge
 Database/
 result/
-.result-transfer/
-.database-transfer/
+/Database
+/result
+/.data-sync/
 logs/
 scratch/
 .agent_state/

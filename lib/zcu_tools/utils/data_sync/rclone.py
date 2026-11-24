@@ -168,6 +168,39 @@ def _stop_process(process: subprocess.Popen[str]) -> None:
         process.wait()
 
 
+def run_cli(
+    binary: Path,
+    config_dir: Path,
+    arguments: list[str],
+    *,
+    capture_output: bool = False,
+) -> subprocess.CompletedProcess[str]:
+    """Run arguments against config_dir/rclone.conf without interactive prompts.
+
+    The caller supplies a verified binary and CLI arguments without global account
+    flags. Stdout is inherited unless requested as UTF-8 text. Stderr is inherited.
+    Return the subprocess status, and stop the subprocess if interrupted.
+    """
+    command = [
+        str(binary),
+        "--config",
+        str(config_dir / "rclone.conf"),
+        "--ask-password=false",
+        *arguments,
+    ]
+    with subprocess.Popen(
+        command,
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.PIPE if capture_output else None,
+        encoding="utf-8",
+    ) as process:
+        try:
+            stdout, _ = process.communicate()
+            return subprocess.CompletedProcess(command, process.returncode, stdout)
+        finally:
+            _stop_process(process)
+
+
 @dataclass(frozen=True)
 class ApiResponse:
     """Raw local rclone response; body may contain account data and must not be logged."""
