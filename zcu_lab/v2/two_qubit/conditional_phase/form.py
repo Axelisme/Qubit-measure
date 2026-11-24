@@ -1,26 +1,17 @@
 """Fixed-capture inputs for conditional phase calibration."""
 
-from typing import TypeVar
-
 from zcu_tools.cfg_model import Hidden, Range, Slot, Template
 from zcu_tools.gui.form_adapter import Form, FormContext
 
 from zcu_lab.v2.support.measure.ctx_helpers import source
 from zcu_lab.v2.support.measure.mux_forms import mux_readout_seed_metadata
+from zcu_lab.v2.support.measure.paired_qubits import TwoQubitForm, captured_qubits
 
-from .._measure import TwoQubitForm, captured_qubits
 from .core import ConditionalPhaseCfg
-
-CfgT = TypeVar("CfgT", bound=ConditionalPhaseCfg)
 
 
 def make_form(ctx: FormContext) -> Form[ConditionalPhaseCfg]:
-    """Use fixed qubit and coupler bindings to seed the ordinary classified phase experiment."""
-    return phase_form(ctx, ConditionalPhaseCfg)
-
-
-def phase_form(ctx: FormContext, cfg_type: type[CfgT]) -> Form[CfgT]:
-    """Seed calibrated pulses and hidden tone positions for either variant.
+    """Seed calibrated pulses and hidden tone positions.
 
     Missing CZ slots stay required. Both qubit tones need circle + radius from
     GE Post before Run. No other experiment Form or simulator truth supplies inputs.
@@ -33,7 +24,7 @@ def phase_form(ctx: FormContext, cfg_type: type[CfgT]) -> Form[CfgT]:
         Template("readout/mux:blank"),
     )
     return TwoQubitForm(
-        cfg_type,
+        ConditionalPhaseCfg,
         readout_of=lambda cfg: cfg.readout,
         tree={
             "reps": 1000,

@@ -601,7 +601,7 @@
     },
     {
       "scene_id": "two_qubit/conditional_phase_heralded",
-      "adapter": "two_qubit/conditional_phase_heralded",
+      "adapter": "heralded/conditional_phase",
       "metric": {"kind": "scan", "axes": [{"field": "gate_counts"}, {"field": "frequencies"}]},
       "basis": "The earlier workload selection retained this adapter to exercise its bounded setup or a named prerequisite. Any GE classifiers or Local Z corrections from this fixture are path-timing inputs, not calibrations.",
       "overrides": [
@@ -647,7 +647,7 @@
     },
     {
       "scene_id": "two_qubit/conditional_spectroscopy_heralded",
-      "adapter": "two_qubit/conditional_spectroscopy_heralded",
+      "adapter": "heralded/conditional_spectroscopy",
       "metric": {"kind": "scan", "axes": [{"field": "dc_values"}, {"field": "frequencies"}]},
       "basis": "Adapter inventory from lab_definitions; simulator path-timing workload. Any GE classifiers or Local Z corrections from this fixture are path-timing inputs, not calibrations.",
       "overrides": [
@@ -875,7 +875,7 @@
     },
     {
       "scene_id": "two_qubit/rb_heralded",
-      "adapter": "two_qubit/rb_heralded",
+      "adapter": "heralded/rb",
       "metric": {"kind": "scan", "axes": [{"field": "seeds"}, {"field": "depths"}]},
       "basis": "Bounded RB path-time workload; timing fixture has synthetic 0-degree Local Z pair. No physical RB interpretation.",
       "overrides": [

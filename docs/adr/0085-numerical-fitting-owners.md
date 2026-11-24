@@ -13,16 +13,17 @@ date: 2026-11-12
 
 ## 決策
 
-2026-11-12，使用者在「照建議表搬移選定工具」的方案中回答「A」。以下六組純數值計算由 `zcu_tools.analysis.fitting` 持有，沿用既有 `shared` 與 `decay` backend，不改算法。
+2026-11-12，使用者在「照建議表搬移選定工具」的方案中回答「A」。當時搬移的六組純數值計算由 `zcu_tools.analysis.fitting` 持有，沿用既有 `shared` 與 `decay` backend，不改算法。下表也列出後來納入的加權 decay fringe。
 
 | 數值工具 | 公開輸入與責任 |
 | --- | --- |
 | ALLXY | Gate-pair sequence、power error、detune error 的模型入口，以及 sequence、實數訊號的擬合入口。擬合一律求 center、contrast 與兩個 coherent errors，g/e 位準可超出量測極值。 |
 | IRB | `depths`、`signals`、`bootstrap_samples`、`bootstrap_seed` 的成對 decay 與 bootstrap 主入口。共同 IQ 投影另有入口，供主 fitter 與即時圖共用。 |
-| 雙比特 RB | `survival`、`totals` 的成對 seed 統計入口，以及 `depths`、`means`、`errors` 的兩組共享 decay 擬合入口。 |
+| 雙比特 RB | `survival`、`totals` 的成對 seed 統計入口，以及 `depths`、`means`、`errors` 的共享 decay 擬合入口，接受至少兩組，每臂共用一個 decay。 |
 | Gate-count quadrature | `n`、`quadratures`、`variances`、`acquired_shots` 的共同 slope 擬合與 alias 判斷入口。 |
 | Phase modulation | `phases`、`squared_rates` 的 sine／cosine 回歸、最大相位與 covariance 傳播入口。 |
 | Phase slope | `n`、`phase_degrees`、`variances` 的 unwrap 與加權直線擬合入口。 |
+| 加權 decay fringe | `fit_weighted_decay_fringe` 以 `delays`、`observations`、`sigmas` 做逐點加權擬合。各 trace 只共用正頻率，振幅、偏移、相位與衰減時間各自擬合；回傳具名 covariance。Lab 保留類別選擇、有效點判定、符號檢查、ζ、圖與發布。2026-11-24，designer 代裁，使用者未覆核。 |
 
 入口只收數值陣列與既有數值或布林控制參數，不收 lab cfg、Result、Options 或 Analysis。純數值結果型別由 fitting owner 定義，caller 直接引用，不在 lab 宣告鏡像型別。擬合、統計與 IQ 投影入口回傳 fitting owner 的具名結果；ALLXY 的模型入口回傳 scalar Bloch-z。各入口的 docstring 定義 shape、axis、單位與失敗語意，內部小函式不因搬移而公開。
 

@@ -76,7 +76,9 @@ def test_repeated_seed_draws_retain_multiplicity_without_shot_weighting() -> Non
         owner.seed_statistics(survival[:1], totals[:1])
 
 
-@pytest.mark.parametrize("case", ["extra-group", "extra-arm", "extra-error-group"])
+@pytest.mark.parametrize(
+    "case", ["single-group", "extra-arm", "extra-error-group", "wrong-depth"]
+)
 def test_shared_decay_rejects_shapes_that_would_leave_data_unused(case: str) -> None:
     depths = np.array([1, 4, 9, 16, 25, 40, 60, 80], dtype=np.int64)
     means = np.array(
@@ -86,30 +88,34 @@ def test_shared_decay_rejects_shapes_that_would_leave_data_unused(case: str) -> 
         ]
     )
     errors = np.full_like(means, 0.01)
-    if case == "extra-group":
-        means = np.concatenate([means, means[:1]])
-        errors = np.concatenate([errors, errors[:1]])
+    if case == "single-group":
+        means, errors = means[:1], errors[:1]
     elif case == "extra-arm":
         means = np.concatenate([means, means[:, :1]], axis=1)
         errors = np.concatenate([errors, errors[:, :1]], axis=1)
-    else:
+    elif case == "extra-error-group":
         errors = np.concatenate([errors, errors[:1]])
-    with pytest.raises(ValueError, match="shape"):
+    else:
+        depths = depths[:-1]
+    with pytest.raises(ValueError, match="shape|leading dimension"):
         owner.fit_joint_decay(depths, means, errors)
 
 
-def test_shared_decay_recovers_both_arm_rates_and_full_covariance() -> None:
+@pytest.mark.parametrize("groups", [2, 4])
+def test_shared_decay_recovers_local_parameters_and_full_covariance(
+    groups: int,
+) -> None:
     depths = np.array([1, 4, 9, 16, 25, 40, 60, 80], dtype=np.int64)
     ps = (0.98, 0.96)
-    amplitudes = ((0.4, 0.35), (0.25, 0.3))
-    offsets = ((0.3, 0.2), (0.2, 0.35))
+    amplitudes = ((0.4, 0.35), (0.25, 0.3), (0.5, 0.2), (0.45, 0.52))
+    offsets = ((0.3, 0.2), (0.2, 0.35), (0.38, 0.44), (0.21, 0.32))
     exact = np.array(
         [
             [amplitudes[g][a] * ps[a] ** depths + offsets[g][a] for a in range(2)]
-            for g in range(2)
+            for g in range(groups)
         ]
     )
-    noise = 0.0001 * np.sin(np.arange(32).reshape(2, 2, 8))
+    noise = 0.0001 * np.sin(np.arange(exact.size).reshape(exact.shape))
     means = exact + noise
     errors = np.full_like(means, 0.01)
     result = owner.fit_joint_decay(depths, means, errors)
@@ -120,10 +126,15 @@ def test_shared_decay_recovers_both_arm_rates_and_full_covariance() -> None:
     assert fit.diagnostics.valid
     # Independent local linear error propagation for A*p**depth+B, with the
     # documented reduced-chi-square covariance scaling of shared fitting.
-    jacobian = np.zeros((32, 10))
     names = fit.parameter_names
-    for g in range(2):
+    assert len(names) == 2 + 4 * groups
+    jacobian = np.zeros((exact.size, len(names)))
+    for g in range(groups):
         for a in range(2):
+            assert fit.values[f"A_{g}_{a}"] == pytest.approx(
+                amplitudes[g][a], abs=0.0002
+            )
+            assert fit.values[f"B_{g}_{a}"] == pytest.approx(offsets[g][a], abs=0.0002)
             rows = slice((g * 2 + a) * 8, (g * 2 + a + 1) * 8)
             jacobian[rows, names.index(f"p_{a}")] = (
                 amplitudes[g][a] * depths * ps[a] ** (depths - 1)
@@ -133,7 +144,7 @@ def test_shared_decay_recovers_both_arm_rates_and_full_covariance() -> None:
     expected_cov = np.linalg.inv(jacobian.T @ jacobian / 0.01**2)
     expected_cov *= fit.diagnostics.reduced_chi_square
     np.testing.assert_allclose(fit.covariance, expected_cov, rtol=0.02, atol=1e-13)
-    first, second = names.index("A_0_0"), names.index("A_1_0")
+    first, second = names.index("A_0_0"), names.index(f"A_{groups - 1}_0")
     assert abs(fit.covariance[first, second]) > 1e-11
 
 

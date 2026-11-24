@@ -1,6 +1,6 @@
 # zcu_tools.analysis.fitting
 
-**Last updated:** 2026-11-23，Singleshot T1 的衰減模與 joint fit 品質
+**Last updated:** 2026-11-24，RB 多組共用 decay
 
 **讀者：** lab-author。擬合模型、數值輸入、結果與失敗契約速查。
 
@@ -58,8 +58,8 @@ binomial variance，不改變 seed 的權重。它回傳 `RBSeedStatistics`，�
 有限的 seeds，至少需要兩個完整 seeds。`seed_std` 只供繪圖，`errors` 仍是擬合權重
 使用的 binomial 標準誤。`rb.seed_standard_deviation` 也能從未齊全的 `(seed,arm,depth)`
 實數曲線計算各格 seed 間的樣本標準差。`rb.fit_joint_decay` 接受 depths 與
-`(2,2,depth)` means／errors，回傳 `RBJointDecayFit` 的 global `SharedFitResult` 與曲線。
-第一軸是兩組資料，各 arm 共用 decay，各 group 保留自己的 amplitude／offset。Covariance
+`(G,2,depth)` means／errors，回傳 `RBJointDecayFit` 的 global `SharedFitResult` 與曲線。
+第一軸至少有兩組。每臂共用一個 decay，各組各臂有自己的 amplitude／offset。Covariance
 以 reduced chi-square 縮放。結果可把每臂的 p 和 covariance 換成 1/e 衰減長度與變異數。
 Lab 解讀 herald 與 d=4。數值工具的 owner 邊界見
 [ADR-0085](../../../../docs/adr/0085-numerical-fitting-owners.md)。
@@ -170,6 +170,8 @@ Tuple 解構只供過渡相容，caller 遷移成具名存取後會移除。
 欄位與 quality 不可重新指定或刪除。陣列保留既有可變性。
 `copy.copy`、`copy.deepcopy` 與 pickle 往返保留所有 tuple 欄位與 quality。
 `_make` 與 `_replace` 拋出 `TypeError`，要求重跑 fitter，讓改值後的 quality 與結果一致。
+
+`fit_weighted_decay_fringe(delays, observations, sigmas)` 在同一等距 delay 軸上做逐點 sigma 加權擬合。各條 trace 只共用正頻率，振幅、偏移、相位、衰減時間各自擬合。首條 trace 供應頻率初值。結果保留 `shared` 的具名共變異數矩陣與 optimizer diagnostics。每條 `traces` 結果可用 `evaluate(delays)` 畫密網格，`quality` 使用該條 observations 與同次 fit 投影的 covariance。普通 `fit_decay_fringe` 不加權，也不改回傳契約。
 
 ## fitting helpers
 

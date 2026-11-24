@@ -7,8 +7,8 @@ from zcu_lab.v2.support.measure.ctx_helpers import source
 from zcu_lab.v2.support.measure.mux_forms import (
     mux_readout_initial,
 )
+from zcu_lab.v2.support.measure.paired_qubits import TwoQubitForm, captured_qubits
 
-from .._measure import TwoQubitForm, captured_qubits
 from .core import CZAmplitudeCfg
 
 

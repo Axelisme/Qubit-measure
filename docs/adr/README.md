@@ -2,7 +2,7 @@
 
 **讀者：** framework-dev、agent。透過本索引與各篇 ADR 查找架構決策及其依據。
 
-依 [CLAUDE.md〈使用者決策的引用〉](../../CLAUDE.md#使用者決策的引用)，取捨符合任一條就寫進 ADR：對多個底層模組已有或可能產生約束；定下整個子系統共用的架構；不易撤回，或得記下為何否決其他方案。像 Python 的 [PEP 659](https://peps.python.org/pep-0659/) 一樣，內部的重大架構改變也收錄，小改進不收。Evolution 的 kernel 共同規則留在 [ADR-0078](0078-evolution-module-boundary.md#每個-kernel-的量測場景只有一段)，個別 kernel 的閾值寫在 [Evolution README](../../lib/zcu_tools/simulate/evolution/README.md#kernel-summary)。只有單一實驗自己用、能在一個 task 內反悔的取捨，寫在該實驗的 README。獨立 heralded 入口的取捨則寫在管理這些實驗入口的 [zcu_lab/v2/README.md〈何時保留獨立 heralded 入口〉](../../zcu_lab/v2/README.md#何時保留獨立-heralded-入口)。索引只放 ADR 原則的摘要與指標。
+依 [CLAUDE.md〈使用者決策的引用〉](../../CLAUDE.md#使用者決策的引用)，取捨符合任一條就寫進 ADR：對多個底層模組已有或可能產生約束；定下整個子系統共用的架構；不易撤回，或得記下為何否決其他方案。像 Python 的 [PEP 659](https://peps.python.org/pep-0659/) 一樣，內部的重大架構改變也收錄，小改進不收。Evolution 的 kernel 共同規則留在 [ADR-0078](0078-evolution-module-boundary.md#每個-kernel-的量測場景只有一段)，個別 kernel 的閾值寫在 [Evolution README](../../lib/zcu_tools/simulate/evolution/README.md#kernel-summary)。只有單一實驗自己用、能在一個 task 內反悔的取捨，寫在該實驗的 README。例如，[ADR-0074](0074-flat-readout-module.md#保留獨立-heralded-實驗的條件) 記錄獨立 heralded 家族的規則；各入口用哪些類別、何時報估計，見 [家族 README](../../zcu_lab/v2/heralded/README.md)。索引只放 ADR 原則的摘要與指標。
 ADR 正文寫目前生效的規則與客觀事實。裁決日期、使用者原話與沿革的放置方式見下方[格式規定](#格式規定)。依據中的「使用者未覆核」只標尚未覆核的代裁；已覆核時記下覆核結果。
 
 程式碼註解與記憶檔以 `ADR-NNNN` 引用本目錄；ADR 之間以 `[[NNNN]]` 互鏈。
@@ -101,7 +101,7 @@ ADR 宣告 package 之間的依賴方向時，同時在 `.importlinter` 建立�
 
 - [0062 — 實驗執行與 workflow 編排](0062-experiment-workflow.md)：Async workflow、operation、Ask、停止、live tunables 與作者保存責任。
 - [0069 — 實驗核心、前端包裝與具名圖形產物](0069-experiment-core-and-frontends.md)：實驗 core 黑箱、前端包裝、Run／AnalysisRecord 與具名圖形產物。局部規則見 [`notebook/adapter.py`](../../lib/zcu_tools/notebook/adapter.py) 的「Notebook interactive analysis」註解。
-- [0074 — 獨立的平鋪 Readout module](0074-flat-readout-module.md)：Readout 配置、classifier、逐 shot sums、選用校正 IQ 矩、herald reset 與逐 shot 遮罩、雙 qubit heralded 分類、單 qubit cov 自校準與 QICK projection。
+- [0074 — 獨立的平鋪 Readout module](0074-flat-readout-module.md)：Readout 配置、classifier、逐 shot sums、選用校正 IQ 矩、herald reset 與逐 shot 遮罩、[獨立 heralded 家族與選單 key](0074-flat-readout-module.md#保留獨立-heralded-實驗的條件)、單 qubit cov 自校準與 QICK projection。
 - [0083 — Program macro 與具名 timeline](0083-program-macros-and-timelines.md)：Program macro、具名 timeline、往後跳轉與 label 合併、查表掃描、compiled snapshot 與全面 Timeline 遷移。
 
 ## Analysis / Simulation / Waveform

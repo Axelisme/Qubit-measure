@@ -173,7 +173,7 @@
 
 ## Measure UI
 
-- 2026-11-23 [Heralded RB 與 conditional phase 合併顯示 gg、ee](2026-11-23-heralded-pooled-display.md)：圖形呈現。兩個 heralded 入口合併主圖與 Live，分組診斷及原分析不變。
+- 2026-11-23 [Heralded RB 與 conditional phase 合併顯示 gg、ee](2026-11-23-heralded-pooled-display.md)：圖形呈現。逐點合併主圖與 Live，保留分組診斷；後記說明合併範圍由 gg、ee 擴為四類。
 - 2026-11-23 [CZ phase 的 contrast 標準誤](2026-11-23-phase-contrast-sem.md)：圖形呈現。Live 與 Analyze 傳遞獨立 X/Y 投影的 shot SEM，恰零時取最大方向。
 - 2026-11-23 [Conditional phase 與 Local Z 的圖照推導順序](2026-11-23-phase-figures-physics-order.md)：圖形呈現。主圖從 Bloch 向量、累積相位到條件相位；診斷量另放；Live 只畫已完整頻率。
 - 2026-11-23 [Singleshot T1 以振幅分 T1／T1b](2026-11-23-singleshot-t1-amplitude-naming.md)：讀圖語意。e→e 曲線振幅大的模是 T1、小的是 T1b；兩版都提議寫回主模。
@@ -271,8 +271,9 @@
 - 2026-11-04 [讀出鏈的資訊上限：λ 指標、記錄層與分析層的損失、自校準](2026-11-04-readout-chain-information-limits.md)：顯示只畫 λ；讀出已知時讀出鏈在等時間下全面勝過 relax 實驗，存 lag 0…4 只損失 ≤ 18%，損失集中在分析層；改走全域兩態、兩通道的自校準估計。
 - 2026-11-15 [Two-qubit RB 的兩組都同時打單 qubit gates](2026-11-15-two-qubit-rb-simultaneous-gates.md)：並行排程。普通與heralded兩版的reference／interleaved都用每qubit時間線，在CZ共同同步，保留原frame與reset政策。
 - 2026-11-20 [Herald 改為 reset 模塊與逐 shot 遮罩](2026-11-20-herald-reset-shot-masks.md)：推翻放置選擇。Herald 改成既有 reset 欄位的模塊選項，取數層以逐 shot bool 遮罩篩選、所有下游統一收遮罩，tracker 改成顯式 reducer，FTF 沿用逐 shot 抽樣，決策見 [ADR-0074](../adr/0074-flat-readout-module.md#herald-reset-與逐-shot-遮罩)。
-- 2026-11-20 [只為共用參數保留獨立 heralded 實驗](2026-11-20-heralded-experiment-pruning.md)：刪除或收窄。只保留 RB 與 conditional phase 的獨立入口，其餘七個用 mux herald reset 篩選 gg。
-- 2026-11-23 [以準備後的 herald 分支量條件頻譜](2026-11-23-heralded-conditional-spectroscopy.md)：實驗入口新增。先做名目 I／Xπ 準備，再依實測 herald 類別畫四支條件頻譜。
+- 2026-11-20 [只為共用參數保留獨立 heralded 實驗](2026-11-20-heralded-experiment-pruning.md)：刪除或收窄（superseded）。以共用參數限制獨立入口的判準已取代，reset 的單類篩選不變。
+- 2026-11-23 [以準備後的 herald 分支量條件頻譜](2026-11-23-heralded-conditional-spectroscopy.md)：實驗入口新增。先做名目 I／Xπ 準備，再依實測 herald 類別畫四支條件頻譜；後記連至搬移後的入口。
+- 2026-11-24 [多類 herald 分析改用獨立家族](2026-11-24-heralded-family.md)：實驗家族。Reset 仍只留一類，保留多類的八個入口在 `heralded` 選單，registry key 跟隨目錄。
 - 2026-11-19 [Integer fluxonium 的 MIST：與 half-flux 的差異及 erasure check 的注意事項](2026-11-19-integer-fluxonium-mist.md)：物理研究。Φ=0 的 e/f 是 parity 相反的計算態加 erasure 態，MIST 線成對、e/f 不經 k=0 交換但 10⁻³ Φ₀ 偏磁即破；check 宜讓 g、f 都暗，最糟後果是 e→g/f 或漏到不被標記的高態；重複 check 的 Stark 相位與磁通雜訊會相乘累積；An 的 check 期間 T1(e→g) 變短無法以閉系統 MIST 或平滑浴解釋。
 - 2026-11-20 [T1 二階矩實驗以 t1_cov 恢復](2026-11-20-t1-cov-restore.md)：恢復已刪除的概念。2026-11-09 誤刪的是二階矩方法，不是 post-selection；先恢復 T1，改稱 cov，讀出叫 pre_readout／post_readout，加可選脈衝 reset，舊資料不載入。
 - 2026-11-20 [Two-qubit RB 在 Clifford 邊界對齊兩條時間線](2026-11-20-rb-clifford-barrier.md)：排程修正。2026-11-15 的並行排程只在 CZ 同步，reference 組相鄰 Clifford 會重疊，interleaved 組不會；改為兩組都在 Clifford 邊界 join，interleaved 時序不變、reference 變長，新舊資料不混比。

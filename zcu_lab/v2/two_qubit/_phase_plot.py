@@ -10,7 +10,7 @@ from matplotlib.ticker import MaxNLocator
 from numpy.typing import NDArray
 from zcu_tools.analysis.fitting.phase_slopes import PhaseSlopeFit
 
-from ._phase import phase_near
+from zcu_lab.v2.support.paired_ramsey import phase_near
 
 
 def wrapped_phase_plot_data(
