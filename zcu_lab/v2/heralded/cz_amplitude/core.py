@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from textwrap import fill
-from typing import Annotated, Self
+from typing import Annotated, ClassVar, Self
 
 import numpy as np
 from matplotlib.figure import Figure
@@ -14,7 +14,14 @@ from pydantic import Field, model_validator
 from zcu_tools.analysis.fitting import FitQuality
 from zcu_tools.analysis.shot_uncertainty import class_probability_covariance
 from zcu_tools.cfg_model import ConfigBase, FieldMeta
-from zcu_tools.experiment import Experiment
+from zcu_tools.experiment import (
+    Experiment,
+    GroupedAxesSpec,
+    GroupedLoadData,
+    VariableAxisSpec,
+    VariableSpec,
+    VariableZSpec,
+)
 from zcu_tools.experiment.records import RunRecord
 from zcu_tools.experiment.v2.utils.round_zcu import sweep2array
 from zcu_tools.plotting.plots import Plots
@@ -168,6 +175,22 @@ class HeraldedCZAmplitudeResult:
     sums: NDArray[np.float64]
 
 
+def _validate_result_shape(result: HeraldedCZAmplitudeResult) -> None:
+    """Check the fixed preparation and classification widths for Native and Analyze."""
+    if result.scales.ndim != 1 or result.sums.shape != (
+        2, 2, result.scales.size, 3, 3, 3, 3
+    ):
+        raise ValueError("Heralded CZ amplitude requires scales (Ns,) and sums (2,2,Ns,3,3,3,3)")
+
+
+def _restore_result(
+    data: GroupedLoadData[HeraldedCZAmplitudeCfg],
+) -> HeraldedCZAmplitudeResult:
+    """Rebuild from the saved multiplier coordinates and ordered counts."""
+    sums = data.variable("sums")
+    return HeraldedCZAmplitudeResult(sums.axes[4], sums.z.astype(np.float64))
+
+
 @dataclass(frozen=True)
 class HeraldedCZAmplitudeAnalysis:
     """First-return diagnostics from the measured gg herald row only.
@@ -200,6 +223,44 @@ class HeraldedCZAmplitudeExp(
 ):
     """Acquire and analyze the four measured CZ return branches."""
 
+    # ADR-0074: keep joint class counts, not per-shot IQ.
+    AXES_SPEC: ClassVar[
+        GroupedAxesSpec[HeraldedCZAmplitudeResult, HeraldedCZAmplitudeCfg]
+    ] = GroupedAxesSpec(
+        variables=(
+            VariableSpec(
+                variable="sums",
+                axes=(
+                    VariableAxisSpec.generated_arange(label="terminal_qubit2", unit=""),
+                    VariableAxisSpec.generated_arange(label="terminal_qubit1", unit=""),
+                    VariableAxisSpec.generated_arange(label="herald_qubit2", unit=""),
+                    VariableAxisSpec.generated_arange(label="herald_qubit1", unit=""),
+                    VariableAxisSpec(
+                        label="Common gain scale", unit="", field_name="scales"
+                    ),
+                    VariableAxisSpec(
+                        label="Prepared Qubit2", unit="", values=(0, 1), dtype=np.int64
+                    ),
+                    VariableAxisSpec(
+                        label="Prepared Qubit1", unit="", values=(0, 1), dtype=np.int64
+                    ),
+                ),
+                z=VariableZSpec(
+                    field_name="sums",
+                    label="Herald × terminal class counts",
+                    unit="",
+                    dtype=np.float64,
+                ),
+            ),
+        ),
+        result_type=HeraldedCZAmplitudeResult,
+        cfg_type=HeraldedCZAmplitudeCfg,
+        cfg_schema_version="1.0",
+        tag="heralded/cz_amplitude",
+        result_builder=_restore_result,
+        result_validator=_validate_result_shape,
+    )
+
     def analyze(
         self,
         source: RunRecord[HeraldedCZAmplitudeCfg, HeraldedCZAmplitudeResult],
@@ -212,7 +273,7 @@ class HeraldedCZAmplitudeExp(
         Use the saved cfg and pool both nominal preparation axes before
         normalizing the rows. A zero or unmeasured gg point ends the fit prefix;
         missing spectator points do not. Missing cfg, inconsistent scan axes
-        and invalid counts raise ValueError. No writeback or reclassification.
+        and invalid analyzed counts raise ValueError. No writeback or reclassification.
         """
         del options
         cfg, result = source.cfg, source.result
@@ -220,8 +281,7 @@ class HeraldedCZAmplitudeExp(
             raise ValueError("Heralded CZ amplitude analysis requires saved cfg")
         if not np.array_equal(result.scales, sweep2array(cfg.scale)):
             raise ValueError("Heralded CZ amplitude scales must match saved cfg")
-        if result.sums.shape != (2, 2, len(result.scales), 3, 3, 3, 3):
-            raise ValueError("Heralded CZ amplitude requires sums (2,2,scale,3,3,3,3)")
+        _validate_result_shape(result)
 
         returns = _conditional_returns(result.sums)
         gg_shots = returns.shots[:, 0, 0]
@@ -252,7 +312,9 @@ def _conditional_returns(sums: NDArray[np.float64]) -> _Returns:
     )
 
 
-def _return_figure(plots: Plots, name: str) -> Figure:
+def _return_figure(
+    plots: Plots, name: str, scales: NDArray[np.float64]
+) -> Figure:
     """Label four return panels by measured herald and inferred CZ input."""
     fig, _ = plots.subplots(
         num=name, nrows=2, ncols=2, sharex=True, sharey=True,
@@ -260,6 +322,8 @@ def _return_figure(plots: Plots, name: str) -> Figure:
     )
     fig.supxlabel(_SCALE_LABEL)
     fig.supylabel("P(terminal = herald | measured herald)")
+    margin = 0.05 * (scales[-1] - scales[0])
+    fig.axes[0].set_xlim(scales[0] - margin, scales[-1] + margin)
     for ax, herald, ket in zip(fig.axes, _HERALDS, _CZ_INPUTS, strict=True):
         ax.set(title=f"Herald {herald} → inferred CZ input |{ket}⟩", ylim=(-0.04, 1.04))
         ax.xaxis.set_major_locator(MaxNLocator(nbins=5))
@@ -273,18 +337,18 @@ def _plot_returns(
     fit: CZReturnFit,
 ) -> None:
     """Draw four conditional traces with shot SEM and the gg-only fit overlay."""
-    fig = _return_figure(plots, "heralded_return")
+    fig = _return_figure(plots, "heralded_return", scales)
+    fitted = np.isfinite(fit.curve)
     for ax, (q1, q2) in zip(fig.axes, np.ndindex(2, 2), strict=True):
         ax.errorbar(
             scales,
             returns.probability[:, q1, q2],
             yerr=returns.sem[:, q1, q2],
-            fmt=".-",
+            fmt="." if q1 == q2 == 0 and fitted.any() else ".-",
             label="Measured ± shot SEM",
         )
 
     gg = fig.axes[0]
-    fitted = np.isfinite(fit.curve)
     if fitted.any():
         gg.plot(scales[fitted], fit.curve[fitted], "k-", label="Fixed-phase cosine fit")
     if fit.scale is None:
@@ -292,5 +356,5 @@ def _plot_returns(
     else:
         diagnostic = f"gg first return = {fit.scale:.5g} ± {fit.error:.2g}"
         gg.axvline(fit.scale, color="C3", ls="--", label="Selected first return")
-    gg.legend()
+    gg.legend(loc="upper center", bbox_to_anchor=(0.5, -0.08), ncols=2)
     fig.suptitle(f"Heralded CZ amplitude · Qubit1, Qubit2\n{diagnostic}")
