@@ -52,6 +52,7 @@ superseded_by: null
 
 ## Family 與 guard
 
+- 2026-11-24，[FTF 依 timeline 段數分配誤差預算](./2026-11-24-ftf-timeline-budget.md)，`rejected`。短 timeline 放寬每段預算；正式五列都未達保留門檻，撤回。CZ amplitude 降幅最大，平均 core 減少 9.339%（`2ec6814af` → `0002badf5`，block 2 `c2b6b9e0522e`、seed 123、完整 Run 各兩輪，未達 10%）。
 - 2026-11-24，[預測拒收能否跳過 sampled RWA 探針](./2026-11-24-sampled-rwa-predicted-rejection.md)，`paused`。比對探針前可算的省略相位與實際端點判決，並按群計數 spot，未實作拒收切點。樣本分界不是端點誤差下界。382 群各一個 spot，首拒後沒有下一個 spot 可省（`234bf075f`，block 2 `c2b6b9e0522e`／`ftf-demo:initial` 五場各一次 Run，另一次 24 點重建正例，合計）。
 - 2026-11-24，[Shaped Sambe 的帶狀 Hermitian 全譜求解](./2026-11-24-banded-shaped-sambe.md)，`rejected`。用下帶儲存取代密集矩陣後，`chain/amp_rabi` 由 6.294 增至 8.912 core s／格（`addd6c8fb` → `0f5d83887`，同 block1 manifest、seed 123、單 worker，兩側批次從空快取開始，各一次完整 11 格 Run）。
 - 2026-11-24，[長時強驅動雙載波的內建波形路由](./2026-11-24-long-dual-carrier-builtins.md)，`paused`。先分類，再用 `inspect_dispatch` 確認目標段的預設路由只列 `dop853`，另行診斷 `common_frame` guard 才觀察到拒收（`32dfb53a5`）。DP5(4) apply 合計 6.449438 CPU s（`593426c2f`，24 態 FTF、單 CPU worker、8 個 1000 ns π／強振幅不同載波雙線格各一次，共 10 個直接積分段，不含平台）。
