@@ -89,6 +89,7 @@ superseded_by: null
 
 ## 表示與合併
 
+- 2026-11-24，[不同載波雙線的 gate 端點交互作用框架](./2026-11-24-multitone-gate-interaction-frame.md)，`rejected`。在局部交互作用框架建 gate 端點，兩場的結果陣列不變，但未量到加速。暖態 `constructive_phase` 1.7692 → 1.8065 core s／格（`addd6c8fb` → `45d465a5a`，同離線 fixture、FTF seed 123、單 worker，兩側均先跑 `chevron`，各一次完整 121 格 Run）。
 - 2026-11-24，[異形同載波的 shaped Sambe](./2026-11-24-same-carrier-shaped-sambe.md)，`paused`。保留各線包絡，在共同載波座標加總 Fourier block；兩場 guard 均拒收。既有 DP5(4) 0.592 CPU s（`fd160e255`，FAST-DRAG／cosine 雙線，8 態、100 ns，一次 Engine 演化）。
 - 2026-11-23，[同頻多線摺成單 tone](./2026-11-23-same-carrier-merge.md)，`adopted`。同載波同形線合成一對 I/Q 算符，交給單 tone family。Plain RB 16.401 → 0.892 CPU s（`2b8f628c3` 對 `0d851985`，depth `[0,4,8]`、seed 701、sim seed 123、2 reps、1 round，單 worker 暖機後各一次）。
 - 2026-11-22，[FTF 真空續演化與 Markov chain](./2026-11-22-ftf-projective-markov.md)，`partial`。投影後清零腔場，讓同點、同層、同 DC 態只續演化一次。獨立同模型參考通過 41／75 個 key（`e602f0dc6`，兩個 floor，兩個縮樣讀出掃描及 heralded conditional phase 的首讀）。
