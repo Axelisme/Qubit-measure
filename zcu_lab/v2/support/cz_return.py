@@ -14,6 +14,7 @@ from zcu_tools.analysis.failure import AnalysisFailed
 from zcu_tools.analysis.fitting import FitQuality, compute_fit_quality, fitcos
 from zcu_tools.analysis.fitting.shared import FitTrace, ParameterSpec, fit_shared
 
+
 @dataclass(frozen=True)
 class CZReturnFit:
     """Single-frequency diagnostics and an optional measured first-return scale.

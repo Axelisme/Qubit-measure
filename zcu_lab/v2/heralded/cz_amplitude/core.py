@@ -3,18 +3,35 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Annotated
+from textwrap import fill
+from typing import Annotated, Self
 
 import numpy as np
+from matplotlib.figure import Figure
+from matplotlib.ticker import MaxNLocator
 from numpy.typing import NDArray
-from pydantic import Field
+from pydantic import Field, model_validator
+from zcu_tools.analysis.fitting import FitQuality
+from zcu_tools.analysis.shot_uncertainty import class_probability_covariance
 from zcu_tools.cfg_model import ConfigBase, FieldMeta
 from zcu_tools.experiment import Experiment
+from zcu_tools.experiment.records import RunRecord
+from zcu_tools.experiment.v2.utils.round_zcu import sweep2array
+from zcu_tools.plotting.plots import Plots
 from zcu_tools.program.v2 import Pulse, Reset, SweepCfg
 from zcu_tools.program.v2.modules import MuxReadout
 
-from zcu_lab.v2.support.paired_counts import POINT_ALIAS_DESCRIPTION
+from zcu_lab.v2.support.cz_return import CZReturnFit, fit_return
+from zcu_lab.v2.support.paired_counts import (
+    POINT_ALIAS_DESCRIPTION,
+    joint_probabilities,
+    validate_qubit_tones,
+)
 from zcu_lab.v2.support.paired_drive import QubitDriveCfg
+
+_HERALDS = ("gg", "ge", "eg", "ee")
+_CZ_INPUTS = ("11", "10", "01", "00")
+_SCALE_LABEL = "Common CZ gain multiplier (dimensionless)"
 
 
 class HeraldedCZAmplitudeCfg(ConfigBase):
@@ -118,6 +135,25 @@ class HeraldedCZAmplitudeCfg(ConfigBase):
         ),
     ]
 
+    @model_validator(mode="after")
+    def validate_pair(self) -> Self:
+        """Require calibrated tone positions, matching drive lines and a valid scan."""
+        validate_qubit_tones(self.readout, self.qubit1_tone, self.qubit2_tone)
+        if (
+            self.drive.qubit1.ch != self.x180_qubit1.ch
+            or self.drive.qubit2.ch != self.x180_qubit2.ch
+        ):
+            raise ValueError("Each CZ line must use its qubit's calibrated Xπ generator")
+        scales = sweep2array(self.scale)
+        if (
+            len(scales) < 2
+            or not np.all(np.isfinite(scales))
+            or np.any(scales < 0)
+            or np.any(np.diff(scales) <= 0)
+        ):
+            raise ValueError("Common gain scales must be finite, nonnegative and strictly increasing")
+        return self
+
 
 @dataclass(frozen=True)
 class HeraldedCZAmplitudeResult:
@@ -132,7 +168,129 @@ class HeraldedCZAmplitudeResult:
     sums: NDArray[np.float64]
 
 
+@dataclass(frozen=True)
+class HeraldedCZAmplitudeAnalysis:
+    """First-return diagnostics from the measured gg herald row only.
+
+    scale is the first positive return covered by measurements starting at
+    zero, or None with a reason. period is the fitted period (dimensionless)
+    and error its standard error. offset and contrast describe conditional
+    P(gg). fit_quality reports residual and uncertainty metrics without an
+    acceptance threshold. Numeric diagnostics are None if unavailable.
+    """
+
+    scale: float | None
+    period: float | None
+    error: float | None
+    offset: float | None
+    contrast: float | None
+    fit_quality: FitQuality | None
+    reason: str | None
+
+
+@dataclass(frozen=True)
+class _Returns:
+    probability: NDArray[np.float64]
+    sem: NDArray[np.float64]
+    shots: NDArray[np.float64]
+
+
 class HeraldedCZAmplitudeExp(
     Experiment[HeraldedCZAmplitudeResult, HeraldedCZAmplitudeCfg]
 ):
     """Acquire and analyze the four measured CZ return branches."""
+
+    def analyze(
+        self,
+        source: RunRecord[HeraldedCZAmplitudeCfg, HeraldedCZAmplitudeResult],
+        options: None,
+        *,
+        plots: Plots,
+    ) -> HeraldedCZAmplitudeAnalysis:
+        """Plot four measured conditional returns and fit only the gg row.
+
+        Use the saved cfg and pool both nominal preparation axes before
+        normalizing the rows. A zero or unmeasured gg point ends the fit prefix;
+        missing spectator points do not. Missing cfg, inconsistent scan axes
+        and invalid counts raise ValueError. No writeback or reclassification.
+        """
+        del options
+        cfg, result = source.cfg, source.result
+        if cfg is None:
+            raise ValueError("Heralded CZ amplitude analysis requires saved cfg")
+        if not np.array_equal(result.scales, sweep2array(cfg.scale)):
+            raise ValueError("Heralded CZ amplitude scales must match saved cfg")
+        if result.sums.shape != (2, 2, len(result.scales), 3, 3, 3, 3):
+            raise ValueError("Heralded CZ amplitude requires sums (2,2,scale,3,3,3,3)")
+
+        returns = _conditional_returns(result.sums)
+        gg_shots = returns.shots[:, 0, 0]
+        fit = fit_return(
+            result.scales,
+            returns.probability[:, 0, 0],
+            np.isfinite(gg_shots) & (gg_shots > 0),
+            gg_shots,
+        )
+        _plot_returns(plots, result.scales, returns, fit)
+        return HeraldedCZAmplitudeAnalysis(
+            fit.scale, fit.period, fit.error, fit.offset, fit.contrast, fit.fit_quality, fit.reason
+        )
+
+
+def _conditional_returns(sums: NDArray[np.float64]) -> _Returns:
+    """Pool preparations; calculate P(terminal = herald) and its shot SEM."""
+    terminal = sums[:, :, :, :2, :2].sum(axis=(0, 1))
+    shots = terminal.sum(axis=(-2, -1))
+    probabilities = joint_probabilities(terminal)
+    covariance = class_probability_covariance(terminal.reshape(-1, 2, 2, 9))
+    q1, q2 = np.indices((2, 2))
+    hit = 3 * q1 + q2
+    return _Returns(
+        probabilities[:, q1, q2, q1, q2],
+        np.sqrt(covariance[:, q1, q2, hit, hit]),
+        shots,
+    )
+
+
+def _return_figure(plots: Plots, name: str) -> Figure:
+    """Label four return panels by measured herald and inferred CZ input."""
+    fig, _ = plots.subplots(
+        num=name, nrows=2, ncols=2, sharex=True, sharey=True,
+        figsize=(10, 7), layout="constrained",
+    )
+    fig.supxlabel(_SCALE_LABEL)
+    fig.supylabel("P(terminal = herald | measured herald)")
+    for ax, herald, ket in zip(fig.axes, _HERALDS, _CZ_INPUTS, strict=True):
+        ax.set(title=f"Herald {herald} → inferred CZ input |{ket}⟩", ylim=(-0.04, 1.04))
+        ax.xaxis.set_major_locator(MaxNLocator(nbins=5))
+    return fig
+
+
+def _plot_returns(
+    plots: Plots,
+    scales: NDArray[np.float64],
+    returns: _Returns,
+    fit: CZReturnFit,
+) -> None:
+    """Draw four conditional traces with shot SEM and the gg-only fit overlay."""
+    fig = _return_figure(plots, "heralded_return")
+    for ax, (q1, q2) in zip(fig.axes, np.ndindex(2, 2), strict=True):
+        ax.errorbar(
+            scales,
+            returns.probability[:, q1, q2],
+            yerr=returns.sem[:, q1, q2],
+            fmt=".-",
+            label="Measured ± shot SEM",
+        )
+
+    gg = fig.axes[0]
+    fitted = np.isfinite(fit.curve)
+    if fitted.any():
+        gg.plot(scales[fitted], fit.curve[fitted], "k-", label="Fixed-phase cosine fit")
+    if fit.scale is None:
+        diagnostic = fill(f"No gg first return: {fit.reason}", width=85)
+    else:
+        diagnostic = f"gg first return = {fit.scale:.5g} ± {fit.error:.2g}"
+        gg.axvline(fit.scale, color="C3", ls="--", label="Selected first return")
+    gg.legend()
+    fig.suptitle(f"Heralded CZ amplitude · Qubit1, Qubit2\n{diagnostic}")
