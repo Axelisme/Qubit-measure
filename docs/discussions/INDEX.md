@@ -173,6 +173,7 @@
 
 ## Measure UI
 
+- 2026-11-24 [實驗選單 key 跟隨定義目錄](2026-11-24-registry-key-paths.md)：公開命名。分組目錄出現在選單，多入口加一段變體名，gate 核對完整登錄。
 - 2026-11-23 [Heralded RB 與 conditional phase 合併顯示 gg、ee](2026-11-23-heralded-pooled-display.md)：圖形呈現。逐點合併主圖與 Live，保留分組診斷；後記說明合併範圍由 gg、ee 擴為四類。
 - 2026-11-23 [CZ phase 的 contrast 標準誤](2026-11-23-phase-contrast-sem.md)：圖形呈現。Live 與 Analyze 傳遞獨立 X/Y 投影的 shot SEM，恰零時取最大方向。
 - 2026-11-23 [Conditional phase 與 Local Z 的圖照推導順序](2026-11-23-phase-figures-physics-order.md)：圖形呈現。主圖從 Bloch 向量、累積相位到條件相位；診斷量另放；Live 只畫已完整頻率。

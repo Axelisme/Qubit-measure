@@ -1,8 +1,9 @@
 """Run the fast quality gates in one command.
 
 With --base, run formatting on touched files, import contracts, script awaits,
-MCP text budgets and the ratchet. Some checks scan the whole repository or launch
-subprocesses, so runtime is not proportional only to the changed file count.
+MCP text budgets, registry key paths and the ratchet. Some checks scan the whole
+repository or launch subprocesses, so runtime is not proportional only to the
+changed file count.
 
 Collection and behavioral tests stay separate: this command does not establish
 that tests collect consistently or that the changed behavior passes. Runtime
@@ -66,6 +67,11 @@ STATUS_CHECKS: Final = (
         "mcp text budget",
         (sys.executable, str(_TOOLS_DIR / "check_mcp_text_budget.py")),
         "overage_count",
+    ),
+    Check(
+        "registry key paths",
+        (sys.executable, str(_TOOLS_DIR / "check_registry_key_paths.py")),
+        "violation_count",
     ),
     Check("ruff", ("ruff", "check", "--output-format", "json", "."), "__len__"),
     Check(
@@ -182,6 +188,12 @@ def steps(base: str, files: tuple[str, ...], *, fix: bool) -> tuple[Step, ...]:
         Step(
             "mcp text budget",
             (sys.executable, str(_TOOLS_DIR / "check_mcp_text_budget.py")),
+        )
+    )
+    found.append(
+        Step(
+            "registry key paths",
+            (sys.executable, str(_TOOLS_DIR / "check_registry_key_paths.py")),
         )
     )
     found.append(

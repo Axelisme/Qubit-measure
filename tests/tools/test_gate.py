@@ -96,6 +96,41 @@ def test_main_status_reports_mcp_budget_overages_without_a_base(
     assert reading.split()[-1] == str(overage_count)
 
 
+@pytest.mark.parametrize(
+    ("argv", "expected_exit", "expected_reading"),
+    [
+        (["--base", "abcdef1234", "--no-fix"], 1, "FAIL registry key paths"),
+        ([], 0, "registry key paths 1"),
+    ],
+    ids=["comparison-with-no-changed-files", "status"],
+)
+def test_main_runs_the_registry_path_check_and_reports_failures(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    argv: list[str],
+    expected_exit: int,
+    expected_reading: str,
+) -> None:
+    def external_tool(
+        command: tuple[str, ...], **_kwargs: object
+    ) -> subprocess.CompletedProcess[str]:
+        if any(Path(part).name == "check_registry_key_paths.py" for part in command):
+            return subprocess.CompletedProcess(
+                command, 1, '{"violation_count": 1}', "bad key"
+            )
+        if command[:2] == ("git", "rev-parse"):
+            return subprocess.CompletedProcess(command, 0, "abcdef1234\n", "")
+        return subprocess.CompletedProcess(
+            command, 0, "" if command[0] == "git" else "{}", ""
+        )
+
+    monkeypatch.setattr(subprocess, "run", external_tool)
+
+    assert gate.main(argv) == expected_exit
+    rows = capsys.readouterr().out.splitlines()
+    assert any(row.split() == expected_reading.split() for row in rows)
+
+
 def test_status_runs_a_shared_command_once_and_reads_each_count(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -138,6 +173,7 @@ def test_formatting_runs_before_anything_measures_the_code() -> None:
         "import contracts",
         "script awaits",
         "mcp text budget",
+        "registry key paths",
         "ratchet",
     ]
 
@@ -146,7 +182,13 @@ def test_the_ratchet_runs_even_when_no_python_file_changed() -> None:
     """A candidate can widen a per-file-ignore without touching any Python."""
     names = [step.name for step in gate.steps("abc", (), fix=True)]
 
-    assert names == ["import contracts", "script awaits", "mcp text budget", "ratchet"]
+    assert names == [
+        "import contracts",
+        "script awaits",
+        "mcp text budget",
+        "registry key paths",
+        "ratchet",
+    ]
 
 
 def test_the_rewriting_steps_receive_only_the_changed_files() -> None:
