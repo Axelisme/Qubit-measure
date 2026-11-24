@@ -2,23 +2,31 @@
 
 from dataclasses import dataclass
 from itertools import pairwise
-from typing import Annotated, ClassVar, Self
+from textwrap import fill
+from typing import Annotated, ClassVar, Literal, Self, TypeAlias
 
 import numpy as np
+from matplotlib.ticker import MaxNLocator
 from numpy.typing import NDArray
 from pydantic import Field, model_validator
+from zcu_lab.v2.support.heralded_projection import align_terminal_counts
 from zcu_lab.v2.support.paired_counts import (
     POINT_ALIAS_DESCRIPTION,
     validate_qubit_tones,
 )
 from zcu_lab.v2.support.paired_drive import QubitDriveCfg
 from zcu_lab.v2.support.paired_ramsey import (
+    CountQuadratures,
+    complete_projections,
     count_phase,
     count_quadratures,
+    fit_count_phase_slopes,
     phase_variance,
+    wrap_phase,
 )
 from zcu_tools.analysis.fitting import FitQuality
 from zcu_tools.analysis.fitting.phase_line import fit_phase_line
+from zcu_tools.analysis.fitting.phase_slopes import PhaseSlopeFit
 from zcu_tools.cfg_model import ConfigBase, FieldMeta
 from zcu_tools.experiment import (
     Experiment,
@@ -35,7 +43,15 @@ from zcu_tools.program.v2.modules import MuxReadout
 
 from ..counts import terminal_counts
 
-_TARGETS = ("qubit1", "qubit2")
+_Target: TypeAlias = Literal["qubit1", "qubit2"]
+_Herald: TypeAlias = tuple[Literal["g", "e"], Literal["g", "e"]]
+_TARGETS: tuple[_Target, _Target] = ("qubit1", "qubit2")
+
+# For each target: spectator g/e, then target g/e. Labels stay in physical order.
+_HERALDS: dict[_Target, tuple[tuple[_Herald, _Herald], tuple[_Herald, _Herald]]] = {
+    "qubit1": ((("g", "g"), ("e", "g")), (("g", "e"), ("e", "e"))),
+    "qubit2": ((("g", "g"), ("g", "e")), (("e", "g"), ("e", "e"))),
+}
 
 
 @dataclass(frozen=True)
@@ -52,16 +68,16 @@ class LocalZHeraldedResult:
 
 @dataclass(frozen=True)
 class LocalZJointFit:
-    """Shared slope and its 1σ error (deg/CZ), plus the negative-slope correction (deg).
+    """Shared slope and its 1σ error (deg/CZ); correction (deg) for spectator g only.
 
-    An unavailable fit has all numeric fields None and a reason. fit_quality
-    describes the residuals and uncertainty of the joint model, not an acceptance gate.
+    An unavailable fit has all numeric fields None and a reason. Reduced χ²
+    compares residuals to count variances; it is not an acceptance threshold.
     """
 
     slope_deg: float | None = None
     correction_deg: float | None = None
     slope_error_deg: float | None = None
-    fit_quality: FitQuality | None = None
+    reduced_chi_square: float | None = None
     reason: str | None = None
 
 
@@ -104,6 +120,14 @@ class LocalZHeraldedAnalysis:
     fits: tuple[LocalZJointFit, LocalZJointFit]
     gg_only: tuple[LocalZGGFit, LocalZGGFit]
     spectator_comparisons: tuple[LocalZSpectatorComparison, LocalZSpectatorComparison]
+
+
+@dataclass(frozen=True)
+class _TargetFit:
+    model: PhaseSlopeFit
+    main: LocalZJointFit
+    excited: LocalZJointFit
+    comparison: LocalZSpectatorComparison
 
 
 class LocalZHeraldedCfg(ConfigBase):
@@ -292,8 +316,12 @@ class LocalZHeraldedExp(Experiment[LocalZHeraldedResult, LocalZHeraldedCfg]):
         *,
         plots: Plots,
     ) -> LocalZHeraldedAnalysis:
-        """Analyze a classified record; reject missing cfg, wrong shape or train axes."""
-        del options, plots
+        """Fit each spectator pair and keep gg only as a separate diagnostic.
+
+        Plot aligned observations even if a group cannot support a fit. Reject
+        records without cfg or with inconsistent train or count axes.
+        """
+        del options
         cfg, data = source.cfg, source.result
         if cfg is None:
             raise ValueError("Local Z analysis requires saved source cfg")
@@ -303,18 +331,176 @@ class LocalZHeraldedExp(Experiment[LocalZHeraldedResult, LocalZHeraldedCfg]):
             raise ValueError(
                 "Expected target × X/Y × n × herald Q1/Q2 × terminal Q1/Q2 counts"
             )
-        # Baseline for the focused red probe: only the existing gg estimate is available.
-        return LocalZHeraldedAnalysis(
-            (
-                LocalZJointFit(reason="No shared slope"),
-                LocalZJointFit(reason="No shared slope"),
-            ),
-            _gg_diagnostics(data.gate_counts, data.sums),
-            (
-                LocalZSpectatorComparison(reason="No spectator comparison"),
-                LocalZSpectatorComparison(reason="No spectator comparison"),
-            ),
+        complete = complete_projections(
+            data.sums.sum(axis=(-4, -3, -2, -1)), cfg.reps * cfg.rounds
         )
+        fits: list[LocalZJointFit] = []
+        comparisons: list[LocalZSpectatorComparison] = []
+        gg_only = _gg_diagnostics(data.gate_counts, data.sums)
+        for t, target in enumerate(_TARGETS):
+            groups = _target_groups(data.sums[t], target)
+            fitted = _fit_target(data.gate_counts, complete[t], groups)
+            main, comparison = (_summarize(fitted, target, s) for s in range(2))
+            fits.append(main)
+            delta = _compare_spectators(main, comparison)
+            comparisons.append(delta)
+            _plot_target(
+                plots, data.gate_counts, target, groups,
+                _TargetFit(fitted, main, comparison, delta),
+            )
+        return LocalZHeraldedAnalysis(
+            (fits[0], fits[1]), gg_only, (comparisons[0], comparisons[1])
+        )
+
+
+def _target_groups(
+    sums: NDArray[np.float64], target: _Target
+) -> tuple[CountQuadratures, CountQuadratures]:
+    """Return the two target herald groups, each with spectator × X/Y × n axes."""
+    groups = []
+    for g, e in zip(*_HERALDS[target], strict=True):
+        projected = [
+            count_quadratures(
+                align_terminal_counts(terminal_counts(sums, h), target, h), target
+            )
+            for h in (g, e)
+        ]
+        groups.append(
+            CountQuadratures(
+                np.stack([group.values for group in projected]),
+                np.stack([group.variances for group in projected]),
+                np.stack([group.acquired for group in projected]),
+            )
+        )
+    return groups[0], groups[1]
+
+
+def _fit_target(
+    ns: NDArray[np.int64],
+    complete: NDArray[np.bool_],
+    groups: tuple[CountQuadratures, CountQuadratures],
+) -> PhaseSlopeFit:
+    """Use the shared phase fitter with one coordinate and two spectator channels."""
+    return fit_count_phase_slopes(
+        ns,
+        *(
+            CountQuadratures(
+                group.values[..., None],
+                group.variances[..., None],
+                group.acquired[..., None],
+            ).for_fit(complete[None, ..., None])
+            for group in groups
+        ),
+    )
+
+
+def _summarize(fitted: PhaseSlopeFit, target: _Target, spectator: int) -> LocalZJointFit:
+    fit = fitted.fits[spectator][0]
+    if fit is None:
+        g, e = ("".join(herald) for herald in _HERALDS[target][spectator])
+        return LocalZJointFit(
+            reason=f"{g} + {e} (groups 0–1): {fitted.reasons[spectator][0]}"
+        )
+    slope = float(fitted.slopes_deg[spectator, 0])
+    slope_error = float(fitted.errors_deg[spectator, 0])
+    chi_square = fit.diagnostics.reduced_chi_square
+    return LocalZJointFit(
+        slope_deg=slope,
+        correction_deg=-slope if spectator == 0 else None,
+        slope_error_deg=slope_error if np.isfinite(slope_error) else None,
+        reduced_chi_square=chi_square if np.isfinite(chi_square) else None,
+    )
+
+
+def _compare_spectators(
+    main: LocalZJointFit, excited: LocalZJointFit
+) -> LocalZSpectatorComparison:
+    if main.slope_deg is None:
+        return LocalZSpectatorComparison(reason=f"Spectator g: {main.reason}")
+    if excited.slope_deg is None:
+        return LocalZSpectatorComparison(reason=f"Spectator e: {excited.reason}")
+    return LocalZSpectatorComparison(wrap_phase(excited.slope_deg - main.slope_deg))
+
+
+def _plot_target(
+    plots: Plots,
+    ns: NDArray[np.int64],
+    target: _Target,
+    groups: tuple[CountQuadratures, CountQuadratures],
+    fitted: _TargetFit,
+) -> None:
+    """Show measured X/Y and per-group predictions, with one row per spectator."""
+    fig, _ = plots.subplots(
+        num=f"local_z_{target}",
+        nrows=2,
+        ncols=2,
+        sharex=True,
+        sharey=True,
+        figsize=(10, 8),
+        layout="constrained",
+    )
+    fig.suptitle(f"Heralded Local Z · Qubit{target[-1]}")
+    fig.supxlabel("CZ gates, n (count) · Bars: shot SEM")
+    fig.supylabel("Aligned target projection")
+    grid = np.linspace(ns[0], ns[-1], 401)
+    for s, summary in enumerate((fitted.main, fitted.excited)):
+        state = ("g", "e")[s]
+        detail = ""
+        if s == 0 and summary.correction_deg is not None:
+            detail = f"Correction {summary.correction_deg:+.2f}°"
+        elif s == 1 and fitted.comparison.delta_deg_per_gate is not None:
+            detail = f"e − g: {fitted.comparison.delta_deg_per_gate:+.2f}°/CZ"
+        value = _slope_label(summary)
+        for q, quadrature in enumerate(("X", "Y")):
+            ax = fig.axes[s * 2 + q]
+            name = f"Spectator {state} · {quadrature}"
+            annotation = value if q == 0 else detail
+            ax.set_title(f"{name}\n{annotation}" if annotation else name)
+            ax.xaxis.set_major_locator(MaxNLocator(integer=True))
+            fit = fitted.model.fits[s][0]
+            for h, (group, herald) in enumerate(
+                zip(groups, _HERALDS[target][s], strict=True)
+            ):
+                color = f"C{h}"
+                label = "".join(herald)
+                shots = group.acquired[s, q]
+                variance = group.variances[s, q]
+                sem = np.sqrt(
+                    np.divide(
+                        variance * shots,
+                        shots - 1,
+                        out=np.full_like(shots, np.nan),
+                        where=shots > 1,
+                    )
+                )
+                ax.errorbar(
+                    ns,
+                    group.values[s, q],
+                    yerr=sem,
+                    fmt=("o", "s")[h],
+                    color=color,
+                    label=f"{label} · {quadrature}",
+                )
+                phase = fitted.model.accumulated_phase_deg(
+                    grid, channel=s, coordinate=0, group=h
+                )
+                if fit is not None and phase is not None:
+                    model = fit.values[f"amplitude_{h}"] * (np.cos, np.sin)[q](
+                        np.deg2rad(phase)
+                    )
+                    ax.plot(grid, model, color=color, label=f"{label} fit")
+            ax.legend(ncols=2, fontsize="small")
+
+
+def _slope_label(summary: LocalZJointFit) -> str:
+    if summary.slope_deg is None:
+        return fill(summary.reason or "Slope unavailable", width=43)
+    error = summary.slope_error_deg
+    value = f"{summary.slope_deg:+.2f}"
+    value += f" ± {error:.2g}°/CZ" if error is not None else "°/CZ (SE unavailable)"
+    if summary.reduced_chi_square is not None:
+        value += f" · Reduced χ² {summary.reduced_chi_square:.2g}"
+    return value
 
 
 def _gg_diagnostics(
