@@ -11,15 +11,18 @@
 3. **Interleaved Clifford depth** 選在已量的 IRB 衰減中段。**Clifford sequence seeds** 填 3–5 個不同整數。**Optimizer random seed** 控制候選，不改 Clifford 序列。
 4. **Avoid frequencies (MHz)** 可填絕對實驗室頻率，例如量到但不想驅動的躍遷。留空時頻譜不畫頻帶。這個欄位不加入最優化目標。
 
-評估 0 直接播放原 pulse 並套用原 local Z。原 `arb` 不對稱時也照原樣播放。CMA 另外把整段起點的 I 取對稱分量，Q 取反對稱分量，再擬合半段樣條節點。候選的 I 鏡像，Q 反號鏡像。中心 I 斜率為零，振幅可調。中心 Q 為零。
+評估 0 直接播放原 pulse 並套用原 local Z。原 `arb` 不對稱時也照原樣播放。若原 pulse 是 FAST-DRAG 資產，在 **FAST-DRAG start weights** 填入生成該資產的 `c1`、`c2`、`c3` 及有號 β（ns）。CMA 直接用這四個值建立起點，不從資產樣本擬合。留空時，`cosine` 起點只用 `c1`，β 為零；其他波形先把 I 投影到三個諧波，再選使 Q 殘差最小的 β。
+
+設 `T` 為兩線共用的編譯總長。I 是前三個 `1 − cos(2πnt/T)` 項的加權和，Q 為 `(β/2π)·dI/dt`。兩端 I 的值與斜率為零，Q 的值為零，Q 的斜率不受限。CMA 固定起點絕對值最大的 I 權重及其符號，只搜尋另外兩個權重相對於它的比例。這樣不重複搜尋整體振幅。每次 Run 合計兩個比例、β、場倍率 `g` 和兩個 local Z，共六個搜尋座標。
 
 | 欄位 | 控制的物理量 |
 | --- | --- |
-| Initial I/Q control-point spread | 半段各三個 I、Q 節點。每個節點的範圍為 −1 到 1，指定歸一前的形狀。 |
-| Minimum / Maximum field multiplier g；Initial gain spread | `g` 同時乘兩線的起始擬合複數峰。範圍須包含 1，spread 用 ln g。兩線的 raw gain 在起點換算一次，之後只乘 `g`。任一線的最大 raw gain 超出 ±1 時，Run 在取數前報錯。 |
+| Initial I harmonic ratio spread | 兩個自由 I 權重相對於固定權重絕對值的初始標準差。 |
+| Initial FAST-DRAG β spread | β 的初始標準差，單位 ns，預設 10 ns。β 可正可負。 |
+| Minimum / Maximum field multiplier g；Initial gain spread | `g` 是兩線共用場倍率。範圍須包含 1，spread 用 ln g。兩線的 raw gain 在起點換算一次。FAST-DRAG 和 cosine 用原包絡峰，其他波形用投影包絡峰；之後只乘 `g`。任一線的最大 raw gain 超出 ±1 時，Run 在取數前報錯。 |
 | Initial local Z spread | 每個 CZ 後套用的兩個 virtual Z 角，單位 deg。 |
 
-非零候選的 I、Q 共同除以複數包絡峰，保持兩者比例。全零候選記零分，不取數，也不參與勝選。全零起始擬合則在取數前報錯。候選時長固定在起點總長。每個候選都用單一完整的記憶體 arb 包絡，尾端補零到 16 samples 的倍數。記憶體用量約等於整段樣本數。若超過容量，QICK 在上傳時報錯。
+非零候選的 I、Q 共同除以複數包絡峰，保持兩者比例。全零候選記零分，不取數，也不參與勝選。初始 I 包絡全零時，Run 在取數前報錯。候選時長固定在起點總長。每個候選都用單一完整的記憶體 arb 包絡，尾端補零到 16 samples 的倍數。記憶體用量約等於整段樣本數。若超過容量，QICK 在上傳時報錯。
 
 總評估數為 `1 + Optimizer generations × Candidates per generation`。每個實測候選以相同的 seed 數與 Reps 取數。每個 seed 以保留 shots 為分母，包含 other。某個 seed 沒有保留 shots 時，Run 報出該 seed。Stop 時，未完成候選已保留的 shots 仍存入結果，但不算該候選的目標值。
 
@@ -29,9 +32,9 @@
 - **Envelopes** 疊畫評估 0 的顯示包絡、CMA 初始均值和最佳 CMA 候選。時間用 µs，幅度用 Qubit1 的 DDS gain 等效尺度，包含原 `flat_top` ramp 與平台的相對幅度。
 - **Spectrum** 用複數 I/Q 比較評估 0 和最佳評估。0 MHz 是 CZ 載波，各曲線以自己的載波分量為 0 dB。避免頻率換算成相對載波偏移後以 ±0.5 MHz 帶標出。
 
-**Save All** 在 Native `data.h5` 儲存具名參數、歸一後的複數峰、分類計數和起點顯示包絡。起點時長存在 `/docs/run_values` 的 `duration` 欄（秒）。參數中的角度用 rad。Labber 只匯出具名參數和峰值。
+**Save All** 用 Native tag `two_qubit/cz_optimize/fourier-v2` 保存分類計數、起點包絡、複數峰及具名參數。三個 I 權重 `i_coeff_1` 至 `i_coeff_3` 都保存，重畫不需要知道哪一項固定。β 用秒、角度用 rad。起點時長在 `/docs/run_values` 的 `duration` 欄，單位也是秒。Labber 只匯出具名參數和峰值。
 
-Load 從 Native 檔還原起點時長。檔案缺少 `/docs/run_values` 或 `duration` 時，Load 會拒讀並指出來源檔；請用當初寫檔的版本開啟舊格式。若 Load 只報 cfg 無法還原，仍可看圖，但沒有避免頻率帶，也不能寫回。
+**Load** 不讀舊節點版結果，會指出需要 `fourier-v2`。舊檔請用原寫檔版本開啟。新版檔案缺少起點時長時也會拒讀。若只有 cfg 無法還原，仍可看圖，但沒有避免頻率帶，也不能寫回。
 
 起點引用 `arb` 資產時，Native 檔也保存資產路徑和 SHA-256，包括 `flat_top` 的資產 ramp。若資產缺檔或內容已變更，Analyze 摘要會指出路徑和原因。分析用已保存的時長和樣本，不用目前資產重建起點。
 

@@ -1,15 +1,16 @@
-"""CZ start display, symmetric arb fit, and fixed-duration rendering."""
+"""CZ start display, FAST-DRAG coefficients and fixed-duration arb rendering."""
 
 from dataclasses import dataclass
 from enum import IntEnum
 from math import lcm
-from typing import Literal, override
+from typing import Annotated, Literal, override
 
 import numpy as np
 from numpy.typing import NDArray
+from pydantic import FiniteFloat
 from qick import QickConfig
 from qick.asm_v2 import QickProgramV2
-from scipy.interpolate import CubicSpline
+from zcu_tools.cfg_model import ConfigBase, FieldMeta
 from zcu_tools.core.waveform_format import WaveformSamples
 from zcu_tools.program.v2 import (
     Pulse,
@@ -22,12 +23,30 @@ from zcu_tools.program.v2.modules.waveform import InMemoryArbWaveformCfg, Wavefo
 
 from zcu_lab.v2.support.paired_drive import QubitDriveCfg
 
-KNOTS = 3
-KNOT_COLUMNS = 2 * KNOTS
-GAIN_INDEX = KNOT_COLUMNS
+# Three I harmonics retain the FAST-DRAG spectral design. Q uses their
+# derivative, not separate weights. Fixing one I weight eliminates scale.
+I_TERMS = 3
+I_RATIO_COUNT = I_TERMS - 1
+BETA_INDEX = I_TERMS
+GAIN_INDEX = BETA_INDEX + 1
 Z1 = GAIN_INDEX + 1
 Z2 = Z1 + 1
 PARAM_COUNT = Z2 + 1
+SEARCH_PARAM_COUNT = PARAM_COUNT - 1
+
+
+class FastDragStartCfg(ConfigBase):
+    """Original FAST-DRAG design weights and signed derivative coefficient.
+
+    c1, c2 and c3 multiply 1-cos(nθ), for n=1, 2 and 3. Their common scale
+    is arbitrary. beta_ns sets the derivative quadrature in nanoseconds.
+    The two calibrated pulses still play unmodified at evaluation zero.
+    """
+
+    c1: Annotated[FiniteFloat, FieldMeta(label="First I harmonic c1")]
+    c2: Annotated[FiniteFloat, FieldMeta(label="Second I harmonic c2")]
+    c3: Annotated[FiniteFloat, FieldMeta(label="Third I harmonic c3")]
+    beta_ns: Annotated[FiniteFloat, FieldMeta(label="FAST-DRAG β", unit="ns")]
 
 
 class StartStyle(IntEnum):
@@ -67,14 +86,14 @@ class _StartingEnvelope:
 
 @dataclass(frozen=True)
 class StartShape:
-    """Display and fit snapshot for the start; evaluation 0 plays the unmodified cfg.
+    """Original pulse display and separate CMA start for the same duration.
 
     iq is the played Qubit1 field sampled uniformly in DDS const units.
     style is the original shape identity. duration_us is its quantized support.
     cycle_us and samples_per_cycle are Qubit1's grid. carrier_mhz is the
-    shared programmed carrier. knots hold the free I then Q values.
-    arb_gains are each line's raw gain at physical g=1. field_at_one is
-    Qubit1's equivalent DDS gain at g=1 for the fit and candidates.
+    shared programmed carrier. coefficients are c1…c3 with max |c| = 1;
+    beta_s is the FAST-DRAG coefficient in seconds. arb_gains are each line's
+    raw gain at physical g=1; field_at_one is Qubit1's equivalent DDS gain.
     """
 
     iq: NDArray[np.complex128]
@@ -83,9 +102,24 @@ class StartShape:
     cycle_us: float
     samples_per_cycle: int
     carrier_mhz: float
-    knots: NDArray[np.float64]
+    coefficients: NDArray[np.float64]
+    beta_s: float
     arb_gains: NDArray[np.float64]
     field_at_one: float
+
+    @property
+    def i_ratios(self) -> NDArray[np.float64]:
+        """Return the two free I weights relative to the anchor's magnitude."""
+        return np.delete(self.coefficients, self._anchor)
+
+    def expand_i(self, ratios: NDArray[np.float64]) -> NDArray[np.float64]:
+        """Return three I weights in harmonic order, inserting the signed anchor."""
+        anchor = self._anchor
+        return np.insert(ratios, anchor, self.coefficients[anchor])
+
+    @property
+    def _anchor(self) -> int:
+        return int(np.argmax(np.abs(self.coefficients)))
 
 
 def _native_style(style: StartStyle) -> _NativeStyle:
@@ -167,39 +201,68 @@ def _compiled_cycles(pulse: PulseCfg, board: QickConfig) -> int:
     return int(board.us2cycles(duration, gen_ch=pulse.ch))
 
 
-def _spline(knots: NDArray[np.float64], *, in_phase: bool) -> CubicSpline:
-    # Start I and Q at zero; only Q must also vanish at the center.
-    zero = np.zeros_like(knots[:1])
-    half = np.concatenate((zero, knots) if in_phase else (zero, knots, zero))
-    reflection = half[-2::-1] if in_phase else -half[-2::-1]
-    full = np.concatenate((half, reflection))
-    return CubicSpline(np.linspace(0.0, 1.0, len(full)), full, bc_type="natural")
+_HARMONICS = np.arange(1, I_TERMS + 1, dtype=np.float64)
 
 
-def _fit_knots(iq: NDArray[np.complex128]) -> NDArray[np.float64]:
-    # Reflect the centers of the DAC sample intervals. Odd I and even Q
-    # disappear from the mean but remain in the measured start.
-    domain = (np.arange(len(iq)) + 0.5) / len(iq)
-    even_i = (iq.real + iq.real[::-1]) / 2
-    odd_q = (iq.imag - iq.imag[::-1]) / 2
-    basis = np.eye(KNOTS)
-    return np.concatenate(
-        [
-            np.linalg.lstsq(
-                _spline(basis, in_phase=in_phase)(domain), values, rcond=None
-            )[0]
-            for in_phase, values in ((True, even_i), (False, odd_q))
-        ]
+def _harmonic_angles(samples: int) -> NDArray[np.float64]:
+    return (2 * np.pi / samples) * np.arange(samples)[:, None] * _HARMONICS
+
+
+def _i_basis(angles: NDArray[np.float64]) -> NDArray[np.float64]:
+    return 1.0 - np.cos(angles)
+
+
+def _quadrature(
+    angles: NDArray[np.float64], coefficients: NDArray[np.float64]
+) -> NDArray[np.float64]:
+    # Q = (β/2π) dI/dt; multiply this unit-β/T profile by β/T.
+    return np.sin(angles) @ (_HARMONICS * coefficients)
+
+
+def _starting_coefficients(
+    iq: NDArray[np.complex128],
+    style: StartStyle,
+    duration_s: float,
+    fast_drag: FastDragStartCfg | None,
+) -> tuple[NDArray[np.float64], float, float]:
+    if fast_drag is not None:
+        # The design weights describe shape, not the asset's playback scale.
+        return (
+            np.array([fast_drag.c1, fast_drag.c2, fast_drag.c3]),
+            fast_drag.beta_ns * 1e-9,
+            float(np.max(np.abs(iq))),
+        )
+    if style == StartStyle.COSINE:
+        return np.array([1.0, 0.0, 0.0]), 0.0, float(np.max(np.abs(iq)))
+
+    # Other starts need a projection. Fit I on the playback grid, then choose
+    # the single β that best matches the original Q for that I.
+    angles = _harmonic_angles(len(iq))
+    basis = _i_basis(angles)
+    coefficients = np.asarray(
+        np.linalg.lstsq(basis, iq.real, rcond=None)[0], dtype=np.float64
     )
+    derivative = _quadrature(angles, coefficients)
+    norm = float(derivative @ derivative)
+    beta_ratio = float(derivative @ iq.imag) / norm if norm else 0.0
+    peak = float(np.max(np.hypot(basis @ coefficients, beta_ratio * derivative)))
+    return coefficients, beta_ratio * duration_s, peak
 
 
 def prepare_start(
-    drive: QubitDriveCfg, board: QickConfig, *, g_max: float
+    drive: QubitDriveCfg,
+    board: QickConfig,
+    *,
+    g_max: float,
+    fast_drag: FastDragStartCfg | None = None,
 ) -> StartShape:
-    """Evaluate and fit aligned scalar pulses before acquiring any counts.
+    """Evaluate aligned pulses and seed the search without changing evaluation 0.
 
-    Compare shapes on Qubit1's display grid, then require equal played durations
-    on the two native generator grids before fitting on Qubit1's grid.
+    Compare shapes on Qubit1's grid and require equal compiled durations. If
+    given, fast_drag must describe the selected calibrated asset's design;
+    use its weights and β directly. Cosine seeds only c1. Project other
+    shapes onto the FAST-DRAG form. Reject an empty or nonfinite start and
+    g_max values that overdrive either line in arb playback.
     """
     first, second = drive.qubit1, drive.qubit2
     start = _starting_envelope(first.waveform, board, first.ch)
@@ -231,20 +294,17 @@ def prepare_start(
     # Include the compiled support in T, but do not model the analog response.
     tail_samples = first_cycles * samples_per_cycle - len(start.iq)
     iq = np.pad(start.iq, (0, tail_samples)) if tail_samples else start.iq
-    knots = _fit_knots(iq)
-    _, fit_i, fit_q = _sample_knots(
-        knots,
-        duration_us=duration_us,
-        cycle_us=cycle_us,
-        samples_per_cycle=samples_per_cycle,
+    coefficients, beta_s, p0 = _starting_coefficients(
+        iq, start.style, duration_us * 1e-6, fast_drag
     )
-    p0 = float(np.max(np.hypot(fit_i, fit_q)))
-    if not np.isfinite(p0) or p0 == 0.0:
-        raise ValueError("CZ starting fit must have a finite nonzero complex peak")
-
-    # Only re-express the shape in the CMA box. Keep the original fit's
-    # physical field by absorbing its unscaled peak into both gains once.
-    knots /= max(1.0, float(np.max(np.abs(knots))))
+    anchor = float(np.max(np.abs(coefficients)))
+    if not (np.isfinite(p0) and p0 > 0.0 and np.isfinite(anchor) and anchor > 0.0):
+        raise ValueError(
+            "CZ Fourier start needs a finite nonzero I shape and complex peak"
+        )
+    # Keep the largest start weight fixed at ±1 for this search. Changing
+    # either other weight changes shape rather than rescaling the envelope.
+    coefficients /= anchor
     original = _native_style(start.style)
     arb_gains = []
     for name, pulse in (("qubit1", first), ("qubit2", second)):
@@ -267,31 +327,36 @@ def prepare_start(
         cycle_us=cycle_us,
         samples_per_cycle=samples_per_cycle,
         carrier_mhz=float(first.freq),
-        knots=knots,
+        coefficients=coefficients,
+        beta_s=beta_s,
         arb_gains=np.array(arb_gains, dtype=np.float64),
         field_at_one=arb_gains[0] * pulse_output_scale(board, ch, "arb"),
     )
 
 
-def _sample_knots(
-    knots: NDArray[np.float64],
+def _sample_fourier(
+    weights: NDArray[np.float64],
     *,
     duration_us: float,
     cycle_us: float,
     samples_per_cycle: int,
 ) -> tuple[NDArray[np.float64], NDArray[np.float64], NDArray[np.float64]]:
-    if not np.all(np.isfinite(knots)):
-        raise ValueError("CZ envelope knots must be finite")
     samples = round(duration_us / cycle_us) * samples_per_cycle
     block = lcm(16, samples_per_cycle)
     padded = ((samples + block - 1) // block) * block
     step_us = cycle_us / samples_per_cycle
-    domain = np.arange(samples, dtype=np.float64) / samples
     time = np.arange(padded + 1, dtype=np.float64) * step_us
     i = np.zeros_like(time)
     q = np.zeros_like(time)
-    i[:samples] = _spline(knots[:KNOTS], in_phase=True)(domain)
-    q[:samples] = _spline(knots[KNOTS:], in_phase=False)(domain)
+    angles = _harmonic_angles(samples)
+    coefficients = weights[:I_TERMS]
+    scale = float(np.max(np.abs(coefficients)))
+    # The final normalized samples do not depend on the common I scale.
+    if scale:
+        coefficients = coefficients / scale
+    beta_ratio = weights[BETA_INDEX] / (duration_us * 1e-6)
+    i[:samples] = _i_basis(angles) @ coefficients
+    q[:samples] = beta_ratio * _quadrature(angles, coefficients)
     if not (np.all(np.isfinite(i)) and np.all(np.isfinite(q))):
         raise ValueError("CZ envelope samples must be finite")
     # The last time point is the support boundary, not a DAC sample.
@@ -305,15 +370,17 @@ def render_candidate(
     cycle_us: float,
     samples_per_cycle: int,
 ) -> WaveformSamples:
-    """Sample a fixed-duration arb and normalize I and Q by one positive scale."""
-    knots = params[:KNOT_COLUMNS]
-    if not np.all(np.isfinite(knots)):
-        raise ValueError("CZ envelope knots must be finite")
-    scale = float(np.max(np.abs(knots)))
-    # The spline is linear in the knots. Scaling before evaluation avoids
-    # losing subnormal shapes to floating-point underflow inside the spline.
-    time, i, q = _sample_knots(
-        knots / scale if scale else knots,
+    """Render [c1, c2, c3, β (s), ...] on the DAC grid, with DMA zero padding.
+
+    β sets Q = (β/2π)·dI/dt. Gain and Local Z do not change the unit-peak
+    envelope. Nonfinite shape parameters or samples raise ValueError.
+    The final time point is the support boundary, not a DAC sample.
+    """
+    weights = params[:GAIN_INDEX]
+    if not np.all(np.isfinite(weights)):
+        raise ValueError("CZ Fourier shape parameters must be finite")
+    time, i, q = _sample_fourier(
+        weights,
         duration_us=duration_us,
         cycle_us=cycle_us,
         samples_per_cycle=samples_per_cycle,
