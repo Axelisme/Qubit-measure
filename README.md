@@ -25,6 +25,7 @@ uv run --directory <worktree> --no-sync -- python -m apps.measure
 
 - [量測領域詞彙](docs/CONTEXT.md) 說明參數、量測成果與分析交接用語。
 - [結果傳輸](docs/result-transfer.md)：首次以官方 rclone GUI 授權並保存雲端位置，之後使用 `python scripts/transfer_results.py upload/download <name>`，agent 可直接從 Bash 呼叫。
+- [Database 傳輸](docs/result-transfer.md#傳輸-database)：用 `python scripts/transfer_database.py` 上下載 `Database/<name>/`；共用 rclone 帳號，另選雲端父資料夾。
 - [Notebook 用途入口](notebook_md/README.md) 指向量測、分析與電路設計主題；執行流程由各 Notebook 說明。
 
 ## 資料遷移與升級
