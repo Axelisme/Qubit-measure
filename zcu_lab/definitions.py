@@ -28,6 +28,9 @@ from zcu_lab.v2.heralded.conditional_spectroscopy.gui import (
 from zcu_lab.v2.heralded.cz_amplitude.gui import (
     DEFINITION as HERALDED_CZAMPLITUDE_DEFINITION,
 )
+from zcu_lab.v2.heralded.cz_optimize.gui import (
+    DEFINITION as HERALDED_CZOPTIMIZE_DEFINITION,
+)
 from zcu_lab.v2.heralded.local_z.gui import DEFINITION as LOCAL_Z_HERALDED_DEFINITION
 from zcu_lab.v2.heralded.rb.gui import (
     DEFINITION as TWO_QUBIT_RB_HERALDED_DEFINITION,
@@ -331,6 +334,7 @@ def register_all(
         "heralded/conditional_spectroscopy": SPECTROSCOPY_HERALDED_DEFINITION,
         "heralded/conditional_phase": CONDITIONAL_PHASE_HERALDED_DEFINITION,
         "heralded/cz_amplitude": HERALDED_CZAMPLITUDE_DEFINITION,
+        "heralded/cz_optimize": HERALDED_CZOPTIMIZE_DEFINITION,
         "heralded/local_z": LOCAL_Z_HERALDED_DEFINITION,
         "heralded/rb": TWO_QUBIT_RB_HERALDED_DEFINITION,
         "fastflux/twotone": TWO_TONE_DEFINITION,
