@@ -14,8 +14,6 @@ from zcu_tools.analysis.failure import AnalysisFailed
 from zcu_tools.analysis.fitting import FitQuality, compute_fit_quality, fitcos
 from zcu_tools.analysis.fitting.shared import FitTrace, ParameterSpec, fit_shared
 
-from .._rabi_analysis import cosine
-
 
 @dataclass(frozen=True)
 class CZReturnFit:
@@ -49,7 +47,7 @@ def fit_return(
     """Fit complete prefix P00 to offset + contrast*cos(2π*scale/period).
 
     Inputs are finite ascending uniform source scales, count-derived P00
-    including incomplete NaNs, and its completion mask. No source is modified.
+    including incomplete NaNs, its completion mask and accepted shot totals. No source is modified.
     Require measured scale=0 and every requested point through the first positive
     return. A cancelled suffix may be absent; a missing interior scale ends the
     prefix. Numeric failure, zero contrast, rank deficiency or nonfinite standard
@@ -96,7 +94,7 @@ def _fit_complete_prefix(
         probability = (ys * shots + 0.5) / (shots + 1.0)
         errors = np.sqrt(probability * (1.0 - probability) / (shots + 1.0))
         weighted = fit_shared(
-            [FitTrace(xs, ys, cosine, names, errors)],
+            [FitTrace(xs, ys, _cosine, names, errors)],
             [
                 ParameterSpec(name, value, fixed=name == "phase_deg")
                 for name, value in zip(names, initial, strict=True)
@@ -172,3 +170,16 @@ def _fit_complete_prefix(
             reason="First positive return is outside the complete measured span; no extrapolation",
         )
     return replace(answer, scale=period)
+
+
+def _cosine(
+    xs: NDArray[np.float64],
+    offset: float,
+    contrast: float,
+    frequency: float,
+    phase_deg: float,
+) -> NDArray[np.float64]:
+    """Preserve the original shared-fit model's floating-point operation order."""
+    return offset + contrast * np.cos(
+        2 * np.pi * frequency * xs + np.deg2rad(phase_deg)
+    )

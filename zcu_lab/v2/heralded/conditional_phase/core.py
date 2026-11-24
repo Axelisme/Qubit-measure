@@ -40,6 +40,7 @@ from zcu_tools.program.v2 import (
 from zcu_tools.program.v2.modules import MuxReadout
 
 from zcu_lab.v2.support import live_errorbar
+from zcu_lab.v2.support.heralded_projection import align_terminal_counts
 from zcu_lab.v2.support.paired_counts import qubit_sigma
 from zcu_lab.v2.support.paired_ramsey import (
     CountQuadratures,
@@ -186,24 +187,13 @@ def _aligned_counts(
     *,
     complete: NDArray[np.bool_] | None = None,
 ) -> tuple[NDArray[np.float64], ...]:
-    """Select gg/ge/eg/ee and align each array to actual spectator and target σ.
-
-    Rows start in nominal I/Xπ order; flip them only for spectator herald e.
-    For target herald e, exchange terminal target g/e counts before reduction.
-    If given, mask incomplete projections in nominal order before relabeling.
-    """
-    target_index = 0 if target == "qubit1" else 1
+    """Select gg/ge/eg/ee and mask nominally incomplete rows before alignment."""
     aligned = []
     for herald in _HERALDS:
         counts = terminal_counts(sums, herald)
         if complete is not None:
             counts = np.where(complete[..., None, None], counts, np.nan)
-        if herald[1 - target_index] == "e":
-            counts = counts[::-1]
-        if herald[target_index] == "e":
-            # Negate σ without changing the terminal Other denominator.
-            counts = np.take(counts, [1, 0, 2], axis=target_index - 2)
-        aligned.append(counts)
+        aligned.append(align_terminal_counts(counts, target, herald, spectator_axis=0))
     return tuple(aligned)
 
 
