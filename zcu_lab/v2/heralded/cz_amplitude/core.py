@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass
 from textwrap import fill
 from typing import Annotated, ClassVar, Self
@@ -22,12 +23,15 @@ from zcu_tools.experiment import (
     VariableSpec,
     VariableZSpec,
 )
+from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.records import RunRecord
+from zcu_tools.experiment.v2.runtime import RunOptions, Schedule, SignalBuffer
 from zcu_tools.experiment.v2.utils.round_zcu import sweep2array
 from zcu_tools.plotting.plots import Plots
-from zcu_tools.program.v2 import Pulse, Reset, SweepCfg
+from zcu_tools.program.v2 import Classify, Pulse, Reset, SweepCfg, TimelineBuilder, shot_sums
 from zcu_tools.program.v2.modules import MuxReadout
 
+from zcu_lab.v2.support import live_errorbar
 from zcu_lab.v2.support.cz_return import CZReturnFit, fit_return
 from zcu_lab.v2.support.paired_counts import (
     POINT_ALIAS_DESCRIPTION,
@@ -46,7 +50,8 @@ class HeraldedCZAmplitudeCfg(ConfigBase):
     double Xπ and terminal mux. Each of the two tone fields is a zero-based
     position in the full mux tone list, not an ADC channel number. The same
     calibrated readout is used twice. Reset is ordinary only (None omits it).
-    Signed drive gains share one increasing nonnegative dimensionless scale.
+    The Xπ pulses must share a scalar pre-delay so each inversion pair starts
+    together. Signed drive gains share an increasing nonnegative scale.
     Reps are attempts per preparation and scale per round.
     """
 
@@ -151,6 +156,15 @@ class HeraldedCZAmplitudeCfg(ConfigBase):
             or self.drive.qubit2.ch != self.x180_qubit2.ch
         ):
             raise ValueError("Each CZ line must use its qubit's calibrated Xπ generator")
+        pre1, pre2 = self.x180_qubit1.pre_delay, self.x180_qubit2.pre_delay
+        if (
+            not isinstance(pre1, (float, int))
+            or not isinstance(pre2, (float, int))
+            or not np.isfinite(pre1)
+            or pre1 < 0
+            or pre1 != pre2
+        ):
+            raise ValueError("The two Xπ pulses must have the same finite nonnegative pre-delay")
         scales = sweep2array(self.scale)
         if (
             len(scales) < 2
@@ -261,6 +275,96 @@ class HeraldedCZAmplitudeExp(
         result_validator=_validate_result_shape,
     )
 
+    def run(
+        self, config: HeraldedCZAmplitudeCfg, *, context: RunContext
+    ) -> HeraldedCZAmplitudeResult:
+        """Acquire four equal-attempt nominal preparations in one hardware program.
+
+        Start each shot with optional ordinary reset; record the readout after
+        nominal preparation and after Xπ⊗Xπ → CZ → Xπ⊗Xπ. Both reads are
+        visible, and herald outcomes never control the pulse sequence. Counts
+        sum over completed rounds; Stop keeps those rounds and leaves unmeasured
+        points as NaN. Compilation or acquisition errors propagate.
+        """
+        scales = sweep2array(config.scale)
+        buffer = SignalBuffer(
+            (2, 2, len(scales), 3, 3, 3, 3),
+            dtype=np.float64,
+            on_update=_live_returns(context.plots, scales),
+        )
+        builder = TimelineBuilder(
+            context.soccfg,
+            reps=config.reps,
+            initial_delay=config.initial_delay,
+            relax_delay=config.relax_delay,
+        )
+        builder.add_loop("prepared_qubit1", 2)
+        builder.add_loop("prepared_qubit2", 2)
+        scale = builder.add_sweep("scale", config.scale)
+        readout = MuxReadout("readout", config.readout)
+        x180_q1 = Pulse("x180_qubit1", config.x180_qubit1)
+        x180_q2 = Pulse("x180_qubit2", config.x180_qubit2)
+
+        # Reset and select the two nominal flips by loop index, not by readout.
+        if config.reset is not None:
+            builder.emit(Reset("reset", config.reset))
+        builder.fork("default", into=["prepare_q1", "prepare_q2"])
+        with (
+            builder.branch(by="prepared_qubit1", align_timeline=True, timeline="prepare_q1") as cases,
+            cases.case(1),
+        ):
+            builder.emit(x180_q1, tag="prepare_qubit1")
+        with (
+            builder.branch(by="prepared_qubit2", align_timeline=True, timeline="prepare_q2") as cases,
+            cases.case(1),
+        ):
+            builder.emit(x180_q2, tag="prepare_qubit2")
+        builder.join("prepare_q1", "prepare_q2", into="default")
+        builder.emit(readout, tag="herald")
+
+        # Invert the actual input, play both signed gains, then invert back.
+        builder.fork("default", into=["invert_q1", "invert_q2"])
+        builder.emit(x180_q1, timeline="invert_q1", tag="invert_qubit1")
+        builder.emit(x180_q2, timeline="invert_q2", tag="invert_qubit2")
+        builder.join("invert_q1", "invert_q2", into="default")
+
+        builder.fork("default", into=["cz_q1", "cz_q2"])
+        builder.emit(
+            Pulse("cz_qubit1", config.drive.qubit1, gain=float(config.drive.qubit1.gain) * scale),
+            timeline="cz_q1",
+            tag="cz_qubit1",
+        )
+        builder.emit(
+            Pulse("cz_qubit2", config.drive.qubit2, gain=float(config.drive.qubit2.gain) * scale),
+            timeline="cz_q2",
+            tag="cz_qubit2",
+        )
+        builder.join("cz_q1", "cz_q2", into="default")
+
+        builder.fork("default", into=["restore_q1", "restore_q2"])
+        builder.emit(x180_q1, timeline="restore_q1", tag="restore_qubit1")
+        builder.emit(x180_q2, timeline="restore_q2", tag="restore_qubit2")
+        builder.join("restore_q1", "restore_q2", into="default")
+        builder.emit(readout, tag="terminal")
+
+        # Count all 81 combinations; the order sets the trailing Result axes.
+        program = builder.build()
+        reducer = shot_sums(
+            program,
+            [
+                Classify("herald", config.qubit1_tone),
+                Classify("herald", config.qubit2_tone),
+                Classify("terminal", config.qubit1_tone),
+                Classify("terminal", config.qubit2_tone),
+            ],
+        )
+        with Schedule(buffer, scope=context.scope) as schedule:
+            schedule.run_acquire_summed(
+                program, context.soc, reducer=reducer, rounds=config.rounds, options=RunOptions()
+            )
+        buffer.trigger_update(flush=True)
+        return HeraldedCZAmplitudeResult(scales, buffer.array)
+
     def analyze(
         self,
         source: RunRecord[HeraldedCZAmplitudeCfg, HeraldedCZAmplitudeResult],
@@ -328,6 +432,25 @@ def _return_figure(
         ax.set(title=f"Herald {herald} → inferred CZ input |{ket}⟩", ylim=(-0.04, 1.04))
         ax.xaxis.set_major_locator(MaxNLocator(nbins=5))
     return fig
+
+
+def _live_returns(
+    plots: Plots, scales: NDArray[np.float64]
+) -> Callable[[NDArray[np.float64]], None]:
+    """Update the four measured return panels on the plot owner thread."""
+    fig = _return_figure(plots, "measurement", scales)
+    viewers = [live_errorbar(ax) for ax in fig.axes]
+    fig.suptitle("Heralded CZ amplitude · Qubit1, Qubit2")
+    fig.show()
+
+    @plots.on_plot_thread
+    def update(sums: NDArray[np.float64]) -> Figure:
+        returns = _conditional_returns(sums)
+        for viewer, (q1, q2) in zip(viewers, np.ndindex(2, 2), strict=True):
+            viewer.set(scales, returns.probability[:, q1, q2], returns.sem[:, q1, q2])
+        return fig
+
+    return update
 
 
 def _plot_returns(
