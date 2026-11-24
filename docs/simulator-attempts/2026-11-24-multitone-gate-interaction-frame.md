@@ -24,7 +24,9 @@ superseded_by: null
 
 ### 五場完整基線
 
-基線 commit 為 `addd6c8fb57a55bf36742ec01a5a87e51ca55d1a`。CPU affinity 為 0–3，非排他。兩批各跑一次所列場景，第二批沿用第一批的快取。兩批都完成，無逾時。
+基線 commit 為 `addd6c8fb57a55bf36742ec01a5a87e51ca55d1a`。CPU affinity 為 0–3，非排他。第一批跑 `cz_amplitude`、`rb_heralded`；第二批跑 `chevron`、`constructive_phase`、`rb`。每場只跑一次完整 Run，五場都完成，無逾時。
+
+兩批各啟動新程序，各自標記首場為冷啟動：第一批是 `cz_amplitude`，第二批是 `chevron`。第二批沿用第一批的磁碟快取，冷首場不等於空快取。
 
 | 場景 | Result 格數 | Core s／格 | `multitone_rwa` prepare CPU s | `multitone_gate` prepare CPU s | `dop853` apply CPU s |
 | --- | ---: | ---: | ---: | ---: | ---: |
@@ -40,7 +42,7 @@ superseded_by: null
 
 用同批的 `(core_s - evolve_s) / point_count` 計算，即使 evolve 耗時歸零且其他階段不變，`rb_heralded` 和 `cz_amplitude` 仍各需 2.9746、0.3018 core s／格。兩者都高於 0.1 s／格目標。這是基線的算術估計，不是改後實測。
 
-### 兩場配對
+### 兩場排他診斷配對
 
 以下以相同輸入對照 `addd6c8fb57a` 與候選 `45d465a5a58a`。兩側都用乾淨的工作樹、排他 CPU 0–7、關閉 OpenCL，各自從空快取開始。在同一 process 先跑冷首場 `chevron`，接著跑暖態 `constructive_phase`。每側每場各一次完整 Run，均完成，無逾時。這批的 `chevron` 冷首場不當暖態基準，也不和另一批的基線跨批比較。
 
@@ -53,7 +55,7 @@ superseded_by: null
 
 ## 為何否決
 
-拒收的是這個 gate 端點原型。兩場結果陣列相同，但兩場的 gate prepare CPU 和 core s／格都沒有下降。每場只有一對 Run，不能把上表的增加比例當成可重現的退步幅度。
+依這組排他診斷否決 gate 端點原型。兩場結果陣列相同，但兩場的 gate prepare CPU 和 core s／格都沒有下降。每場只有一對 Run，不能把上表的增加比例當成可重現的退步幅度。原型未落地，不計入已採用的速度變更，也沒有另做非排他配對。
 
 `rb_heralded`、`cz_amplitude`、`rb` 只有完整基線，未量候選。也未量 `mux/t1`、`mux/t2echo`、`mux/t2ramsey` 的暖態配對。這個原型沒有修改或單獨量測直接積分的 DP5(4)，不能用這兩場配對否定 DP5(4) 的優化方向。
 
