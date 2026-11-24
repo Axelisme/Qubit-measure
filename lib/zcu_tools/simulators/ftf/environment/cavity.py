@@ -568,10 +568,10 @@ class ProjectionChainEvolution:
 
     result includes the full density at terminal read start before projection.
     readout includes the terminal event even if no ADC observes it. reuse_keys
-    cover each Engine solve. continued_states and identity_weight record the
-    number of source states selected by the floor and total skipped marginal
-    per point and transition, respectively. spans gives provenance for each
-    actual Engine solve.
+    cover each Engine solve. continued_states counts source states actually
+    solved per point and transition, excluding reused rows. identity_weight
+    records the total marginal below the floor per point and transition.
+    spans gives provenance for each actual Engine solve.
     """
 
     result: EvolutionResult
@@ -761,14 +761,13 @@ def _project_chain_point(
         if solves.options.cancel is not None and solves.options.cancel.is_set():
             raise Cancelled()
         adopted = marginal >= floor
-        continued.append(int(np.count_nonzero(adopted)))
         skipped.append(float(marginal[~adopted].sum()))
         key = cell_keys.get(event)
         cached = {} if key is None else memo.pop(key, {})
         states = [int(state) for state in np.flatnonzero(adopted)]
-        outputs = solves.continue_sources(
-            timeline, event, range(start, stop), [s for s in states if s not in cached]
-        )
+        missing = [state for state in states if state not in cached]
+        outputs = solves.continue_sources(timeline, event, range(start, stop), missing)
+        continued.append(len(missing))
         with solves.options.reading():
             transition = identities.copy()
             for state in states:
@@ -803,10 +802,11 @@ def evolve_projection_chain(
 
     Plans have a common topology with at least one nonterminal projection per
     point. At each projection, reset the cavity to vacuum and continue once
-    per retained DC energy state with marginal at least projection_weight_floor.
-    Single-span undriven DC cells can reuse a same-point row if only the
-    single flat incident tone's phase differs. Skipped states use identity
-    without dropping weight. The final transition ends at the terminal event.
+    per retained DC energy state with marginal at least projection_weight_floor
+    and no reusable row. Single-span DC cells with no overlapping declared
+    microwave drive can reuse a same-point row if only the single flat incident
+    tone's phase differs. Skipped states use identity without dropping weight.
+    The final transition solves separately to preserve the terminal density.
     ADC paths do not feed back into density solves. Errors retain span and node
     context. Stop raises Cancelled without returning a partial preparation.
     """

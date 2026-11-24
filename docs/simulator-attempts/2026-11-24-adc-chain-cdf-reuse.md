@@ -14,7 +14,7 @@ superseded_by: null
 
 ## 核心思路
 
-[ADC raw path sampling](../../lib/zcu_tools/simulate/adc/_path_sampling.py)原先每輪對相同的 initial 和 transition 機率重算累積和。現在每個 [acquire 內的 raw preparation](2026-11-22-adc-raw-plan-acquire-owner.md)對同事件把 CDF 算一次，跨 round 讀取。換 preparation 或結束 acquire 後不再寫入原 memo。逐列浮點加法、state 抽樣、事件間的 cavity CTMC 和最後的 receiver noise 順序不變。
+[ADC raw path sampling](../../lib/zcu_tools/simulate/adc/_path_sampling.py)原先每輪對相同的 initial 和 transition 機率重算累積和。現在 [acquire 內的 raw owner](2026-11-22-adc-raw-plan-acquire-owner.md)在同一 active generation 對每個事件只算一次 CDF，跨 round 讀取。換 preparation 或結束 acquire 會退役原 generation。A→B→A 重綁會為 A 開新 generation，不沿用第一次的 CDF。逐列浮點加法、state 抽樣、事件間的 cavity CTMC 和最後的 receiver noise 順序不變。
 
 不同事件仍各建一份 plan。把絕對時間改成相對時間會改變 carrier 與 demod phase 的浮點計算路徑，不能用代數上的時間平移等價代替逐值驗收。
 
@@ -38,3 +38,6 @@ superseded_by: null
 ## 留下的線索
 
 Materialize 仍是兩場最大分項。此次完整 31 點配對和[先前 11 點 flat-jump 配對](2026-11-24-adc-flat-jump-baselines.md#實測)的輸入不同，不能串接成累計改善。
+
+- 浮點結果接近不能保證 ADC 整數逐值相同。差異可能跨過取整界線。若要接受近似，須另訂統計層級的契約；本次不改逐值契約，也不共用跨事件 plan。
+- 若 `chain_freq` 改成直接產出讀出統計量，不再逐 shot materialize，應重新估計 CDF 重用還能省多少工作。

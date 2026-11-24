@@ -122,7 +122,7 @@ superseded_by: null
 
 ## 環境與讀出
 
-- 2026-11-24，[ADC 跨 round 重用 chain CDF](./2026-11-24-adc-chain-cdf-reuse.md)，`adopted`。同一 raw preparation 每個讀出事件只算一次 CDF。`twotone/ro_optimize/chain_freq` 的 materialize 139.611 → 115.223 s（`5dbccaffa` → `1d82a507d`，離線 fixture、31 點 × 2,000 reps × 320 rounds、每點 16 reads、seed 123、單 worker、各一次冷 cache Run）。
+- 2026-11-24，[ADC 跨 round 重用 chain CDF](./2026-11-24-adc-chain-cdf-reuse.md)，`adopted`。同一 active raw generation 的每個讀出事件只算一次 CDF。A→B→A 重綁會為 A 開新 generation。`twotone/ro_optimize/chain_freq` 的 materialize 139.611 → 115.223 s（`5dbccaffa` → `1d82a507d`，離線 fixture、31 點 × 2,000 reps × 320 rounds、每點 16 reads、seed 123、單 worker、各一次冷 cache Run）。
 - 2026-11-24，[ADC 共用腔場乘積積分](./2026-11-24-adc-cavity-product-integrals.md)，`adopted`。小型平坦區間共用每態的短步係數，一次積分各腔場乘積。`chain/len_rabi` 的 readout 20.772 → 8.279 s（`addd6c8fb` → `2a571d682`，離線 fixture、seed 123、單 worker、各冷 cache，各一次 11 格 Run）。
 - 2026-11-24，[ADC flat jump 只算兩態基線](./2026-11-24-adc-flat-jump-baselines.md)，`adopted`。平坦且不回傳 trace 的多態讀出只計算跳轉所用的兩態。`twotone/ro_optimize/chain_freq` 的 materialize 61.162 → 48.688 s（`addd6c8fb` → `5e43af2c7`，離線 fixture、seed 123、單 worker、各冷 cache，各一次 11 格 Run）。
 - 2026-11-22，[FTF 樣板提高 projective floor](./2026-11-22-ftf-projection-weight-floor.md)，`adopted`。提高新工作副本的 floor，減少低機率來源態的續演化。最大完整 density 差 6.921e-6（`cc6b252c0`，六列 FTF 輸入、同 seed、Markov 模型的 floor `1e-5` 對 `0`）。

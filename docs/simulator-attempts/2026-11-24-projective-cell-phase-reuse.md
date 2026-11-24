@@ -16,7 +16,7 @@ superseded_by: null
 
 [保留絕對相位的簽章](2026-11-24-exact-projective-cell-signatures.md)沒有找到可共用的 cell。FTF 從真空開始 linear cavity propagation。把全部腔入射乘同一相位，會讓每個 state branch 的場同向旋轉。Stark 與 dephasing 讀的是場的二階乘積，旋轉因子在乘積內相消。DC projector、qubit Hamiltonian 與 Lindblad operators 不隨這個旋轉改變。只轉一部分 tone，或保留固定的殘餘腔場，沒有這個保證。
 
-[FTF 的重用資格](../../lib/zcu_tools/simulators/ftf/environment/_cell_reuse.py)只接受同一點、靜態 flux、單 span、單個有效 flat cavity tone，且沒有作用中的 qubit drive。不取相位模數，也不設容差。長度、支撐區間、carrier 和複數 gain 必須精確相同。每層先用自己的機率 floor 選來源態，才查先前實際求出的列。末層要保留完整 density，仍獨立求解。
+[FTF 的重用資格](../../lib/zcu_tools/simulators/ftf/environment/_cell_reuse.py)只接受同一點、靜態 flux、單 span、單個有效 flat cavity tone。有宣告為 active 的 qubit drive 時，只要它的非空支撐區間與 cell 重疊，就不能共用。Gain 為零也一樣。不取相位模數，也不設容差。長度、支撐區間、carrier 和複數 gain 必須精確相同。每層先用自己的機率 floor 選來源態，才查先前實際求出的列。末層要保留完整 density，仍獨立求解。
 
 ## 實測
 
@@ -28,7 +28,7 @@ superseded_by: null
 | 同一 preparation 的 floor 通過列數 | 3,229 → 3,229 |
 | 完整 Run core 秒，合計 compile、evolve、readout、materialize | 96.324 → 96.032 |
 
-每點每事件的 floor 通過列數及 identity weight 相同。有序 initial／transition map 和最終 Result 的數值陣列最大絕對差皆為 0，門檻是 `1e-10`；軸、計數和輸入也相同。
+每點每事件的 floor 通過列數及 identity weight 相同。有序 initial／transition map 和最終 Result 的數值陣列最大絕對差皆為 0，門檻是 `1e-10`；軸、計數和輸入也相同。這是同 seed 與舊路徑的比對，未獨立驗證。
 
 ## 為何採用
 

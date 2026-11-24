@@ -56,14 +56,9 @@ class EventPlanMemo:
             cdfs = self._chain_cdfs
             if cdfs is None:
                 return None
-            if (cdf := cdfs.get(event_index)) is not None:
-                return cdf
-        cdf = probabilities.cumsum(axis=-1)
-        with self._lock:
-            # Retirement may have dropped the memo while this CDF was built.
-            if self._chain_cdfs is not None:
-                return self._chain_cdfs.setdefault(event_index, cdf)
-        return cdf
+            if (cdf := cdfs.get(event_index)) is None:
+                cdf = cdfs[event_index] = probabilities.cumsum(axis=-1)
+            return cdf
 
 
 def physical_shots(

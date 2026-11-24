@@ -1,11 +1,20 @@
 """Eligibility for reusing vacuum projective continuation rows."""
 
 from fractions import Fraction
+from typing import NamedTuple
 
 from zcu_tools.simulate.adc import ReadoutPulse
 from zcu_tools.simulate.evolution import TimelineBatch
 
-type FlatCell = tuple[Fraction, Fraction, Fraction, float, complex]
+
+class FlatCell(NamedTuple):
+    """Exact cell key with pulse support relative to the cell start."""
+
+    duration_ns: Fraction
+    pulse_start_ns: Fraction
+    pulse_end_ns: Fraction
+    frequency_ghz: float
+    amplitude: complex
 
 
 def _single_incident(
@@ -38,11 +47,14 @@ def flat_cell_keys(
         or any(p.envelope is not None for p in pulses)
     ):
         return {}
-    drives = tuple(
-        (track.start_ns[0], track.start_ns[0] + track.duration_ns[0])
-        for track in batch.tracks
-        if track.active[0] and track.amplitude[0] != 0 and track.duration_ns[0] > 0
-    )
+    # Engine decides whether a drive is effective. Reuse excludes even a
+    # zero-gain track when its declared nonempty support overlaps the cell.
+    # Keep the declared endpoints exact so rounding cannot hide overlap.
+    drives = []
+    for track in batch.tracks:
+        if track.active[0] and track.duration_ns[0] > 0:
+            start = Fraction(float(track.start_ns[0]))
+            drives.append((start, start + Fraction(float(track.duration_ns[0]))))
     keys = {}
     for event, (first, stop) in enumerate(
         zip(boundaries[:-1], boundaries[1:], strict=True)
@@ -51,7 +63,7 @@ def flat_cell_keys(
             continue
         start, end = spans[first]
         if any(a < end and start < b for a, b in drives):
-            continue  # Non-readout row phase is not quotiented out.
+            continue
         pulse = _single_incident(pulses, start, end)
         if pulse is None:
             continue
@@ -59,7 +71,7 @@ def flat_cell_keys(
         # single span mean no inherited or intermediate branch field to match.
         # Keep exact differences of binary times, not rounded relative times.
         origin = Fraction(float(start))
-        keys[event] = (
+        keys[event] = FlatCell(
             Fraction(float(end)) - origin,
             Fraction(float(pulse.start_ns)) - origin,
             Fraction(float(pulse.end_ns)) - origin,

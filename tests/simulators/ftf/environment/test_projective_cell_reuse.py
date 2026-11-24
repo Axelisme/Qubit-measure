@@ -18,7 +18,7 @@ from zcu_tools.simulate.evolution import (
     SampledRWAProbeMemo,
     TimelineBatch,
 )
-from zcu_tools.simulators.ftf.environment import FTFSource
+from zcu_tools.simulators.ftf.environment import FTFNumericUse, FTFSource
 
 from tests.core._simulation import tick_array
 from tests.program._profiles import profile_soccfg
@@ -65,7 +65,7 @@ def _read_chain(
 
 def _run_chain(
     timeline: TimelineTemplate, engine: EngineDouble, *, floor: float = 0.0
-) -> ProjectionChain:
+) -> tuple[ProjectionChain, FTFNumericUse]:
     numeric = settings().with_telemetry(enabled=False)
     numeric = numeric.model_copy(
         update={
@@ -80,6 +80,7 @@ def _run_chain(
         result = source.open_acquire(request(templates=(timeline,))).sample_round(
             snapshot(), 0
         )
+        (diagnostics,) = source.evaluations
     if not isinstance(result, IntegratedRound) or not isinstance(
         result.raw, ADCRawShots
     ):
@@ -87,7 +88,7 @@ def _run_chain(
     chain = result.raw.prepared.readout
     if not isinstance(chain, ProjectionChain):
         raise AssertionError("expected a full chain including the terminal transition")
-    return chain
+    return chain, diagnostics
 
 
 def _continued_spans(engine: EngineDouble) -> set[tuple[float, float]]:
@@ -104,7 +105,7 @@ def _continued_spans(engine: EngineDouble) -> set[tuple[float, float]]:
 @pytest.mark.parametrize("phase", [0.0, 67.0], ids=["match", "phase-only"])
 def test_repeated_projective_cells_handoff_one_source_solve_per_point(phase):
     engine = EngineDouble(backend="cpu")
-    chain = _run_chain(_read_chain(phase=phase), engine)
+    chain, diagnostics = _run_chain(_read_chain(phase=phase), engine)
     assert len(chain.transitions) == 3
     for layer in chain.transitions:
         np.testing.assert_array_equal(layer, np.tile(np.eye(2), (2, 1, 1)))
@@ -112,6 +113,27 @@ def test_repeated_projective_cells_handoff_one_source_solve_per_point(phase):
     # second cell, and still evolves to its own terminal event.
     assert _continued_spans(engine) == {(8.0, 16.0), (24.0, 32.0)}
     assert sum(len(batches) for _, batches in engine.calls) == 10
+    assert diagnostics.projection_continued_states == ((2, 0, 2), (2, 0, 2))
+    assert diagnostics.projection_identity_weight == ((0.0, 0.0, 0.0),) * 2
+
+
+@pytest.mark.parametrize("other_support", [(24, 2), (20, 0)], ids=["touching", "empty"])
+def test_declared_zero_gain_drive_blocks_reuse_only_where_it_overlaps(other_support):
+    start, duration = other_support
+    drive = replace(
+        template(tones=1).events[0],
+        start_ticks=tick_array(np.array([16, start]) / 1000),
+        duration_ticks=tick_array(np.array([8, duration]) / 1000),
+        gain=np.zeros(2),
+    )
+    timeline = _read_chain(phase=67.0)
+    _, diagnostics = _run_chain(
+        replace(timeline, events=(*timeline.events, drive)), EngineDouble(backend="cpu")
+    )
+    assert [
+        span.point for span in diagnostics.projective_spans if span.event_index == 1
+    ] == [0]
+    assert diagnostics.projection_continued_states == ((2, 2, 2), (2, 0, 2))
 
 
 @pytest.mark.parametrize("difference", ["span", "drive", "support"])
@@ -167,7 +189,7 @@ class FlipProjectors(EngineDouble):
 def test_each_cell_uses_its_actual_floor_even_with_a_cached_row():
     engine = FlipProjectors(backend="cpu")
     timeline = _read_chain(phase=67.0, starts=(8, 16, 24, 32, 40))
-    chain = _run_chain(timeline, engine, floor=0.5)
+    chain, _ = _run_chain(timeline, engine, floor=0.5)
     # First and third adopt ground. Second and terminal adopt excited.
     # The second cell must neither take the cached ground row nor reuse
     # the first layer's identity placeholder for its newly occupied state.

@@ -114,9 +114,9 @@ class FTFNumericUse:
     rejected_rows is zero after successful ADC preparation, or the number of
     rows ADC rejected under its reported validation rule. The record survives
     that failure. A reused snapshot does not create a new solve or change it.
-    projection_continued_states gives the number of floor-selected DC source states
-    per C-order point and transition. projection_identity_weight gives the
-    source marginal mass left unchanged at each transition. Both are empty for
+    projection_continued_states counts DC source states actually solved per
+    C-order point and transition, excluding reused rows. projection_identity_weight
+    gives the source marginal mass assigned to identity rows at each transition. Both are empty for
     terminal-only templates. projective_spans locates solved nodes and their
     diagnostics in each absolute span. Reuse preserves these author-only values.
     """
