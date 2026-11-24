@@ -38,16 +38,16 @@ from zcu_tools.program.v2 import (
 from zcu_tools.program.v2.modules import MuxReadout
 
 from zcu_lab.v2.support import live_errorbar
+from zcu_lab.v2.support.cz_return import CZReturnFit, fit_return
 from zcu_lab.v2.support.paired_counts import (
     POINT_ALIAS_DESCRIPTION,
     joint_probabilities,
     validate_qubit_tones,
 )
 from zcu_lab.v2.support.paired_drive import QubitDriveCfg
+from zcu_lab.v2.support.rabi_duration import cosine
 
-from .._rabi_analysis import cosine
 from .._readout import MuxResetCfg
-from .fit import CZReturnFit, fit_return
 
 _X_LABEL = "Common CZ gain multiplier (a.u.)"
 _RETURN_LABEL = "P(g,g) after double Xπ"

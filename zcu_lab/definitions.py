@@ -19,13 +19,18 @@ from zcu_lab.v2.fastflux.distortion.phase.gui import DEFINITION as PHASE_DEFINIT
 from zcu_lab.v2.fastflux.mist.gui import DEFINITION as MIST_DEFINITION
 from zcu_lab.v2.fastflux.t1.gui import DEFINITION as FAST_FLUX_T1_DEFINITION
 from zcu_lab.v2.fastflux.twotone.gui import DEFINITION as TWO_TONE_DEFINITION
+from zcu_lab.v2.heralded.chevron.gui import DEFINITION as HERALDED_CHEVRON_DEFINITION
 from zcu_lab.v2.heralded.conditional_phase.gui import (
     DEFINITION as CONDITIONAL_PHASE_HERALDED_DEFINITION,
 )
 from zcu_lab.v2.heralded.conditional_spectroscopy.gui import (
     DEFINITION as SPECTROSCOPY_HERALDED_DEFINITION,
 )
+from zcu_lab.v2.heralded.cz_amplitude.gui import (
+    DEFINITION as HERALDED_CZAMPLITUDE_DEFINITION,
+)
 from zcu_lab.v2.heralded.idle_zz.gui import DEFINITION as IDLE_ZZ_HERALDED_DEFINITION
+from zcu_lab.v2.heralded.local_z.gui import DEFINITION as LOCAL_Z_HERALDED_DEFINITION
 from zcu_lab.v2.heralded.rb.gui import (
     DEFINITION as TWO_QUBIT_RB_HERALDED_DEFINITION,
 )
@@ -328,7 +333,10 @@ def register_all(
         "two_qubit/rb": TWO_QUBIT_RB_DEFINITION,
         "heralded/conditional_spectroscopy": SPECTROSCOPY_HERALDED_DEFINITION,
         "heralded/conditional_phase": CONDITIONAL_PHASE_HERALDED_DEFINITION,
+        "heralded/cz_amplitude": HERALDED_CZAMPLITUDE_DEFINITION,
+        "heralded/local_z": LOCAL_Z_HERALDED_DEFINITION,
         "heralded/rb": TWO_QUBIT_RB_HERALDED_DEFINITION,
+        "heralded/chevron": HERALDED_CHEVRON_DEFINITION,
         "fastflux/twotone": TWO_TONE_DEFINITION,
         "fastflux/t1": FAST_FLUX_T1_DEFINITION,
         "fastflux/distortion/freq": FAST_FLUX_FREQ_DEFINITION,

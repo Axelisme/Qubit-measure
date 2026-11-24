@@ -52,13 +52,13 @@ from zcu_lab.v2.support.paired_counts import (
     validate_qubit_tones,
 )
 from zcu_lab.v2.support.paired_drive import QubitDriveCfg
-
-from .._rabi_analysis import (
+from zcu_lab.v2.support.rabi_duration import (
     RabiRate,
     ReturnData,
     cosine,
     fit_duration_rates,
 )
+
 from .._rabi_scan import RabiScanResult
 from .._readout import MuxResetCfg
 
