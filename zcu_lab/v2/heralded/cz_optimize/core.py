@@ -437,6 +437,7 @@ def _plot_seed_returns(
     fig.suptitle("Heralded CZ optimization · returns by seed and class")
     cmap = colormaps["viridis"].with_extremes(bad="0.9")
     image = ax.imshow(rates.T, aspect="auto", cmap=cmap, vmin=0.0, vmax=1.0)
+    ax.grid(False)
     fig.colorbar(image, ax=ax, label="Conditional return probability")
     ax.plot(evaluation, cell, "x", color="C3", linestyle="none")
     ax.set(
