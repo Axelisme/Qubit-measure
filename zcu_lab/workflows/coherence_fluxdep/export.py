@@ -201,7 +201,8 @@ def prepare_export(
             schema_version="1.0",
         ),
         LabberMetadata(comment="Committed Coherence raw traces and accepted lifetimes"),
-        "independent",
+        experiment_tag="coherence_fluxdep",
+        labber_layout="independent",
     )
 
 

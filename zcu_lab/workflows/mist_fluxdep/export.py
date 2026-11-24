@@ -169,7 +169,8 @@ def prepare_export(
         LabberMetadata(
             comment=f"Committed MIST {mode} raw gain traces and acquisition success"
         ),
-        "independent",
+        experiment_tag="mist_fluxdep",
+        labber_layout="independent",
     )
 
 

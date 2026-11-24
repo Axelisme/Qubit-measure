@@ -100,14 +100,17 @@ def _integral2(matrix, duration):
 
 
 @njit(nogil=True, cache=False)
-def _flat_baselines(a, v, pulse, coupling, safe, times):
+def _flat_baselines(a, v, pulse, driven_solution, times, state_pairs):
     start, stop, incident, omega = pulse
-    fields = np.zeros((len(times), len(a), len(v)), dtype=np.complex128)
+    coupling, safe = driven_solution
+    columns = len(a) if state_pairs is None else 2
+    fields = np.zeros((len(times), columns, len(v)), dtype=np.complex128)
     for index, time in enumerate(times):
         if time <= start:
             continue
         driven = min(time, stop) - start
-        for state in range(len(a)):
+        for column in range(columns):
+            state = column if state_pairs is None else state_pairs[index, column]
             if safe[state]:
                 field = incident * (
                     np.exp(-1j * omega * driven) * coupling[state]
@@ -119,7 +122,7 @@ def _flat_baselines(a, v, pulse, coupling, safe, times):
                 field *= np.exp(-1j * omega * driven)
             if time > stop:
                 field = _exp2(-a[state], time - stop) @ field
-            fields[index, state] = field
+            fields[index, column] = field
     return fields
 
 
@@ -188,14 +191,23 @@ def _segment_traces(a, scattering, grid, wave, step, output):
 
 
 @njit(nogil=True, cache=False)
-def _jump_memory(a, shots, targets, jumps, baselines, wave):
+def _jump_memory(a, step, baselines, wave, paired):
+    """Update cavity memory in place for the jumps in ``step``.
+
+    ``baselines`` has shape (jump, column, cavity). Row i contains vacuum
+    fields at ``step``'s i-th jump time, aligned with its shot and destination.
+    If ``paired=True``, columns 0 and 1 are (source, destination) for that jump.
+    Otherwise, columns are indexed by model state.
+    """
+    shots, jumps, targets = step
     states, left, memory = wave
     for index, shot in enumerate(shots):
         state = states[shot]
+        source, target = (0, 1) if paired else (state, targets[index])
         memory[shot] = (
             _exp2(-a[state], jumps[index] - left[shot]) @ memory[shot]
-            + baselines[index, state]
-            - baselines[index, targets[index]]
+            + baselines[index, source]
+            - baselines[index, target]
         )
 
 
@@ -345,11 +357,17 @@ class IntegratedPaths:
                 coupling[state], safe[state] = value, True
         return coupling, safe
 
-    def _baseline(self, times):
+    def _baseline(self, times, state_pairs: NDArray[np.int64] | None = None):
+        """Sum carrier baselines in order, for all states or flat jump pairs.
+
+        state_pairs selects the (source, destination) columns for each time.
+        It is only supplied when every carrier is flat.
+        """
+        columns = len(self.a) if state_pairs is None else 2
         fields = np.zeros(
-            (len(times), len(self.a), self.model.cavity_count), dtype=np.complex128
+            (len(times), columns, self.model.cavity_count), dtype=np.complex128
         )
-        for pulse, path_fields, (coupling, safe) in zip(
+        for pulse, path_fields, driven_solution in zip(
             self.pulses, self.path_fields, self.couplings, strict=True
         ):
             if path_fields is not None:
@@ -369,9 +387,9 @@ class IntegratedPaths:
                         pulse.amplitude * np.exp(1j * pulse.phase_rad),
                         omega,
                     ),
-                    coupling,
-                    safe,
+                    driven_solution,
                     times,
+                    state_pairs,
                 )
         return fields
 
@@ -433,6 +451,11 @@ class IntegratedPaths:
             )
             for grid in self.grids
         ]
+        pair_jumps = (
+            not traces
+            and len(self.a) > 2
+            and all(pulse.envelope is None for pulse in self.pulses)
+        )
         for index, step in enumerate(paths.steps):
             active, right, targets = step
             for read, grid in enumerate(self.plans):
@@ -451,8 +474,15 @@ class IntegratedPaths:
             moving = targets >= 0
             shots, jumps, destinations = active[moving], right[moving], targets[moving]
             if len(shots):
-                baselines = self._baseline(jumps)
-                _jump_memory(self.a, shots, destinations, jumps, baselines, wave)
+                state_pairs = (
+                    np.column_stack((states[shots], destinations))
+                    if pair_jumps
+                    else None
+                )
+                baselines = self._baseline(jumps, state_pairs)
+                _jump_memory(
+                    self.a, (shots, jumps, destinations), baselines, wave, pair_jumps
+                )
                 states[shots], left[shots] = destinations, jumps
         receiver = self.model.receiver
         result = []
