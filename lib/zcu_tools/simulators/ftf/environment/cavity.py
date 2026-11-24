@@ -12,6 +12,7 @@ from zcu_tools.simulate.adc import (
     CavityAverageCache,
     ProjectionChain,
     ProjectionReadout,
+    ReadoutPulse,
     normalize_populations,
 )
 from zcu_tools.simulate.boundary import CancellationQuery
@@ -33,6 +34,7 @@ from zcu_tools.simulate.evolution import (
     segment_spans,
 )
 from zcu_tools.simulators.ftf.config import FTFSettings
+from zcu_tools.simulators.ftf.environment._cell_reuse import FlatCell, flat_cell_keys
 from zcu_tools.simulators.ftf.environment.numeric import EVOLUTION_BUDGET, resonators
 from zcu_tools.simulators.ftf.environment.template import FTFModelFacts, FTFTemplatePlan
 from zcu_tools.simulators.ftf.physics import CavityDrive
@@ -566,9 +568,10 @@ class ProjectionChainEvolution:
 
     result includes the full density at terminal read start before projection.
     readout includes the terminal event even if no ADC observes it. reuse_keys
-    cover each Engine solve. continued_states and identity_weight record the
-    number of solved source states and total skipped marginal per point and
-    transition, respectively. spans gives provenance for each Engine solve.
+    cover each Engine solve. continued_states counts source states actually
+    solved per point and transition, excluding reused rows. identity_weight
+    records the total marginal below the floor per point and transition.
+    spans gives provenance for each actual Engine solve.
     """
 
     result: EvolutionResult
@@ -617,6 +620,28 @@ class _ChainSolves:
             return  # All rows are identity; there is nothing to solve.
         for step in steps:
             self._advance_span(layer, step, spans[step])
+
+    def continue_sources(
+        self,
+        timeline: _CavityTimeline,
+        event: int,
+        steps: range,
+        states: list[int],
+    ) -> dict[int, NDArray[np.complex128]]:
+        """Solve the requested DC projectors from vacuum to the cell endpoint."""
+        point = int(timeline.batch.points[0])
+        nodes = {}
+        for state in states:
+            density = np.zeros_like(timeline.density)
+            density[0, state, state] = 1
+            nodes[self.row_id(point, event, state)] = (
+                state,
+                replace(
+                    timeline, density=density, fields=np.zeros_like(timeline.fields)
+                ),
+            )
+        self.advance(_NodeLayer(point, event, nodes), timeline.spans[0], steps)
+        return {state: node.density[0] for state, node in nodes.values()}
 
     def _advance_span(
         self, layer: _NodeLayer, step: int, span: tuple[float, float]
@@ -705,6 +730,7 @@ class _PointChain:
 def _project_chain_point(
     solves: _ChainSolves,
     timeline: _CavityTimeline,
+    pulses: tuple[ReadoutPulse, ...],
     read_starts: tuple[float, ...],
     floor: float,
 ) -> _PointChain:
@@ -726,34 +752,37 @@ def _project_chain_point(
     skipped = []
     density = timeline.density[0]
     identities = np.eye(len(initial))
+    cell_keys = flat_cell_keys(timeline.batch, spans, pulses, boundaries)
+    last_use = {key: event for event, key in cell_keys.items()}
+    memo: dict[FlatCell, dict[int, NDArray[np.float64]]] = {}
     for event, (start, stop) in enumerate(
         zip(boundaries, (*boundaries[1:], len(spans)), strict=True)
     ):
         if solves.options.cancel is not None and solves.options.cancel.is_set():
             raise Cancelled()
         adopted = marginal >= floor
-        continued.append(int(np.count_nonzero(adopted)))
         skipped.append(float(marginal[~adopted].sum()))
-        timelines = {
-            int(state): replace(
-                timeline,
-                density=np.diag(identities[state]).astype(np.complex128)[None],
-                fields=np.zeros_like(timeline.fields),
-            )
-            for state in np.flatnonzero(adopted)
-        }
-        nodes = {
-            solves.row_id(point, event, state): (state, node)
-            for state, node in timelines.items()
-        }
-        solves.advance(_NodeLayer(point, event, nodes), spans, range(start, stop))
+        key = cell_keys.get(event)
+        cached = {} if key is None else memo.pop(key, {})
+        states = [int(state) for state in np.flatnonzero(adopted)]
+        missing = [state for state in states if state not in cached]
+        outputs = solves.continue_sources(timeline, event, range(start, stop), missing)
+        continued.append(len(missing))
         with solves.options.reading():
             transition = identities.copy()
-            density = np.diag(np.where(adopted, 0, marginal)).astype(np.complex128)
-            for state, node in timelines.items():
-                output = node.density[0]
-                transition[state] = normalize_populations(output.diagonal().real)
-                density += marginal[state] * output
+            for state in states:
+                if state not in cached:
+                    cached[state] = normalize_populations(
+                        outputs[state].diagonal().real
+                    )
+                transition[state] = cached[state]
+            if key is not None and last_use[key] > event:
+                memo[key] = cached
+            if stop == len(spans):
+                # The terminal layer always solves; preserve its full DC density.
+                density = np.diag(np.where(adopted, 0, marginal)).astype(np.complex128)
+                for state, output in outputs.items():
+                    density += marginal[state] * output
             transitions.append(transition)
             marginal = marginal @ transition
     return _PointChain(
@@ -773,12 +802,13 @@ def evolve_projection_chain(
 
     Plans have a common topology with at least one nonterminal projection per
     point. At each projection, reset the cavity to vacuum and continue once
-    per retained DC energy state with marginal at least projection_weight_floor.
-    Other states use identity without dropping their probability. The last
-    transition ends at the terminal event, observed or not. ADC trajectories
-    do not feed back into these density solves. Engine errors retain span and
-    node context. A Stop observed at a node boundary or by Engine raises
-    Cancelled without returning a partial preparation.
+    per retained DC energy state with marginal at least projection_weight_floor
+    and no reusable row. Single-span DC cells with no overlapping declared
+    microwave drive can reuse a same-point row if only the single flat incident
+    tone's phase differs. Skipped states use identity without dropping weight.
+    The final transition solves separately to preserve the terminal density.
+    ADC paths do not feed back into density solves. Errors retain span and node
+    context. Stop raises Cancelled without returning a partial preparation.
     """
     points = np.concatenate([plan.batch.points for plan in plans])
     solves = _ChainSolves(engine, facts, options)
@@ -804,6 +834,7 @@ def evolve_projection_chain(
                     _project_chain_point(
                         solves,
                         timeline,
+                        pulses,
                         tuple(read.start_ns for read in reads),
                         settings.numerics.projection_weight_floor,
                     )
