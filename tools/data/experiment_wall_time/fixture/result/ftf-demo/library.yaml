@@ -101,7 +101,16 @@ components:
         ro_ch: 0
         ro_length: 0.99
         trig_offset: 1.110801351175282
+        # Synthetic GE input for path timing only; not a calibration.
         classifier:
+          mode: circle
+          g_center: {__complex__: [0.0, 0.0]}
+          e_center: {__complex__: [1.0, 0.0]}
+          radius: 0.5
+          confusion_matrix:
+          - [1.0, 0.0, 0.0]
+          - [0.0, 1.0, 0.0]
+          - [0.0, 0.0, 1.0]
         nqz: 2
         phase: 0.0
         mixer_freq:
@@ -134,7 +143,7 @@ components:
         desc:
         waveform:
           style: const
-          length: 0.8
+          length: 0.78
         ch: 2
         freq: 5799.976979080261
         gain: 0.024144059109456696
@@ -148,7 +157,7 @@ components:
         desc:
         waveform:
           style: const
-          length: 0.8
+          length: 0.78
         ch: 3
         freq: 5799.976979080261
         gain: 0.024144059109456696
