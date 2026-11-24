@@ -21,13 +21,9 @@ HeraldedCZAmplitudeRun: TypeAlias = RunRecord[
 ]
 
 
-def run(
-    cfg: HeraldedCZAmplitudeCfg, *, context: RunContext
-) -> HeraldedCZAmplitudeRun:
+def run(cfg: HeraldedCZAmplitudeCfg, *, context: RunContext) -> HeraldedCZAmplitudeRun:
     """Acquire the four nominal preparations and retain the applied cfg."""
-    return RunRecord(
-        cfg=cfg, result=HeraldedCZAmplitudeExp().run(cfg, context=context)
-    )
+    return RunRecord(cfg=cfg, result=HeraldedCZAmplitudeExp().run(cfg, context=context))
 
 
 def _analyze(
@@ -38,7 +34,9 @@ def _analyze(
 
 def _summary_lines(source: HeraldedCZAmplitudeRun) -> tuple[str, ...]:
     cfg = source.cfg
-    return () if cfg is None else (f"Reps×Rounds per preparation {cfg.reps}×{cfg.rounds}",)
+    return (
+        () if cfg is None else (f"Reps×Rounds per preparation {cfg.reps}×{cfg.rounds}",)
+    )
 
 
 DEFINITION = Adapter(

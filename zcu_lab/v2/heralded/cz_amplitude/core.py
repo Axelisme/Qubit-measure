@@ -28,7 +28,14 @@ from zcu_tools.experiment.records import RunRecord
 from zcu_tools.experiment.v2.runtime import RunOptions, Schedule, SignalBuffer
 from zcu_tools.experiment.v2.utils.round_zcu import sweep2array
 from zcu_tools.plotting.plots import Plots
-from zcu_tools.program.v2 import Classify, Pulse, Reset, SweepCfg, TimelineBuilder, shot_sums
+from zcu_tools.program.v2 import (
+    Classify,
+    Pulse,
+    Reset,
+    SweepCfg,
+    TimelineBuilder,
+    shot_sums,
+)
 from zcu_tools.program.v2.modules import MuxReadout
 
 from zcu_lab.v2.support import live_errorbar
@@ -155,7 +162,9 @@ class HeraldedCZAmplitudeCfg(ConfigBase):
             self.drive.qubit1.ch != self.x180_qubit1.ch
             or self.drive.qubit2.ch != self.x180_qubit2.ch
         ):
-            raise ValueError("Each CZ line must use its qubit's calibrated Xπ generator")
+            raise ValueError(
+                "Each CZ line must use its qubit's calibrated Xπ generator"
+            )
         pre1, pre2 = self.x180_qubit1.pre_delay, self.x180_qubit2.pre_delay
         if (
             not isinstance(pre1, (float, int))
@@ -164,7 +173,9 @@ class HeraldedCZAmplitudeCfg(ConfigBase):
             or pre1 < 0
             or pre1 != pre2
         ):
-            raise ValueError("The two Xπ pulses must have the same finite nonnegative pre-delay")
+            raise ValueError(
+                "The two Xπ pulses must have the same finite nonnegative pre-delay"
+            )
         scales = sweep2array(self.scale)
         if (
             len(scales) < 2
@@ -172,7 +183,9 @@ class HeraldedCZAmplitudeCfg(ConfigBase):
             or np.any(scales < 0)
             or np.any(np.diff(scales) <= 0)
         ):
-            raise ValueError("Common gain scales must be finite, nonnegative and strictly increasing")
+            raise ValueError(
+                "Common gain scales must be finite, nonnegative and strictly increasing"
+            )
         return self
 
 
@@ -192,9 +205,17 @@ class HeraldedCZAmplitudeResult:
 def _validate_result_shape(result: HeraldedCZAmplitudeResult) -> None:
     """Check the fixed preparation and classification widths for Native and Analyze."""
     if result.scales.ndim != 1 or result.sums.shape != (
-        2, 2, result.scales.size, 3, 3, 3, 3
+        2,
+        2,
+        result.scales.size,
+        3,
+        3,
+        3,
+        3,
     ):
-        raise ValueError("Heralded CZ amplitude requires scales (Ns,) and sums (2,2,Ns,3,3,3,3)")
+        raise ValueError(
+            "Heralded CZ amplitude requires scales (Ns,) and sums (2,2,Ns,3,3,3,3)"
+        )
 
 
 def _restore_result(
@@ -310,12 +331,16 @@ class HeraldedCZAmplitudeExp(
             builder.emit(Reset("reset", config.reset))
         builder.fork("default", into=["prepare_q1", "prepare_q2"])
         with (
-            builder.branch(by="prepared_qubit1", align_timeline=True, timeline="prepare_q1") as cases,
+            builder.branch(
+                by="prepared_qubit1", align_timeline=True, timeline="prepare_q1"
+            ) as cases,
             cases.case(1),
         ):
             builder.emit(x180_q1, tag="prepare_qubit1")
         with (
-            builder.branch(by="prepared_qubit2", align_timeline=True, timeline="prepare_q2") as cases,
+            builder.branch(
+                by="prepared_qubit2", align_timeline=True, timeline="prepare_q2"
+            ) as cases,
             cases.case(1),
         ):
             builder.emit(x180_q2, tag="prepare_qubit2")
@@ -330,12 +355,20 @@ class HeraldedCZAmplitudeExp(
 
         builder.fork("default", into=["cz_q1", "cz_q2"])
         builder.emit(
-            Pulse("cz_qubit1", config.drive.qubit1, gain=float(config.drive.qubit1.gain) * scale),
+            Pulse(
+                "cz_qubit1",
+                config.drive.qubit1,
+                gain=float(config.drive.qubit1.gain) * scale,
+            ),
             timeline="cz_q1",
             tag="cz_qubit1",
         )
         builder.emit(
-            Pulse("cz_qubit2", config.drive.qubit2, gain=float(config.drive.qubit2.gain) * scale),
+            Pulse(
+                "cz_qubit2",
+                config.drive.qubit2,
+                gain=float(config.drive.qubit2.gain) * scale,
+            ),
             timeline="cz_q2",
             tag="cz_qubit2",
         )
@@ -360,7 +393,11 @@ class HeraldedCZAmplitudeExp(
         )
         with Schedule(buffer, scope=context.scope) as schedule:
             schedule.run_acquire_summed(
-                program, context.soc, reducer=reducer, rounds=config.rounds, options=RunOptions()
+                program,
+                context.soc,
+                reducer=reducer,
+                rounds=config.rounds,
+                options=RunOptions(),
             )
         buffer.trigger_update(flush=True)
         return HeraldedCZAmplitudeResult(scales, buffer.array)
@@ -397,7 +434,13 @@ class HeraldedCZAmplitudeExp(
         )
         _plot_returns(plots, result.scales, returns, fit)
         return HeraldedCZAmplitudeAnalysis(
-            fit.scale, fit.period, fit.error, fit.offset, fit.contrast, fit.fit_quality, fit.reason
+            fit.scale,
+            fit.period,
+            fit.error,
+            fit.offset,
+            fit.contrast,
+            fit.fit_quality,
+            fit.reason,
         )
 
 
@@ -416,13 +459,16 @@ def _conditional_returns(sums: NDArray[np.float64]) -> _Returns:
     )
 
 
-def _return_figure(
-    plots: Plots, name: str, scales: NDArray[np.float64]
-) -> Figure:
+def _return_figure(plots: Plots, name: str, scales: NDArray[np.float64]) -> Figure:
     """Label four return panels by measured herald and inferred CZ input."""
     fig, _ = plots.subplots(
-        num=name, nrows=2, ncols=2, sharex=True, sharey=True,
-        figsize=(10, 7), layout="constrained",
+        num=name,
+        nrows=2,
+        ncols=2,
+        sharex=True,
+        sharey=True,
+        figsize=(10, 7),
+        layout="constrained",
     )
     fig.supxlabel(_SCALE_LABEL)
     fig.supylabel("P(terminal = herald | measured herald)")
