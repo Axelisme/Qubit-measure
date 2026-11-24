@@ -31,6 +31,13 @@ from zcu_tools.datafile import (
 )
 from zcu_tools.resources.entry import SaveContext, default_save_stem
 
+from .run_values import (
+    LoadedRunValues,
+    RunValueAxis,
+    RunValueSpec,
+    validate_declarations,
+)
+
 __all__ = [
     "Axis",
     "ZSpec",
@@ -41,6 +48,8 @@ __all__ = [
     "LoadedVariableData",
     "GroupedLoadData",
     "GroupedAxesSpec",
+    "RunValueAxis",
+    "RunValueSpec",
     "IDENTITY",
     "MHZ_TO_HZ",
     "US_TO_S",
@@ -129,7 +138,9 @@ class AxesSpec(Generic[T_Result, T_Config]):
     defaulting to 1.0. Invalid Result fields fail at declaration time. Existing
     save exports Labber; native load/save_run/load_run consume this same spec.
     zcu_lab declares child specs through ``AxesSpec.Axis`` and ``AxesSpec.Z``;
-    the standalone Axis and ZSpec names remain available.
+    the standalone Axis and ZSpec names remain available. run_values declares
+    fixed Result fields kept only in Native docs/run_values; run_values_version
+    is the independent document version (currently 1).
     save_stem receives captured SaveContext and returns an exact filename stem.
     The default joins dotted frontend name, ordered role names and full run_id.
     Frontends append no prefix or ID. Invalid stems fail SaveLayout validation;
@@ -149,6 +160,8 @@ class AxesSpec(Generic[T_Result, T_Config]):
     )  # stable single-variable identity
     cfg_schema_version: str = "1.0"  # declaration-owned cfg major.minor
     save_stem: Callable[[SaveContext], str] = default_save_stem
+    run_values: tuple[RunValueSpec, ...] = field(default=(), kw_only=True)
+    run_values_version: int = field(default=1, kw_only=True)
 
     def __post_init__(self) -> None:
         _validate_cfg_schema_version(self.cfg_schema_version)
@@ -166,6 +179,13 @@ class AxesSpec(Generic[T_Result, T_Config]):
                 f"AxesSpec field_name(s) {sorted(missing)} not on "
                 f"{self.result_type.__name__} (has {sorted(result_fields)})"
             )
+        validate_declarations(
+            self.run_values,
+            self.run_values_version,
+            result_fields,
+            declared,
+            {self.data_variable: tuple(axis.label for axis in self.axes)},
+        )
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -263,11 +283,13 @@ class GroupedLoadData(Generic[T_Config]):
     """Validated grouped arrays used to rebuild an experiment Result.
 
     variables maps each present DataVariable identity to its memory-unit loaded
-    arrays. Absent optional variables have no entry. Result builders reconstruct
-    from these arrays before typed cfg validation.
+    arrays. Absent optional variables have no entry. run_values contains the
+    fixed values already decoded and converted to memory units. Result builders
+    reconstruct from these inputs before typed cfg validation.
     """
 
     variables: Mapping[DataVariable, LoadedVariableData]
+    run_values: LoadedRunValues = field(default_factory=LoadedRunValues, kw_only=True)
 
     def variable(self, variable: str | DataVariable) -> LoadedVariableData:
         """Get loaded arrays by snake_case identity; invalid/missing names raise ValueError."""
@@ -499,6 +521,8 @@ class GroupedAxesSpec(Generic[T_Result, T_Config]):
     grids regardless of the Labber layout. labber_variables selects a nonempty
     subset of declared names for export, in declaration order. None exports all
     present variables. Selection never changes native save or restore.
+    run_values declares fixed Result fields kept only in Native docs/run_values;
+    run_values_version is the independent document version (currently 1).
     save_stem receives captured SaveContext and returns an exact filename stem.
     The default joins dotted frontend name, ordered role names and full run_id.
     Frontends append no prefix or ID. Invalid stems fail SaveLayout validation;
@@ -515,6 +539,8 @@ class GroupedAxesSpec(Generic[T_Result, T_Config]):
     labber_layout: Literal["common", "independent"] = "common"
     save_stem: Callable[[SaveContext], str] = default_save_stem
     labber_variables: tuple[str, ...] | None = field(default=None, kw_only=True)
+    run_values: tuple[RunValueSpec, ...] = field(default=(), kw_only=True)
+    run_values_version: int = field(default=1, kw_only=True)
 
     def __post_init__(self) -> None:
         _validate_cfg_schema_version(self.cfg_schema_version)
@@ -534,6 +560,24 @@ class GroupedAxesSpec(Generic[T_Result, T_Config]):
                 raise ValueError(f"duplicate grouped data variable {data_variable!r}")
             seen.add(data_variable)
             variable.validate_result_fields(result_fields, self.result_type.__name__)
+        array_fields = {variable.z.field_name for variable in self.variables}
+        array_fields.update(
+            axis.field_name
+            for variable in self.variables
+            for axis in variable.axes
+            if axis.field_name is not None
+        )
+        validate_declarations(
+            self.run_values,
+            self.run_values_version,
+            result_fields,
+            array_fields,
+            {
+                variable.data_variable: tuple(axis.label for axis in variable.axes)
+                for variable in self.variables
+                if variable.required
+            },
+        )
         if self.labber_variables is not None:
             selected = {DataVariable(name) for name in self.labber_variables}
             if not selected or len(selected) != len(self.labber_variables):

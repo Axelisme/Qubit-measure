@@ -1,6 +1,6 @@
 # zcu_lab
 
-**Last updated:** 2026-11-23，離線 probe 的 fit 失敗判讀
+**Last updated:** 2026-11-24，單 qubit detune 的保存驗收
 
 **讀者：** lab-author、agent。查找實驗室定義的套件邊界、註冊入口與操作文件。
 
@@ -130,12 +130,10 @@ saved = save_stage(record, experiment.AXES_SPEC, output_dir)
 analyzed = analysis_stage(experiment, record, options)
 ```
 
-T2Echo 保存範例：[`T2EchoResult.true_activate_detune`](v2/twotone/time_domain/t2echo/core.py) 是 run-only 欄位，Native 還原後是 `None`。
-若原 record 的該欄有值，分兩次驗收：
-
-1. 用原 record 呼叫 `save_stage`，在 scratch 記錄 `roundtrip_equal=False`，從 WARNING 確認唯一差異是 `true_activate_detune`。
-2. 用 `dataclasses.replace` 複製 record 與 Result，只把副本的 `true_activate_detune` 設為 `None`，不改原 record。`iq_moments` 是 Native 持久欄位，有值就保留在副本中一起比較。
-3. 用副本和另一個輸出目錄重跑 `save_stage`，確認 `roundtrip_equal is True`。在 scratch 記錄並判讀 `cfg_issue`。
+T2Echo 保存範例：[`T2EchoResult.true_activate_detune`](v2/twotone/time_domain/t2echo/core.py) 在 Result 用 MHz，在 Native 的 `docs/run_values` 用 Hz。
+用原 record 呼叫 `save_stage`，記錄 `cfg_issue`，並確認 `roundtrip_equal is True`。
+若 Run 無法估計實際 detune，Result 保留 `None`；重存與 Load 不會用 cfg 的名目 detune 補值。
+`iq_moments` 有值時也在同次往返中比較，不需清除任何欄位。
 
 Run／analysis 的圖片由腳本保存，例如：
 

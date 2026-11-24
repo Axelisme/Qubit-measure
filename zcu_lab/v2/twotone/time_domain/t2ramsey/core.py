@@ -25,6 +25,7 @@ from zcu_tools.experiment import (
     Experiment,
     GroupedAxesSpec,
     GroupedLoadData,
+    RunValueSpec,
     VariableAxisSpec,
     VariableSpec,
     VariableZSpec,
@@ -59,9 +60,10 @@ class T2RamseyResult:
     """Free-evolution delays in us and mean complex IQ, one sample per delay.
 
     true_activate_detune is the phase-ramp frequency in MHz after hardware
-    time/phase rounding, not a fitted qubit detuning. It is run-only metadata
-    and is None after canonical load. iq_moments stores (N, 6) retained shot
-    sums [count, ΣI, ΣQ, ΣI², ΣIQ, ΣQ²], or None for a mean-only file.
+    time/phase rounding, not a fitted qubit detuning. It is None if the
+    applied frequency was not recorded or could not be estimated.
+    iq_moments stores (N, 6) retained shot sums [count, ΣI, ΣQ, ΣI², ΣIQ, ΣQ²],
+    or None for a mean-only file.
     """
 
     times: NDArray[np.float64]
@@ -110,9 +112,10 @@ def _build_result(data: GroupedLoadData[T2RamseyCfg]) -> T2RamseyResult:
     """Restore mean IQ and optional sums on the same saved delay grid."""
     trace = data.variable("data")
     (times,) = trace.axes
+    detune = data.run_values.nullable_scalar("true_activate_detune")
     moments = data.variables.get(DataVariable("iq_moments"))
     if moments is None:
-        return T2RamseyResult(times, trace.z)
+        return T2RamseyResult(times, trace.z, true_activate_detune=detune)
     columns, moment_times = moments.axes
     if not np.array_equal(times, moment_times) or not np.array_equal(
         columns, _MOMENT_COLUMNS
@@ -120,7 +123,9 @@ def _build_result(data: GroupedLoadData[T2RamseyCfg]) -> T2RamseyResult:
         raise ValueError(
             "/vars/iq_moments: expected columns 0–5 on the /vars/data delay grid"
         )
-    return T2RamseyResult(times, trace.z, iq_moments=moments.z)
+    return T2RamseyResult(
+        times, trace.z, true_activate_detune=detune, iq_moments=moments.z
+    )
 
 
 class T2RamseyCfg(ConfigBase):
@@ -186,6 +191,15 @@ class T2RamseyExp(Experiment[T2RamseyResult, T2RamseyCfg]):
         ),
         result_builder=_build_result,
         labber_variables=("data",),
+        run_values=(
+            RunValueSpec(
+                field_name="true_activate_detune",
+                wire_name="true_activate_detune",
+                unit="Hz",
+                scale=1e6,
+                allow_unknown=True,
+            ),
+        ),
         result_type=T2RamseyResult,
         cfg_type=T2RamseyCfg,
         cfg_schema_version="4.0",
@@ -278,7 +292,7 @@ class T2RamseyExp(Experiment[T2RamseyResult, T2RamseyCfg]):
         return T2RamseyResult(
             times=lengths,
             signals=split_sums(signals_buffer.array)[1],
-            true_activate_detune=true_detune,
+            true_activate_detune=true_detune if np.isfinite(true_detune) else None,
             iq_moments=signals_buffer.array,
         )
 

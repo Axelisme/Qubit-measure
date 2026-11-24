@@ -1,6 +1,6 @@
 # `zcu_tools.experiment` — 實驗層
 
-**Last updated:** 2026-11-23，離線 probe 保存比較與 lab 範例入口
+**Last updated:** 2026-11-24，固定 Run 值的 Native 保存與還原
 
 **讀者：** framework-dev。實驗介面、Run 資料、持久化映射與裝置操作邊界。
 
@@ -198,7 +198,7 @@ Caller 用實驗自己的 Result 型別包裝陣列，再組 RunRecord 交給 sa
 框架測試的合成輸入與 lab 驗收邊界見 [tests](../../../tests/README.md#實驗定義)。
 
 `probe.compare_roundtrip(original, restored, *, spec)` 也可比較 caller 已還原的 Result。
-Shape 與 dtype 必須相同。`None` 只與 `None` 相等，不等於陣列。Run 階段的 exact dtype 檢查只略過缺席的 optional variable，其餘 field-backed arrays 照常驗證。AxesSpec 與 GroupedAxesSpec 各組宣告中，scale≠1 且比例有限非零的浮點 Result 欄位，容許每個實數／虛數分量相對誤差 ≤2·eps，absolute tolerance 為0。
+Shape 與 dtype 必須相同。`None` 只與 `None` 相等，不等於陣列。Run 階段的 exact dtype 檢查只略過缺席的 optional variable，其餘 field-backed arrays 照常驗證。AxesSpec 與 GroupedAxesSpec 的軸、資料通道與固定 Run 值中，scale≠1 且比例有限非零的浮點 Result 欄位，容許每個實數／虛數分量相對誤差 ≤2·eps，absolute tolerance 為0。
 eps 取實際實數分量 dtype 的 machine epsilon，不隨 scale 大小改變。此上界涵蓋以同一 scale 各乘、除一次的正常有限值捨入，不放寬 underflow 或 overflow。
 固定或自動產生的軸沒有 Result 欄位，不加入縮放欄位映射。
 NaN 分量位置與 infinity 符號必須相同，其他欄位及整數陣列保持 exact 比較。
@@ -211,7 +211,7 @@ Warning 指出欄位、index_axis、index 與 shape、dtype 或 value 差異。�
 既有測試見 [`test_save_stage.py`](../../../tests/experiment/probe/test_save_stage.py) 的
 `test_scalar_field_restored_as_none_reports_dtype_and_keeps_comparing`。這個案例直接測 `compare_roundtrip`，不測 `save_stage`。
 
-原 record 的預期差異與副本驗收步驟見 [lab 的 T2Echo 保存範例](../../../zcu_lab/README.md#準備-python-檔)。
+固定 Run 值的保存驗收見 [lab 的 T2Echo 保存範例](../../../zcu_lab/README.md#準備-python-檔)。
 
 ## 實驗介面與資料
 
@@ -248,6 +248,15 @@ Warning 指出欄位、index_axis、index 與 shape、dtype 或 value 差異。�
   `GroupedLoadData` 提供現有變數及其固定座標，由 Result builder 決定是否保留。`VariableSpec(required=False)` 只在 Result 的整個 z 欄為 `None` 時略寫該變數。讀檔缺席的 optional variable 不傳給 builder；存在但不合宣告仍拒絕。每個 grouped spec 至少有一個 required variable。
 
   `AxesSpec` 在宣告時核對 Result 的資料欄位，不要求 Result 包含 cfg。軸以 inner-first 排列；保存時套用宣告的單位比例，載入時還原成 Result 欄位。Native cfg snapshot 載入時由宣告的 cfg 型別驗證；Labber 匯出另以 comment envelope 保存 cfg。`save_labber` 使用 caller 指定的路徑，不替 caller 選檔名。對包含多個 Data Variable 的單一 Result，`GroupedAxesSpec`／`VariableSpec` 描述 variable 與欄位的映射，由 typed builder 重建純 Result；Grouped 與 single 都透過 `save_labber(record, path, spec=...)` 匯出，cfg 缺失時拒絕。`labber_layout` 預設 common，要求共同 grid；明確宣告 independent 時，各 variable 保留自己的 1D／2D axes。`labber_variables` 預設匯出所有現有變數，也可明列名稱選集；native required 與否不限制選集。單檔 save 與 artifact 保存共用投影，不自動切換 layout，也不改 native 格式。Grouped native load 由 `load_run_with_metadata` 與 single 共用 restore，不從 Labber reconstruction 讀回。通用檔案格式與讀寫由 [datafile](../datafile/README.md) 負責；保存權責另見 [ADR-0063](../../../docs/adr/0063-persistence-ownership.md)。
+
+`AxesSpec.run_values`／`GroupedAxesSpec.run_values` 宣告只寫入 Native `docs/run_values` 的固定 Result 欄位。
+`RunValueSpec` 分別指定 Result 欄名、盤上鍵、單位、scale、記憶體 dtype，及是否允許 unknown。
+向量另用 `RunValueAxis` 綁到必有資料變數的具名軸，沿該軸原序存讀，不另存座標。
+`run_values_version` 是獨立文件版本，現在只接受整數 1，不影響 cfg 或 Container 版本。
+單變數還原將解好的欄位傳給 Result constructor；分組 builder 經 `GroupedLoadData.run_values` 讀取 `scalar`、`nullable_scalar` 或 `vector`。
+缺文件與缺欄都按宣告還原為 unknown 或拒讀；存在但壞掉的宣告欄一律拒讀。
+Typed 重存只寫宣告欄，保留未知欄需使用原始 Container。
+`PreparedRunData.to_container` 為 Native 編碼固定值；Labber 不投影，也不受這一步的編碼錯誤阻擋。
 
 `metadata.validate_run_metadata(document)` 在實際 Save 前驗證完整 schema 與原文件的有限 JSON，不修改作者 key。
 GUI 在修改 comment 或準備 ledger 前呼叫它，native 與 artifact saver 也使用同一入口。

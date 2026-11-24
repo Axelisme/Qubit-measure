@@ -7,7 +7,14 @@ import numpy as np
 import pytest
 from numpy.typing import NDArray
 from pydantic import Field
-from zcu_tools.experiment import AxesSpec, Axis, ZSpec, native_persistence, probe
+from zcu_tools.experiment import (
+    AxesSpec,
+    Axis,
+    RunValueSpec,
+    ZSpec,
+    native_persistence,
+    probe,
+)
 from zcu_tools.experiment.native_persistence import load_run_with_metadata
 from zcu_tools.experiment.records import RunRecord
 
@@ -79,6 +86,35 @@ def test_save_reports_a_differing_result_field_through_public_comparison(
     assert (
         probe.compare_roundtrip(record.result, outcome.record.result, spec=spec) is True
     )
+
+
+def test_save_stage_accepts_unit_rounding_for_a_fixed_scalar(tmp_path: Path) -> None:
+    spec = AxesSpec(
+        axes=(Axis("coordinate", "Coordinate", "s"),),
+        z=ZSpec("signal", "Signal", "V"),
+        result_type=_RunOnlyScalarResult,
+        cfg_type=SavingCfg,
+        tag="test/scaled_run_value",
+        run_values=(
+            RunValueSpec(
+                field_name="estimate",
+                wire_name="estimate",
+                unit="Hz",
+                scale=1e6,
+                allow_unknown=True,
+            ),
+        ),
+    )
+    result = _RunOnlyScalarResult(np.array([1.0]), 1 / 37, np.array([1 + 2j]))
+    record = RunRecord(
+        SavingCfg(), result, native_metadata(spec.tag).model_dump(mode="json")
+    )
+
+    saved = probe.save_stage(record, spec, tmp_path)
+
+    assert saved.roundtrip_equal is True
+    different = replace(saved.record.result, estimate=0.03)
+    assert probe.compare_roundtrip(result, different, spec=spec) is False
 
 
 def test_save_preserves_native_cfg_diagnostic(tmp_path: Path):

@@ -58,6 +58,7 @@ if TYPE_CHECKING:
         save_run,
     )
     from .records import AnalysisRecord, RunRecord
+    from .run_values import RunValueAxis, RunValueSpec
     from .scope import Scope, ScriptCancelled
 
 __all__ = [
@@ -107,6 +108,8 @@ __all__ = [
     "LoadedVariableData",
     "GroupedLoadData",
     "GroupedAxesSpec",
+    "RunValueAxis",
+    "RunValueSpec",
     "IDENTITY",
     "MHZ_TO_HZ",
     "US_TO_S",
@@ -159,6 +162,8 @@ _EXPORT_MODULES = {
     "LoadedVariableData": ".axes_spec",
     "GroupedLoadData": ".axes_spec",
     "GroupedAxesSpec": ".axes_spec",
+    "RunValueAxis": ".run_values",
+    "RunValueSpec": ".run_values",
     "IDENTITY": ".axes_spec",
     "MHZ_TO_HZ": ".axes_spec",
     "US_TO_S": ".axes_spec",
