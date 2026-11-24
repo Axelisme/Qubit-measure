@@ -1,4 +1,4 @@
-from zcu_lab.v2.twotone.ro_optimize.auto_optimize.core import AutoOptCfg, AutoOptExp
+from zcu_lab.v2.twotone.ro_optimize.auto.core import AutoOptCfg, AutoOptExp
 from zcu_lab.v2.twotone.ro_optimize.chain_freq.core import ChainFreqCfg, ChainFreqExp
 from zcu_lab.v2.twotone.ro_optimize.chain_length.core import (
     ChainLengthCfg,

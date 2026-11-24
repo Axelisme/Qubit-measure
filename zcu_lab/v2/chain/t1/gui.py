@@ -48,7 +48,7 @@ def _run(cfg: ChainT1Cfg, *, context: RunContext) -> RunRecord[ChainT1Cfg, Cycle
     return RunRecord(cfg=cfg, result=ChainT1Exp().run(cfg, context=context))
 
 
-# No writeback: twotone/t1 calibrates $qubit.t1.
+# No writeback: twotone/time_domain/t1 calibrates $qubit.t1.
 DEFINITION = Adapter(
     spec=ChainT1Exp.AXES_SPEC,
     make_form=make_form,

@@ -177,7 +177,7 @@ Runtime 回覆 `status="cancelled"`、`report=null` 與各次 `runs`。
 
 ## 操作文件與驗收
 
-用 `recipe_guide(adapter="twotone/t1")` 依 adapter 名查 operator guide。
+用 `recipe_guide(adapter="twotone/time_domain/t1")` 依 adapter 名查 operator guide。
 Recipe 可以串多個 adapter，宣告不另設單一 adapter mapping。
 十二個 mux 的輸入、原始 tone 位置與報告見 [mux guide](mux-guide.md)。
 Two-qubit 的位置綁定、舊 point 重綁、herald reset、寫回與 RB 波形覆寫見 [two-qubit guide](two-qubit-guide.md)。
@@ -209,7 +209,7 @@ QND 軸固定 0..1，但回報不裁切。Score 軸只按 score 值決定，不�
 | `twotone_chain` | `twotone/chain` | 必填 drive 的 `center_mhz`、`span_mhz`、`points`。每點 48 次無 reset 的（驅動、讀出），`reps` 是每輪快掃次數。分析以 `twotone/freq` 的峰擬合擬合離背景的 sigma 曲線，`expected_center_mhz` 選峰。回報中心、近似寬度與 5% 誤報門檻，完整 Run、Analyze、Save，不提出 writeback。 |
 | `chain_amp_rabi` | `chain/amp_rabi` | 掃 drive gain，`gain_range`、`points`。每個 rep 是一個 cycle：K（`relax_delay`）後 (Rabi pulse, 讀, 讀) × 8，`reps` 是每輪每點 cycle 數。用第一讀的擬合取起點；無估計則用保存的 gain 軸取起點，`first_read_pi_gain` 為 `null`。聯合擬合 65 個數一次。回報 π gain 與頻率的估值、Wald 標準誤、R、J、df、J/df、χ² 參考帶端點，以及白化殘差分量 \|r\| > 3 的比例。數值不作通過門檻。逐點投影只在圖上，無 writeback。 |
 | `chain_len_rabi` | [`chain/len_rabi`](../v2/chain/len_rabi/guide.md) | 以 `max_length_us`、`points` 掃 const／flat_top drive 的長度。Cycle 與 `reps` 同上。用第一讀擬合取起點；無估計則用保存的長度軸取起點，`first_read_pi_length_us` 為 `null`。聯合擬合 65 個數一次。回報 π 長度（µs）、Rabi 頻率（MHz）、Wald 標準誤、R、J、df、J/df、χ² 參考帶端點與白化殘差分量 \|r\| > 3 的比例。數值不作通過門檻，逐點投影只在圖上，無 writeback。 |
-| `t1_cov` | `twotone/t1_cov` | 用單 tone pulse readout 讀取 π 與掃描等待前後的 IQ。`use_reset` 選讀取前的脈衝 reset，`points` 設 Expts。回報狀態改變機率擬合的 T1 與誤差，詢問 `$qubit.t1` 寫回並保存二階矩總和。 |
+| `t1_cov` | `twotone/time_domain/t1_cov` | 用單 tone pulse readout 讀取 π 與掃描等待前後的 IQ。`use_reset` 選讀取前的脈衝 reset，`points` 設 Expts。回報狀態改變機率擬合的 T1 與誤差，詢問 `$qubit.t1` 寫回並保存二階矩總和。 |
 | `chain_t1` | [`chain/t1`](../v2/chain/t1/guide.md) | `max_delay_us`、`points` 設定 π 後的等待掃描。每個 block 是 (π, 等待, 讀, 讀)。聯合擬合用 rate-equation 模型，起點取自第一讀；無估計時用保存等待跨度的三分之一（至少 0.001 µs），只嘗試一次。回報 T1（振幅較大的 eigen time）、secondary time 及各自的 Wald 標準誤，也回報 J、df、J/df、χ² 參考帶端點與白化殘差分量 \|r\| > 3 的比例。數值不作通過門檻；逐點投影只在圖上。保存，不提出 writeback。 |
 | `chain_t2ramsey` | `chain/t2ramsey` | 掃 Ramsey 等待，`max_delay_us`、`points`、`detune_mhz`（第二個 π/2 的相位斜率）。每個 block 是 (π/2, 等待, 反相 π/2, 讀, 讀)。第一讀無估計時，從保存的等待座標選一個 joint fit 起點。回報 T2*、fringe 頻率、第三態衰減時間與 Wald 誤差、R、第一讀 T2*（無估計為 null）、J、df、J/df、χ² 參考帶與尾端比例。不提出 writeback。 |
 | `chain_t2echo` | `chain/t2echo` | 掃總 echo 等待，`max_delay_us`（總長）、`points`。每個 block 是 (π/2, x/2, π, x/2, π/2, 讀, 讀)。排除首點後若不足兩個相異 waits 就略過第一讀擬合。無第一讀估計時改用保存等待軸，`first_read_t2_us` 為 null。回報 T2 echo、第三態衰減時間與 Wald 誤差，以及 `J`、`df`、`J/df`、χ² 期望帶兩端與 `\|r\| > 3` 比例，不提出 writeback。 |

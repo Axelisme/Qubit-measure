@@ -19,14 +19,14 @@ from zcu_tools.gui.app.measure.adapter import (
 from zcu_tools.gui.form_adapter import Form, FormContext
 from zcu_tools.plotting.plots import Plots
 
-from zcu_lab.v2.twotone.reset.bath.freq.core import (
+from zcu_lab.v2.twotone.reset.bath.freq_gain.core import (
     FreqGainAnalysis,
     FreqGainAnalyzeOptions,
     FreqGainCfg,
     FreqGainExp,
     FreqGainResult,
 )
-from zcu_lab.v2.twotone.reset.bath.freq.form import make_form
+from zcu_lab.v2.twotone.reset.bath.freq_gain.form import make_form
 
 BathFreqGainRunResult: TypeAlias = RunRecord[FreqGainCfg, FreqGainResult]
 

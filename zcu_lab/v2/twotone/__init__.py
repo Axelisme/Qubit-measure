@@ -26,7 +26,7 @@ from zcu_lab.v2.twotone.dispersive.core import (
     DispersiveCfg,
     DispersiveExp,
 )
-from zcu_lab.v2.twotone.fluxdep.core import FreqFluxCfg, FreqFluxExp
+from zcu_lab.v2.twotone.flux_dep.core import FreqFluxCfg, FreqFluxExp
 from zcu_lab.v2.twotone.freq.core import (
     FreqAnalysis,
     FreqAnalyzeOptions,
@@ -36,7 +36,7 @@ from zcu_lab.v2.twotone.freq.core import (
 from zcu_lab.v2.twotone.power_dep.core import PowerCfg, PowerExp
 from zcu_lab.v2.twotone.rb.core import RB_Exp, RB_Result, RBAnalysis, RBCfg
 from zcu_lab.v2.twotone.zigzag.core import ZigZagCfg, ZigZagExp
-from zcu_lab.v2.twotone.zigzag_sweep.core import (
+from zcu_lab.v2.twotone.zigzag_scan.core import (
     ZigZagScanAnalysis,
     ZigZagScanAnalyzeOptions,
     ZigZagScanCfg,

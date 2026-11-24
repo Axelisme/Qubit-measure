@@ -71,12 +71,12 @@ from zcu_lab.v2.twotone.ac_stark import ramsey_core as twotone_ac_stark_ramsey
 from zcu_lab.v2.twotone.allxy import core as twotone_allxy
 from zcu_lab.v2.twotone.ckp import core as twotone_ckp
 from zcu_lab.v2.twotone.dispersive import core as twotone_dispersive
-from zcu_lab.v2.twotone.fluxdep import core as twotone_fluxdep
+from zcu_lab.v2.twotone.flux_dep import core as twotone_fluxdep
 from zcu_lab.v2.twotone.freq import core as twotone_freq
 from zcu_lab.v2.twotone.power_dep import core as twotone_power_dep
 from zcu_lab.v2.twotone.rabi.amp_rabi import core as twotone_rabi_amp_rabi
 from zcu_lab.v2.twotone.rabi.len_rabi import core as twotone_rabi_len_rabi
-from zcu_lab.v2.twotone.reset.bath.freq import core as twotone_reset_bath_freq
+from zcu_lab.v2.twotone.reset.bath.freq_gain import core as twotone_reset_bath_freq
 from zcu_lab.v2.twotone.reset.bath.length import core as twotone_reset_bath_length
 from zcu_lab.v2.twotone.reset.bath.phase import core as twotone_reset_bath_phase
 from zcu_lab.v2.twotone.reset.dual_tone.freq import core as twotone_reset_dual_tone_freq
@@ -93,7 +93,7 @@ from zcu_lab.v2.twotone.reset.single_tone.freq import (
 from zcu_lab.v2.twotone.reset.single_tone.length import (
     core as twotone_reset_single_tone_length,
 )
-from zcu_lab.v2.twotone.ro_optimize.auto_optimize import (
+from zcu_lab.v2.twotone.ro_optimize.auto import (
     core as twotone_ro_optimize_auto_optimize,
 )
 from zcu_lab.v2.twotone.ro_optimize.freq import core as twotone_ro_optimize_freq
@@ -113,7 +113,7 @@ from zcu_lab.v2.twotone.time_domain.t1 import (
 from zcu_lab.v2.twotone.time_domain.t2echo import core as twotone_time_domain_t2echo
 from zcu_lab.v2.twotone.time_domain.t2ramsey import core as twotone_time_domain_t2ramsey
 from zcu_lab.v2.twotone.zigzag import core as twotone_zigzag
-from zcu_lab.v2.twotone.zigzag_sweep import core as twotone_zigzag_sweep
+from zcu_lab.v2.twotone.zigzag_scan import core as twotone_zigzag_sweep
 
 # Historical disk schemas precede shot moments and run values. Neither the
 # current native variables nor the Labber export projection defines these logs.

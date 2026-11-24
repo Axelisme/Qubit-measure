@@ -17,7 +17,7 @@ from zcu_tools.gui.app.measure.adapter import (
 from zcu_tools.gui.form_adapter import Form, FormContext
 from zcu_tools.plotting.plots import Plots
 
-from zcu_lab.v2.twotone.zigzag_sweep.core import (
+from zcu_lab.v2.twotone.zigzag_scan.core import (
     ZigZagScanAnalysis,
     ZigZagScanAnalyzeOptions,
     ZigZagScanCfg,

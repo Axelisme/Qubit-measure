@@ -74,7 +74,7 @@ Measure 在 Open／Reset 呼叫 adapter 的 `make_form(ctx)`，依固定來源�
 Form 輸出 adapter 的輸入型別，adapter.run 轉成實際實驗 cfg 並回傳 RunRecord。
 Module 與掃描欄位平鋪於頂層，只有 pulse Advanced 保留既有分組與摺疊。
 Load 不轉換舊 2.0 cfg，也不反填目前 Form；資料與 metadata 保留，record.cfg 為 None 並附原因。
-`onetone/flux_dep` 與 `twotone/fluxdep` 的 core 用具名 `flux_dev: str`；
+`onetone/flux_dep` 與 `twotone/flux_dep` 的 core 用具名 `flux_dev: str`；
 JPA 使用具名 `jpa_flux_dev` 與 `jpa_rf_dev`。Form 在 Open／Reset 讀取
 `$qubit.flux_dev`、`$mux.flux_dev` 或 JPA 的 `$jpa.flux_dev`／`$jpa.rf_source`，
 保存可覆寫的 direct 裝置名稱。既有 input 不隨 alias 或元件參數更新。

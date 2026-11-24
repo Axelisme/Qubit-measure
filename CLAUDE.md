@@ -167,7 +167,7 @@ Module `README.md` 專指 `lib/` 與 `tests/` 子目錄中的高層 cheat-sheet�
 
 讓不熟 repo 的人或 agent 花最少時間與力氣找到所需粒度的資訊。
 
-- **粒度分層。** 依〈讀者宣告〉選入口：operator、lab-author、framework-dev 或 agent 從各自會讀的文件找操作、契約與決策。實作細節由程式碼交代，維護理由留在相關程式的註解。各層分工，說法一致，跨層用連結代替重抄。例如，skopt `n_jobs=1` 的理由留在 [auto-optimize 的 `core.py`](zcu_lab/v2/twotone/ro_optimize/auto_optimize/core.py) 註解；operator guide 只說操作與結果。
+- **粒度分層。** 依〈讀者宣告〉選入口：operator、lab-author、framework-dev 或 agent 從各自會讀的文件找操作、契約與決策。實作細節由程式碼交代，維護理由留在相關程式的註解。各層分工，說法一致，跨層用連結代替重抄。例如，skopt `n_jobs=1` 的理由留在 [auto-optimize 的 `core.py`](zcu_lab/v2/twotone/ro_optimize/auto/core.py) 註解；operator guide 只說操作與結果。
 - **判斷依據。** 讓讀者從文件找到會影響判斷的事實：是什麼、由誰負責、為何如此。要追到實作時，連到程式碼或寫明可 grep 的名稱。例如，lab-author 從 [`experiment-authoring.md` 的存檔軸段](zcu_lab/v2/experiment-authoring.md#存檔軸用關鍵字固定座標不塞進-result)找結果格式；需要判斷舊檔的 cfg 相容性時，入口指向 [ADR-0069〈Cfg 欄位改名與 schema 版本〉](docs/adr/0069-experiment-core-and-frontends.md#cfg-欄位改名與-schema-版本)。
 - **橫向互指。** 一個模組的契約依賴另一個模組的定義時，從雙方的契約段落互連到對應段落。例如，FTF environment、ADC 與 Program simulation 在各自說明 integrated statistics 的段落互指，讓讀者直接對照環境產出的統計、ADC 的邊際計數與 Program 消費的統計格式。
 - **限定語。** 同一詞在不同模組代表不同資料時，每個模組在自己的文件寫明限定語或固定搜尋詞。例如，`joint` 可以指 FTF 的 herald history × terminal state 聯合分布，也可以指 `two_qubit/joint_readout` 的雙 qubit IQ 聯合分類；ADC 的 per-event marginals 則是各讀取事件的邊際計數。

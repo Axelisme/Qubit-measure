@@ -136,7 +136,7 @@ async def cpmg(session: RecipeSession, inputs: CPMGInputs) -> CPMGReport:
     Missing Form values stop before acquisition; completed Run data is saved even if analysis fails.
     """
     tab = session.open_tab(
-        "twotone/cpmg",
+        "twotone/time_domain/cpmg",
         target={"qubit": inputs.target},
         reuse=inputs.reuse_tab_id,
     )

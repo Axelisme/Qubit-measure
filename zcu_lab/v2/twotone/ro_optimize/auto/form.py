@@ -1,4 +1,4 @@
-"""Core-derived starting values for ro_optimize/auto_optimize."""
+"""Core-derived starting values for ro_optimize/auto."""
 
 from dataclasses import replace
 
@@ -6,7 +6,7 @@ from zcu_tools.cfg_model import Hidden, Range, Slot, Template
 from zcu_tools.gui.form_adapter import Form, FormContext
 
 from zcu_lab.v2.support.measure.ctx_helpers import source, t1_initial_time
-from zcu_lab.v2.twotone.ro_optimize.auto_optimize.core import AutoOptCfg
+from zcu_lab.v2.twotone.ro_optimize.auto.core import AutoOptCfg
 
 
 def make_form(ctx: FormContext) -> Form[AutoOptCfg]:

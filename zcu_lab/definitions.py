@@ -119,14 +119,14 @@ from zcu_lab.v2.twotone.allxy.gui import DEFINITION as ALL_XY_DEFINITION
 from zcu_lab.v2.twotone.chain.gui import DEFINITION as CHAIN_DEFINITION
 from zcu_lab.v2.twotone.ckp.gui import DEFINITION as CKP_DEFINITION
 from zcu_lab.v2.twotone.dispersive.gui import DEFINITION as DISPERSIVE_DEFINITION
-from zcu_lab.v2.twotone.fluxdep.gui import DEFINITION as FLUX_DEP_DEFINITION
+from zcu_lab.v2.twotone.flux_dep.gui import DEFINITION as FLUX_DEP_DEFINITION
 from zcu_lab.v2.twotone.freq.gui import DEFINITION as FREQ_DEFINITION
 from zcu_lab.v2.twotone.power_dep.gui import DEFINITION as POWER_DEP_DEFINITION
 from zcu_lab.v2.twotone.rabi.amp_rabi.gui import DEFINITION as AMP_RABI_DEFINITION
 from zcu_lab.v2.twotone.rabi.len_rabi.gui import DEFINITION as LEN_RABI_DEFINITION
 from zcu_lab.v2.twotone.raman_gf.gui import DEFINITION as RAMAN_GF_DEFINITION
 from zcu_lab.v2.twotone.rb.gui import DEFINITION as RB_DEFINITION
-from zcu_lab.v2.twotone.reset.bath.freq.gui import (
+from zcu_lab.v2.twotone.reset.bath.freq_gain.gui import (
     DEFINITION as BATH_FREQ_GAIN_DEFINITION,
 )
 from zcu_lab.v2.twotone.reset.bath.length.gui import (
@@ -155,7 +155,7 @@ from zcu_lab.v2.twotone.reset.single_tone.freq.gui import (
 from zcu_lab.v2.twotone.reset.single_tone.length.gui import (
     DEFINITION as SINGLE_TONE_LENGTH_DEFINITION,
 )
-from zcu_lab.v2.twotone.ro_optimize.auto_optimize.gui import (
+from zcu_lab.v2.twotone.ro_optimize.auto.gui import (
     DEFINITION as RO_OPT_AUTO_DEFINITION,
 )
 from zcu_lab.v2.twotone.ro_optimize.chain_freq.gui import (
@@ -201,10 +201,10 @@ from zcu_lab.v2.twotone.time_domain.t2ramsey.gui import (
     DEFINITION as T2_RAMSEY_DEFINITION,
 )
 from zcu_lab.v2.twotone.zigzag.gui import DEFINITION as ZIG_ZAG_DEFINITION
-from zcu_lab.v2.twotone.zigzag_sweep.gui import (
+from zcu_lab.v2.twotone.zigzag_scan.gui import (
     FREQ_DEFINITION as ZIG_ZAG_SCAN_FREQ_DEFINITION,
 )
-from zcu_lab.v2.twotone.zigzag_sweep.gui import (
+from zcu_lab.v2.twotone.zigzag_scan.gui import (
     GAIN_DEFINITION as ZIG_ZAG_SCAN_GAIN_DEFINITION,
 )
 
@@ -243,10 +243,10 @@ def register_all(
         "twotone/rabi/len_rabi": LEN_RABI_DEFINITION,
         "twotone/rabi/amp_rabi": AMP_RABI_DEFINITION,
         "twotone/raman_gf": RAMAN_GF_DEFINITION,
-        "twotone/t1": T1_DEFINITION,
-        "twotone/t1_cov": T1_COV_DEFINITION,
-        "twotone/t2ramsey": T2_RAMSEY_DEFINITION,
-        "twotone/t2echo": T2_ECHO_DEFINITION,
+        "twotone/time_domain/t1": T1_DEFINITION,
+        "twotone/time_domain/t1_cov": T1_COV_DEFINITION,
+        "twotone/time_domain/t2ramsey": T2_RAMSEY_DEFINITION,
+        "twotone/time_domain/t2echo": T2_ECHO_DEFINITION,
         "chain/amp_rabi": CHAIN_AMP_RABI_DEFINITION,
         "chain/len_rabi": CHAIN_LEN_RABI_DEFINITION,
         "chain/t1": CHAIN_T1_DEFINITION,
@@ -267,7 +267,7 @@ def register_all(
         "twotone/ac_stark": AC_STARK_DEFINITION,
         "twotone/ac_stark_ramsey": AC_STARK_RAMSEY_DEFINITION,
         "twotone/ckp": CKP_DEFINITION,
-        "twotone/cpmg": CPMG_DEFINITION,
+        "twotone/time_domain/cpmg": CPMG_DEFINITION,
         "twotone/allxy": ALL_XY_DEFINITION,
         "twotone/zigzag": ZIG_ZAG_DEFINITION,
         "twotone/zigzag_scan/gain": ZIG_ZAG_SCAN_GAIN_DEFINITION,
@@ -292,7 +292,7 @@ def register_all(
         "twotone/reset/bath/freq_gain": BATH_FREQ_GAIN_DEFINITION,
         "twotone/reset/bath/length": BATH_LENGTH_DEFINITION,
         "twotone/reset/bath/phase": BATH_PHASE_DEFINITION,
-        "twotone/reset/check": RABI_CHECK_DEFINITION,
+        "twotone/reset/rabi_check": RABI_CHECK_DEFINITION,
         "twotone/reset/flux/gain": FLUX_RESET_GAIN_DEFINITION,
         "twotone/reset/flux/length": FLUX_RESET_LENGTH_DEFINITION,
         "mux/onetone": MUX_ONETONE_DEFINITION,

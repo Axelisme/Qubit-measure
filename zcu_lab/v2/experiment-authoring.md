@@ -105,7 +105,7 @@ Linear 是線性格點，decay 將同一時間窗的點集中在衰減段，這�
 取數欄位在每個 cfg 最後完整宣告，保持欄位可見。
 平均類建議提供 `reps`、`rounds`、`relax_delay`，有 SNR 定義才加 `earlystop_snr`，需要才加 `initial_delay`。
 這是建議，缺少其中一項本身不阻擋 review。預設值與欄位 description 依 [風格指南](experiment-style.md#3-寫法判斷)。
-`acquire_retry` 只開放超長掃描 `twotone/fluxdep` 與 `singleshot/t1/t1_with_tone_sweep`。
+`acquire_retry` 只開放超長掃描 `twotone/flux_dep` 與 `singleshot/t1/t1_with_tone_sweep`。
 Workflow 從自己的 settings 傳 retry 給取數 helper，core cfg 不承接 workflow retry。
 
 Readout 用實驗接受的最窄型別：pulse 用 `PulseReadout.Cfg`，mux 用 `MuxReadout.Cfg`，兩者都支援才用 `Readout.Cfg`。

@@ -1,4 +1,4 @@
-from zcu_lab.v2.twotone.reset.bath.freq.core import (
+from zcu_lab.v2.twotone.reset.bath.freq_gain.core import (
     FreqGainAnalysis,
     FreqGainAnalyzeOptions,
     FreqGainCfg,

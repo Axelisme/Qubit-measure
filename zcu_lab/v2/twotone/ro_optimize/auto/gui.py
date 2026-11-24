@@ -18,13 +18,13 @@ from zcu_tools.gui.form_adapter import Form, FormContext
 from zcu_tools.plotting.plots import Plots
 
 from zcu_lab.v2.support.measure.writeback_helpers import readout_dpm_writeback_items
-from zcu_lab.v2.twotone.ro_optimize.auto_optimize.core import (
+from zcu_lab.v2.twotone.ro_optimize.auto.core import (
     AutoOptAnalysis,
     AutoOptCfg,
     AutoOptExp,
     AutoOptResult,
 )
-from zcu_lab.v2.twotone.ro_optimize.auto_optimize.form import make_form
+from zcu_lab.v2.twotone.ro_optimize.auto.form import make_form
 
 RoOptAutoRunResult: TypeAlias = RunRecord[AutoOptCfg, AutoOptResult]
 

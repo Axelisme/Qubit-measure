@@ -397,7 +397,7 @@ Confusion correction 只讀 saved cfg；缺 cfg／classifier／matrix 就略過�
 Amp Rabi 串接各 round 的 raw IQ，reset-check 累加各 round 的 class counts。
 舊比例檔案缺少 counts 變數時拒絕載入，不補造計數。
 
-[`twotone/t1_cov`](twotone/time_domain/t1_cov/guide.md) 共用單 tone `PulseReadout.Cfg`，
+[`twotone/time_domain/t1_cov`](twotone/time_domain/t1_cov/guide.md) 共用單 tone `PulseReadout.Cfg`，
 以 `shot_sums(prog, [IQ("pre_readout"), IQ("post_readout")])` 加總未分類的 IQ 特徵外積。
 Result 保存 float64 `sums`，形狀為（delay, pre, post）。Grouped spec 從內層軸宣告，
 所以先列 `post_readout_features`，再列 `pre_readout_features` 與時間。
@@ -716,7 +716,7 @@ agent / human 判讀，guide 不暗示用自動 fidelity gate 代替判斷。
 | --- | --- |
 | Single-tone | [Freq](twotone/reset/single_tone/freq/guide.md)、[Length](twotone/reset/single_tone/length/guide.md) |
 | Dual-tone | [Freq](twotone/reset/dual_tone/freq/guide.md)、[Power](twotone/reset/dual_tone/power/guide.md)、[Length](twotone/reset/dual_tone/length/guide.md) |
-| Bath | [Freq/gain](twotone/reset/bath/freq/guide.md)、[Length](twotone/reset/bath/length/guide.md)、[Phase](twotone/reset/bath/phase/guide.md) |
+| Bath | [Freq/gain](twotone/reset/bath/freq_gain/guide.md)、[Length](twotone/reset/bath/length/guide.md)、[Phase](twotone/reset/bath/phase/guide.md) |
 | 驗證 | [Rabi check](twotone/reset/rabi_check/guide.md)、[Singleshot reset check](singleshot/reset_check/guide.md) |
 
 Singleshot 的初態、joint fit 與校準條件見 [experiment authoring](experiment-authoring.md#singleshot-initial-state)
