@@ -4,25 +4,40 @@ These two-state checks validate existing flux wiring, not basis convergence or
 nonadiabatic accuracy for a physical device. No production behavior is added.
 """
 
+from collections.abc import Sequence
+from contextlib import closing
+from dataclasses import replace
+from typing import override
+
 import numpy as np
 import pytest
 from numpy.typing import NDArray
+from zcu_tools.device import DeviceManager
 from zcu_tools.simulate.baths import H_OVER_K
 from zcu_tools.simulate.boundary import (
     PointTimeline,
     PulseEnvelope,
     PulseEvent,
     ReadoutWindow,
+    RoundRequest,
     TimelineTemplate,
 )
-from zcu_tools.simulate.evolution import Engine
+from zcu_tools.simulate.evolution import (
+    CaptureBuffer,
+    Engine,
+    EvolutionResult,
+    ModelSource,
+    TimelineBatch,
+    read_capture_metadata,
+    segment_spans,
+)
 from zcu_tools.simulators.ftf.config import FTFSettings, parse_ftf
-from zcu_tools.simulators.ftf.environment import FTFModelFacts, plan_template
+from zcu_tools.simulators.ftf.environment import FTFModelFacts, FTFSource, plan_template
 
 from tests.core._simulation import TIME_BASE, single_point_template, ticks
 from tests.program._profiles import profile_soccfg
 from tests.simulators.ftf.config._data import ftf_document
-from tests.simulators.ftf.environment._templates import snapshot
+from tests.simulators.ftf.environment._templates import request, snapshot
 
 pytestmark = pytest.mark.sim
 
@@ -192,6 +207,57 @@ def test_delayed_cosine_reset_retains_constant_park_relaxation(delay_ns: float) 
     # A long constant park thermalizes even when its ramp ends between samples.
     assert result.densities[0, 0, 0].real == pytest.approx(weights[0], abs=5e-3)
     assert result.paths.segments_by_kernel["t4"] > 0
+
+
+class RecordingCpuEngine(Engine):
+    """Retain ordinary Engine answers at the FTF handoff."""
+
+    def __init__(self) -> None:
+        super().__init__(1, backend="cpu")
+        self.results: list[EvolutionResult] = []
+        self.recording = CaptureBuffer()
+
+    @override
+    def evolve(
+        self, source: ModelSource, batches: Sequence[TimelineBatch], **kwargs
+    ) -> EvolutionResult:
+        kwargs["capture"] = self.recording
+        result = super().evolve(source, batches, **kwargs)
+        self.results.append(result)
+        return result
+
+
+def test_long_cosine_reset_keeps_the_fixed_budget_density_and_route() -> None:
+    config = reset_settings().with_telemetry(enabled=False)
+    soccfg = profile_soccfg("ftf")
+    # The existing zero-delay, 12 T1 park fixture rounds to a 1104 ns hold.
+    template = reset_template(1104, settling_ns=8)
+    acquire = replace(request(templates=(template,)), point_dims=(1,), loop_dims=(3, 1))
+    state = snapshot()
+    plan = plan_template(config, state, template, soccfg=soccfg, time_base=TIME_BASE)
+    (spans,) = segment_spans(plan.batch)
+    assert len(spans) >= 10
+    recording = CaptureBuffer()
+    with closing(Engine(1, backend="cpu")) as legacy:
+        before = legacy.evolve(
+            plan.source, (plan.batch,), budget=1e-3, capture=recording
+        )
+
+    engine = RecordingCpuEngine()
+    with closing(
+        FTFSource(config, DeviceManager(), soccfg=soccfg, engine=engine)
+    ) as source:
+        source.execute(RoundRequest(acquire, state, 0))
+        source.execute(RoundRequest(replace(acquire, sequence=8), state, 0))
+
+    (after,) = engine.results  # Reuse does not run a second evolution.
+    assert after.densities.tobytes() == before.densities.tobytes()
+    (before_record,) = recording.records
+    (after_record,) = engine.recording.records
+    before_metadata = read_capture_metadata(before_record)
+    after_metadata = read_capture_metadata(after_record)
+    assert after_metadata["budget"] == before_metadata["budget"]
+    assert after_metadata["routes"] == before_metadata["routes"]
 
 
 def test_sudden_reset_returns_rotated_park_gibbs_not_adiabatic_populations() -> None:
