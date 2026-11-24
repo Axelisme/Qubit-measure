@@ -74,7 +74,7 @@ ADR 宣告 package 之間的依賴方向時，同時在 `.importlinter` 建立�
 
 原則：同一種資料不因屬於 global 或 point 分成兩套型別或方法，選檔用 `point: str | None`（None 是 global），見 [ADR-0063](0063-persistence-ownership.md#同一種資料不因-global-或-point-分兩套)。
 
-- [0063 — Persistence 保存權威與資料契約](0063-persistence-ownership.md)：保存權威、Container 讀寫、Run metadata、library 與 component 升級邊界。
+- [0063 — Persistence 保存權威與資料契約](0063-persistence-ownership.md)：保存權威、Container 讀寫、Run metadata、[Run 時固定值](0063-persistence-ownership.md#run-時固定值)、library 與 component 升級邊界。
 - [0080 — datafile 通用容器格式與獨立介面](0080-datafile-generic-container.md)：只接受 Container major 3 的通用 vars／docs／groups 容器；公開單一 Variable 的無 I/O 結構檢查。
 - [0081 — Global 與 point 資料以磁碟為真相](0081-point-data-disk-sync.md)：Global／point 以磁碟為真相、write-through、watcher 與 revision 樂觀鎖。
 - [0082 — Component flux frame 與明確升級](0082-component-flux-frame.md)：Component offset／signed periods、flux_dev 與明確 v1→v2→v3 升級鏈。

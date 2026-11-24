@@ -256,7 +256,7 @@ Warning 指出欄位、index_axis、index 與 shape、dtype 或 value 差異。�
 單變數還原將解好的欄位傳給 Result constructor；分組 builder 經 `GroupedLoadData.run_values` 讀取 `scalar`、`nullable_scalar` 或 `vector`。
 缺文件與缺欄都按宣告還原為 unknown 或拒讀；存在但壞掉的宣告欄一律拒讀。
 Typed 重存只寫宣告欄，保留未知欄需使用原始 Container。
-`PreparedRunData.to_container` 為 Native 編碼固定值；Labber 不投影，也不受這一步的編碼錯誤阻擋。
+`prepare_run_data` 在準備時編碼固定值或保留 Native 專有的錯誤；`PreparedRunData.to_container` 加入已編碼的文件或拋出該錯誤，Labber 不投影固定值，也不受該錯誤阻擋。
 
 `metadata.validate_run_metadata(document)` 在實際 Save 前驗證完整 schema 與原文件的有限 JSON，不修改作者 key。
 GUI 在修改 comment 或準備 ledger 前呼叫它，native 與 artifact saver 也使用同一入口。

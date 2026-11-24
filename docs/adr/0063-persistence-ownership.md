@@ -45,6 +45,16 @@ MCP 的單次 aliases／target override 不寫 alias 表。RecordWriteback 不�
 
 **依據。** 2026-10-14，使用者對快照位置選「A」，並說：「Notebook與GUI應該都讀data.h5，只有log browser讀Labber檔。」2026-10-15 確認：「1可以，2採用忽略不支援欄位的方式，3同意，4一起做吧」。見[量測成果與設定快照](../discussions/2026-10-14-artifact-persistence.md)及 [RecordsLedger](../../lib/zcu_tools/resources/entry/README.md#records-ledger)。
 
+### Run 時固定值
+
+**規則。** 使用者輸入存於 `docs/cfg`，量測資料與實際掃描軸存於 `vars`。Run 時才定出、同一 Run 內不隨格點變的事實存於 `docs/run_values`。實驗層透過 `AxesSpec`／`GroupedAxesSpec` 的 `run_values` 宣告欄位及盤上單位，並負責編解碼。GUI、Notebook、`save_run` 與離線 Labber 匯入共用同一 codec。Datafile 只處理通用的有限 JSON 文件，不增加命名空間、讀取 API 或 Container 版本。標準 `RunMetadata` 不增欄。這份文件的 v1 是 JSON 整數 `1`，不借用 cfg 或 Container 版號。缺文件等同每個宣告欄都缺：允許 unknown 的欄還原為 unknown，缺必填欄則拒讀並指名 `/docs/run_values`。一般 Labber 匯出不包含這些值，Load 不從 Labber 讀回。
+
+**例子。** Mux Ramsey 寫 `{"version":1,"values":{"actual_detunes":{"unit":"Hz","value":[120000,null]}}}`，沿 `signals/Tone` 原序還原為 `[0.12, NaN]` MHz。2026-11 的舊單 qubit Ramsey 檔沒有這份文件，仍可 Load；實際 detune 為 unknown，不做頻率修正。CZ Optimize 的 `duration` 必填，缺文件即拒讀。
+
+**邊界。** 只有宣告固定欄的實驗才寫此文件。Typed Load→Save 只寫宣告欄；要保留全文，使用原始 Container。Carrier（`drive.freq`）從同次 cfg 取，不從目前 Form 補，也不另存為 Run 值。舊 Native 不遷移、不雙讀雙寫。
+
+**依據。** 2026-11-24，使用者確認現有命名空間的語意後答「那就獨立文件吧」。對舊檔說「我不想做太多兼容的場景，這會造成維護負擔，照讀或是拒絕選一個好維護的就好」，並答「都可以，你決定」，由 designer 擇照讀，逐欄處理缺值。v1 盤上格式與舊 Labber 匯入由 liaison 代答，使用者以「都没有问题。」追認。見[固定值的 Native 存檔討論](../discussions/2026-11-24-run-values-native-document.md)。
+
 ### MCP call log 與 ledger
 
 **規則。** MCP call log 是 best-effort 除錯紀錄，不併入 ledger。Ledger 記持久的事實，其 origin 只標示 gui、notebook 或 mcp，不帶 MCP call id。
