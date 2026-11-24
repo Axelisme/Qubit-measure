@@ -25,14 +25,14 @@ The tables use SHA-256 prefixes. All three blocks used FTF settings `127360cb65e
 
 | Scene | Core s/cell | Largest stage | Families | Block · commit / manifest | Scope | Status | Task or attempt |
 | --- | ---: | --- | --- | --- | --- | --- | --- |
-| `chain/len_rabi` | 13.6952 | readout | `t4`, `floquet_period` | 1 · `593426c2` / `931fa4f599f4` | 11 cells, 1 Run, warm | `ok` | [ADC readout](#adc-readout) 106.060 → 93.163 core s |
+| `chain/len_rabi` | 13.6952 | readout | `t4`, `floquet_period` | 1 · `593426c2` / `931fa4f599f4` | 11 cells, 1 Run, warm | `ok` | [ADC readout](#adc-readout) 106.060 → 93.163 core s; [Projective cell phase reuse](#projective-cell-phase-reuse) fewer source solves, no established core speedup |
 | `two_qubit/conditional_spectroscopy_heralded` | 8.2706 | evolve | `t4`, `shaped_sambe`, `single_tone_rwa`, `floquet_period`, `dop853` | 2 · `addd6c8fb` / `c2b6b9e0522e` | 11 cells, 1 Run, cold | `ok` | [Shaped Sambe cutoff reuse](#2026-11-24-shaped-sambe-cutoff-reuse) 9.46859 → 9.04786 core s/cell |
-| `twotone/ro_optimize/chain_power` | 7.0092 | materialize | `t4` | 1 · `593426c2` / `931fa4f599f4` | 11 cells, 1 Run, warm | `ok` | [ADC flat jump](#adc-flat-jump) 67.333 → 54.952 core s |
-| `twotone/ro_optimize/chain_freq` | 6.9663 | materialize | `t4` | 1 · `593426c2` / `931fa4f599f4` | 11 cells, 1 Run, warm | `ok` | [ADC flat jump](#adc-flat-jump) 67.716 → 55.282 core s |
+| `twotone/ro_optimize/chain_power` | 7.0092 | materialize | `t4` | 1 · `593426c2` / `931fa4f599f4` | 11 cells, 1 Run, warm | `ok` | [ADC flat jump](#adc-flat-jump) 67.333 → 54.952 core s; [ADC chain CDF reuse](#adc-chain-cdf-reuse) 145.716 → 124.472 core s (31 cells) |
+| `twotone/ro_optimize/chain_freq` | 6.9663 | materialize | `t4` | 1 · `593426c2` / `931fa4f599f4` | 11 cells, 1 Run, warm | `ok` | [ADC flat jump](#adc-flat-jump) 67.716 → 55.282 core s; [ADC chain CDF reuse](#adc-chain-cdf-reuse) 154.649 → 128.696 core s (31 cells) |
 | `chain/amp_rabi` | 6.6886 | evolve | `t4`, `shaped_sambe` | 1 · `593426c2` / `931fa4f599f4` | 11 cells, 1 Run, cold | `ok` | [ADC readout](#adc-readout) 67.767 → 66.059 core s; [Banded Sambe](#banded-sambe) 6.294 → 8.912 core s/cell |
 | `twotone/ro_optimize/power` | 4.7089 | evolve | `t4`, `shaped_sambe`, `single_tone_gate` | 1 · `593426c2` / `931fa4f599f4` | 11 cells, 1 Run, warm | `ok` | [Banded Sambe](#banded-sambe) 3.903 → 4.893 core s/cell |
-| `two_qubit/rb` | 4.2249 | evolve | `t4`, `shaped_sambe`, `single_tone_rwa`, `dop853` | 2 · `addd6c8fb` / `c2b6b9e0522e` | 4 cells, 1 Run, cold | `ok` | [Same-carrier fold](#same-carrier-fold) 16.401 → 0.892 process CPU s; [Sampled RWA audit](#sampled-rwa-probe-audit) |
-| `two_qubit/cz_amplitude` | 2.3373 | evolve | `dop853`, `shaped_sambe`, `t4`, `single_tone_rwa` | 2 · `addd6c8fb` / `c2b6b9e0522e` | 11 cells, 1 Run, cold | `ok` | [Sampled RWA audit](#sampled-rwa-probe-audit) |
+| `two_qubit/rb` | 4.2249 | evolve | `t4`, `shaped_sambe`, `single_tone_rwa`, `dop853` | 2 · `addd6c8fb` / `c2b6b9e0522e` | 4 cells, 1 Run, cold | `ok` | [Same-carrier fold](#same-carrier-fold) 16.401 → 0.892 process CPU s; [Sampled RWA audit](#sampled-rwa-probe-audit); [FTF timeline budget](#ftf-timeline-budget) 14.517 → 14.357 mean core s |
+| `two_qubit/cz_amplitude` | 2.3373 | evolve | `dop853`, `shaped_sambe`, `t4`, `single_tone_rwa` | 2 · `addd6c8fb` / `c2b6b9e0522e` | 11 cells, 1 Run, cold | `ok` | [Sampled RWA audit](#sampled-rwa-probe-audit); [FTF timeline budget](#ftf-timeline-budget) 24.871 → 22.549 mean core s |
 | `twotone/reset/check` | 1.7425 | evolve | `t4`, `shaped_sambe`, `single_tone_rwa`, `floquet_period` | 1b · `381ce160` / `e7fc7a257da7` | 11 cells, 1 Run, cold/JIT | `ok` | — |
 | `mux/t2echo` | 1.5454 | evolve | `shaped_sambe`, `t4`, `dop853`, `multitone_rwa` | 1b · `381ce160` / `195f8ec5b12b` | 11 cells, 1 Run, cold/JIT | `ok` | — |
 | `mux/len_rabi` | 1.1343 | evolve | `dop853`, `shaped_sambe`, `t4` | 1 · `593426c2` / `931fa4f599f4` | 11 cells, 1 Run, warm | `ok` | [Banded Sambe](#banded-sambe) 1.091 → 1.099 core s/cell |
@@ -50,13 +50,13 @@ The tables use SHA-256 prefixes. All three blocks used FTF settings `127360cb65e
 | `singleshot/amp_rabi` | 0.4965 | materialize | `shaped_sambe`, `t4` | 1b · `381ce160` / `f1554d2ceba5` | 11 cells, 1 Run, cold/JIT | `ok` | [Materialize follow-up](#materialize-follow-up) 0.252 → 0.456 core s (+80.7%); 0.096 → 0.197 materialize s |
 | `twotone/rabi/amp_rabi` | 0.4941 | materialize | `shaped_sambe`, `t4` | 1b · `381ce160` / `e7fc7a257da7` | 11 cells, 1 Run, cold/JIT | `ok` | [Materialize follow-up](#materialize-follow-up) 0.321 → 0.265 core s (-17.4%); 0.069 → 0.057 materialize s |
 | `two_qubit/idle_zz` | 0.4682 | materialize | `t4`, `shaped_sambe` | 2 · `addd6c8fb` / `c2b6b9e0522e` | 11 cells, 1 Run, cold | `ok` | — |
-| `two_qubit/chevron` | 0.4099 | evolve | `t4`, `multitone_gate`, `single_tone_gate`, `single_tone_rwa`, `shaped_sambe`, `dop853` | 2 · `addd6c8fb` / `c2b6b9e0522e` | 121 cells, 1 Run, cold | `ok` | [Same-carrier fold](#same-carrier-fold) 143.688 → 143.713 process CPU s; [Sampled RWA audit](#sampled-rwa-probe-audit) |
+| `two_qubit/chevron` | 0.4099 | evolve | `t4`, `multitone_gate`, `single_tone_gate`, `single_tone_rwa`, `shaped_sambe`, `dop853` | 2 · `addd6c8fb` / `c2b6b9e0522e` | 121 cells, 1 Run, cold | `ok` | [Same-carrier fold](#same-carrier-fold) 143.688 → 143.713 process CPU s; [Sampled RWA audit](#sampled-rwa-probe-audit); [FTF timeline budget](#ftf-timeline-budget) 89.095 → 89.586 mean core s |
 | `two_qubit/conditional_phase` | 0.3301 | materialize | `t4`, `single_tone_gate`, `single_tone_rwa`, `shaped_sambe` | 2 · `addd6c8fb` / `c2b6b9e0522e` | 33 cells, 1 Run, cold | `ok` | — |
 | `singleshot/mist/power_freq` | 0.2748 | readout | `t4`, `shaped_sambe` | 1b · `381ce160` / `f1554d2ceba5` | 121 cells, 1 Run, cold/JIT | `ok` | — |
 | `twotone/ac_stark_ramsey` | 0.2562 | readout | `t4`, `shaped_sambe` | 1b · `381ce160` / `e7fc7a257da7` | 121 cells, 1 Run, cold/JIT | `ok` | — |
 | `twotone/reset/flux/length` | 0.1994 | evolve | `t4`, `shaped_sambe` | 1 · `593426c2` / `931fa4f599f4` | 1 cells, 1 Run, warm | `ok` | — |
 | `twotone/reset/flux/gain` | 0.1978 | evolve | `t4`, `shaped_sambe` | 1 · `593426c2` / `931fa4f599f4` | 1 cells, 1 Run, warm | `ok` | — |
-| `twotone/rabi/len_rabi` | 0.1241 | materialize | `shaped_sambe`, `t4` | 1 · `593426c2` / `931fa4f599f4` | 11 cells, 1 Run, warm | `ok` | [Banded Sambe](#banded-sambe) 0.101 → 0.123 core s/cell |
+| `twotone/rabi/len_rabi` | 0.1241 | materialize | `shaped_sambe`, `t4` | 1 · `593426c2` / `931fa4f599f4` | 11 cells, 1 Run, warm | `ok` | [Banded Sambe](#banded-sambe) 0.101 → 0.123 core s/cell; [FTF timeline budget](#ftf-timeline-budget) 19.289 → 19.560 mean core s |
 | `twotone/ckp` | 0.0815 | readout | `t4`, `floquet_period`, `single_tone_gate` | 1 · `593426c2` / `931fa4f599f4` | 121 cells, 1 Run, warm | `ok` | — |
 | `twotone/flux_dep` | 0.0775 | evolve | `t4`, `single_tone_rwa`, `dyson`, `floquet_period` | 1 · `593426c2` / `931fa4f599f4` | 121 cells, 1 Run, warm | `ok` | — |
 | `twotone/ro_optimize/freq_gain` | 0.0766 | materialize | `t4`, `single_tone_gate`, `shaped_sambe` | 1b · `381ce160` / `e7fc7a257da7` | 121 cells, 1 Run, cold/JIT | `ok` | — |
@@ -107,7 +107,7 @@ A stage or family on a timeout row describes only the recorded work. A dash in t
 | `singleshot/t1_tone_sweep_freq` | — | — | — | 1 · `593426c2` / `931fa4f599f4` | 1 attempt, warm, no Result cells | uncovered: Run failed, GE classifier missing | — |
 | `singleshot/t1_tone_sweep_gain` | — | — | — | 1 · `593426c2` / `931fa4f599f4` | 1 attempt, warm, no Result cells | uncovered: Run failed, GE classifier missing | — |
 | `two_qubit/conditional_phase_heralded` | — | evolve | `shaped_sambe`, `t4`, `single_tone_rwa` | 2 · `addd6c8fb` / `c2b6b9e0522e` | 1 attempt, cold, no Result cells | timeout: ≥180 wall s; ≥116.970 core s | [Shaped Sambe cutoff reuse](#2026-11-24-shaped-sambe-cutoff-reuse) 5.54331 → 5.44032 core s/cell |
-| `two_qubit/constructive_phase` | — | evolve | `t4`, `single_tone_gate`, `multitone_gate`, `single_tone_rwa`, `shaped_sambe`, `dop853`, `multitone_rwa`, `dyson` | 2 · `addd6c8fb` / `c2b6b9e0522e` | 1 attempt, cold, no Result cells | timeout: ≥180 wall s; ≥183.776 core s | [Sampled RWA audit](#sampled-rwa-probe-audit) |
+| `two_qubit/constructive_phase` | — | evolve | `t4`, `single_tone_gate`, `multitone_gate`, `single_tone_rwa`, `shaped_sambe`, `dop853`, `multitone_rwa`, `dyson` | 2 · `addd6c8fb` / `c2b6b9e0522e` | 1 attempt, cold, no Result cells | timeout: ≥180 wall s; ≥183.776 core s | [Sampled RWA audit](#sampled-rwa-probe-audit); [FTF timeline budget](#ftf-timeline-budget) 247.572 → 241.898 mean core s |
 | `two_qubit/cz_optimize` | — | — | — | 2 · `addd6c8fb` / `c2b6b9e0522e` | 1 attempt, cold, no Result cells | uncovered: Run failed, generator 2 buffer exceeded 8192 samples | [Same-carrier fold](#same-carrier-fold) 3.108 → 0.140 process CPU s |
 | `two_qubit/rb_heralded` | — | evolve | `t4`, `shaped_sambe`, `single_tone_rwa`, `dop853` | 2 · `addd6c8fb` / `c2b6b9e0522e` | 1 attempt, cold, no Result cells | timeout: ≥180 wall s; ≥119.475 core s | [Sampled RWA audit](#sampled-rwa-probe-audit) |
 | `twotone/chain` | — | — | — | 1 · `593426c2` / `931fa4f599f4` | 1 attempt, warm, no Result cells | timeout: ≥180 wall s | [ADC readout](#adc-readout): both sides timed out |
@@ -139,6 +139,12 @@ A stage or family on a timeout row describes only the recorded work. A dash in t
 
 The pairs show a change tested on fixed inputs. They do not overwrite the historical survey column. The before/after commits are measurement revisions, not necessarily the landing merge commits.
 
+### FTF timeline budget
+
+The [rejected timeline budget candidate](2026-11-24-ftf-timeline-budget.md#正式速度配對) compares `2ec6814af` → `0002badf5` on block 1 manifest `931fa4f599f4` for `twotone/rabi/len_rabi` and block 2 manifest `c2b6b9e0522e` for the four two-qubit scenes. Each row note gives mean core seconds per complete Run, two Runs per side, with FTF seed 123, one CPU worker and fresh private caches for each round. The pair completed `two_qubit/constructive_phase`; its historical survey timeout still stands.
+
+No row passed the 10% minimum reduction and repeat-spread rule. CZ amplitude had the largest reduction, 9.339%. The block 2 pair excludes the original A1 after a concurrent Pyright run and uses the preselected adjacent A1R/B1R pair. Using the clean original B1 instead of B1R lowers the largest reduction to 4.523% and still leaves no passing row. The candidate was reverted without expanding the reference solves.
+
 ### ADC readout
 
 [ADC cavity-product integrals](2026-11-24-adc-cavity-product-integrals.md#實測) compares `addd6c8fb` → `2a571d682` on manifest `931fa4f599f4`. One cold-cache, 11-cell Run per side and scene, same CPU slot, offline fixture, FTF seed 123, one worker. Evolve was the largest stage in all completed pairs. `twotone/chain` reached the 180 s Run deadline on both sides with no complete core or Result.
@@ -160,6 +166,14 @@ The core times per Result cell fell by 1.86% for phase and 4.44% for spectroscop
 ### Same-carrier fold
 
 [Same-carrier folding](2026-11-23-same-carrier-merge.md#實測) compares `2b8f628c3` → `0d851985`. The record identifies workloads, not a manifest hash. Every workload ran once per side after one warmup, on CPU with one worker. Plain RB used depths `[0,4,8]`, sequence seed 701, sim seed 123, two reps and one round. CZ optimize used only E0, with 24 retained states and raw gain. Chevron used 2 × 2 cells, gg herald, 100 reps and one round. The CPU totals are for these workloads only, not the survey grids.
+
+### Projective cell phase reuse
+
+[The reduced pair](2026-11-24-projective-cell-phase-reuse.md#實測) compares `f7a88acef` → `c22947414` on manifest `589a368693c2`. Each side ran one cold-cache `chain/len_rabi` Run with 11 points, 100 reps, 100 rounds, seed 123 and one CPU worker in the same exclusive slot. The first preparation solved 3,229 → 2,967 source rows; the maps and Result matched. Full Run core was 96.324 → 96.032 s. With one observation per side, this does not establish a whole-Run speedup. The historical survey used a different manifest and a warm Run.
+
+### ADC chain CDF reuse
+
+[The CDF reuse pairs](2026-11-24-adc-chain-cdf-reuse.md#實測) compare `5dbccaffa` → `1d82a507d` on manifest `c255a7fb19c9`. Each side ran each scene once, 31 cells × 2,000 reps × 320 rounds, 16 reads per point, seed 123, one CPU worker and separate cold caches, without instrumentation. Each pair ran in one exclusive slot. Materialize fell 17.47% in `chain_freq` and 15.90% in `chain_power`. These complete 31-cell Runs have a different manifest from the earlier 11-cell survey and flat-jump pairs.
 
 ### Materialize follow-up
 

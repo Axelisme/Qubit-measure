@@ -52,6 +52,7 @@ superseded_by: null
 
 ## Family 與 guard
 
+- 2026-11-24，[FTF 依 timeline 段數分配誤差預算](./2026-11-24-ftf-timeline-budget.md)，`rejected`。短 timeline 放寬每段預算；正式五列都未達保留門檻，撤回。CZ amplitude 降幅最大，平均 core 減少 9.339%（`2ec6814af` → `0002badf5`，block 2 `c2b6b9e0522e`、seed 123、完整 Run 各兩輪，未達 10%）。
 - 2026-11-24，[預測拒收能否跳過 sampled RWA 探針](./2026-11-24-sampled-rwa-predicted-rejection.md)，`paused`。比對探針前可算的省略相位與實際端點判決，並按群計數 spot，未實作拒收切點。樣本分界不是端點誤差下界。382 群各一個 spot，首拒後沒有下一個 spot 可省（`234bf075f`，block 2 `c2b6b9e0522e`／`ftf-demo:initial` 五場各一次 Run，另一次 24 點重建正例，合計）。
 - 2026-11-24，[Shaped Sambe 的帶狀 Hermitian 全譜求解](./2026-11-24-banded-shaped-sambe.md)，`rejected`。用下帶儲存取代密集矩陣後，`chain/amp_rabi` 由 6.294 增至 8.912 core s／格（`addd6c8fb` → `0f5d83887`，同 block1 manifest、seed 123、單 worker，兩側批次從空快取開始，各一次完整 11 格 Run）。
 - 2026-11-24，[長時強驅動雙載波的內建波形路由](./2026-11-24-long-dual-carrier-builtins.md)，`paused`。先分類，再用 `inspect_dispatch` 確認目標段的預設路由只列 `dop853`，另行診斷 `common_frame` guard 才觀察到拒收（`32dfb53a5`）。DP5(4) apply 合計 6.449438 CPU s（`593426c2f`，24 態 FTF、單 CPU worker、8 個 1000 ns π／強振幅不同載波雙線格各一次，共 10 個直接積分段，不含平台）。
@@ -75,6 +76,10 @@ superseded_by: null
 
 ## 跨點重用與快取
 
+- 2026-11-24，[跨 acquisition 重用 multitone RWA 探針](./2026-11-24-multitone-rwa-cross-acquire-probe-memo.md)，`rejected`。只在 sampled-probe exact key 相同時跨 acquisition 省掉積分。單臂上界為 1.085×（`e060dae1f` 加未入庫 trace hook，const CZ RB、三 seeds、單 worker，一臂的 core 耗時外推）。
+- 2026-11-24，[RB 的 exact-key segment map 重用](./2026-11-24-rb-exact-segment-map-reuse.md)，`rejected`。物理輸入完全相同的 segment 才共用演化 map。同一 evolve 共用約 1.03×（`e060dae1f`，RB seed 0、depths 0／1／2／4、24 levels、單 worker，單輪 evolve 耗時外推）。
+- 2026-11-24，[Projective cell 共用單音共同相位的轉移列](./2026-11-24-projective-cell-phase-reuse.md)，`adopted`。同一點只對符合共同相位對稱的 cell 共用轉移列。首份 preparation 的來源態求解 3,229 → 2,967（`f7a88acef` → `c22947414`，`chain/len_rabi` 11 點、100 reps × 100 rounds、seed 123、單 worker 的一次冷 cache 配對）；未證實整輪加速。
+- 2026-11-24，[Projective chain 的精確 cell 簽章](./2026-11-24-exact-projective-cell-signatures.md)，`rejected`。絕對與相對簽章均零重複（`5dbccaffa`，`chain/len_rabi`、`chain/t1` 各 101 格，seed 123、單 worker，各只計首份 preparation 的 1,515 個 cell 控制）。Readout 相位不同，未量完整求解或配對速度。
 - 2026-11-24，[Shaped Sambe 在一次 cutoff 決策內重用峰值 Fourier 陣列](./2026-11-24-shaped-sambe-peak-cutoff-reuse.md)，`adopted`。只在同一決策重用精確同 key 的 cutoff-3 陣列。Spectroscopy 為 9.6173 → 9.1434 core s／格（`addd6c8fb` → `d1408edb4`，manifest `c2b6b9e0522e`，11 格的 `conditional_spectroscopy_heralded`，排他單 worker，phase 暖機後各一次完整 Run）。
 - 2026-11-23，[放寬 RB 跨 depth 的前綴候選](./2026-11-23-rb-prefix-candidates.md)，`rejected`。允許更多共同邊界未顯示整輪收益。放寬及只留最長邊界都約 103.4 s，原規則 97.6 s（`8cd18afcd`，離線 plain RB depth `[0,12,24]`、兩臂，單 worker，每規則一次 `run_stage` 牆鐘，Numba 暖度不同）。
 - 2026-11-23，[FTF sampled RWA 探針快取](./2026-11-23-ftf-rwa-probe-memo.md)，`adopted`。一次 preparation 內重用完全相同的 sampled RWA 探針結果，每次 evolve 仍獨立選路。基準的 full-drive DOP853 探針用 175.29 CPU s（`ffd2a0c6`，離線 `two_qubit/chevron` 四點、單 worker 的一次 warm Run，呼叫執行緒 CPU 總和）。這不是快取後的耗時。
@@ -112,6 +117,7 @@ superseded_by: null
 
 ## 平行化與排程
 
+- 2026-11-24，[cz_optimize 的候選與 seed 合批或平行](./2026-11-24-cz-optimize-candidate-seed-batching.md)，`paused`。考慮合批或平行派送各候選與 seed 的 acquire。首候選 wall 合計 316.373 s（`e060dae1f`，164 ns arb CZ path-timing fixture、depth 2、三 seeds、reps 256、單 worker，三次 acquire 的實測總和）。
 - 2026-11-23，[Chevron 先減少 caller 準備成本，再評估程序池](./2026-11-23-chevron-parallelism-order.md)，`paused`。直接換 `loky` 無法序列化現有工作。既有執行緒由 1 改 7 workers 快 1.28 倍（`ffd2a0c6c`，離線 2×2 gg herald chevron、非排他 4 CPU、各一次完整 Run 牆鐘）。
 - 2026-11-21，[FTF 同點同 span 的投影續算合批](./2026-11-21-projective-continuation-batches.md)，`adopted`。同點同 span 的就緒 histories 一起送到 Engine，保留各列初態。固定兩態無驅動序列的配對重播設計從 8 次 evolve 改為 3 次，批寬 2、2、4（呼叫分組，非 ABBA 觀測值）。原計時兩側 commit 未釘，不列加速。
 - 2026-11-18，[dop853 的 OpenCL GPU 後端](./2026-11-18-ftf-gpu-dop853-backend.md)，`adopted`。把合格的獨立 row 批次送到 FP64 GPU，沒有可用裝置時保留 CPU。CPU／auto 中位 wall 比 5.677 倍（`544af11bf`，Intel Arc、d=32 的 `simultaneous_drive` 24 點、7 workers、三組獨占 ABBA 的整次 evolve）。
@@ -120,6 +126,7 @@ superseded_by: null
 
 ## 環境與讀出
 
+- 2026-11-24，[ADC 跨 round 重用 chain CDF](./2026-11-24-adc-chain-cdf-reuse.md)，`adopted`。同一 active raw generation 的每個讀出事件只算一次 CDF。A→B→A 重綁會為 A 開新 generation。`twotone/ro_optimize/chain_freq` 的 materialize 139.611 → 115.223 s（`5dbccaffa` → `1d82a507d`，離線 fixture、31 點 × 2,000 reps × 320 rounds、每點 16 reads、seed 123、單 worker、各一次冷 cache Run）。
 - 2026-11-24，[ADC 共用腔場乘積積分](./2026-11-24-adc-cavity-product-integrals.md)，`adopted`。小型平坦區間共用每態的短步係數，一次積分各腔場乘積。`chain/len_rabi` 的 readout 20.772 → 8.279 s（`addd6c8fb` → `2a571d682`，離線 fixture、seed 123、單 worker、各冷 cache，各一次 11 格 Run）。
 - 2026-11-24，[ADC flat jump 只算兩態基線](./2026-11-24-adc-flat-jump-baselines.md)，`adopted`。平坦且不回傳 trace 的多態讀出只計算跳轉所用的兩態。`twotone/ro_optimize/chain_freq` 的 materialize 61.162 → 48.688 s（`addd6c8fb` → `5e43af2c7`，離線 fixture、seed 123、單 worker、各冷 cache，各一次 11 格 Run）。
 - 2026-11-22，[FTF 樣板提高 projective floor](./2026-11-22-ftf-projection-weight-floor.md)，`adopted`。提高新工作副本的 floor，減少低機率來源態的續演化。最大完整 density 差 6.921e-6（`cc6b252c0`，六列 FTF 輸入、同 seed、Markov 模型的 floor `1e-5` 對 `0`）。

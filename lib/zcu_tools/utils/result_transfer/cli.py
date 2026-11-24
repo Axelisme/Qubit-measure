@@ -34,7 +34,7 @@ def _parser(
         "--settings-dir",
         type=Path,
         default=default_settings_dir,
-        help="This checkout's transfer.json directory (default: this checkout/.result-transfer)",
+        help="This entry point's transfer.json directory (default: %(default)s)",
     )
     parser.add_argument(
         "--cache-dir",
@@ -46,7 +46,7 @@ def _parser(
         "--local-root",
         type=Path,
         default=default_local_root,
-        help="Local parent of entry folders (default: this checkout/result)",
+        help="Local parent of entry folders (default: %(default)s)",
     )
     parser.add_argument(
         "--no-browser",
@@ -95,7 +95,7 @@ def _parser(
 
 
 def _status(
-    config_dir: Path, settings_dir: Path, local_root: Path, *, as_json: bool
+    config_dir: Path, settings_dir: Path, local_root: Path, *, as_json: bool, prog: str
 ) -> int:
     selection = load_settings(settings_dir)
     configured = selection is not None and (config_dir / "rclone.conf").is_file()
@@ -109,9 +109,9 @@ def _status(
     if as_json:
         print(json.dumps(value, ensure_ascii=False))
     elif configured:
-        print(f"Cloud parent: {value['remote_parent']}\nLocal results: {local_root}")
+        print(f"Cloud parent: {value['remote_parent']}\nLocal root: {local_root}")
     else:
-        print("Not configured. Run this command with 'setup' on your desktop first.")
+        print(f"Not configured. Run '{prog} setup' on your desktop first.")
     return 0 if configured else 1
 
 
@@ -221,7 +221,7 @@ def _all_entries(
 ) -> list[str]:
     if action == "upload":
         if not local_root.is_dir():
-            raise ValueError(f"Local results directory does not exist: {local_root}")
+            raise ValueError(f"Local root does not exist: {local_root}")
         return sorted(
             child.name
             for child in local_root.iterdir()
@@ -277,7 +277,9 @@ def _run(default_local_root: Path, default_settings_dir: Path) -> int:
     settings_dir = args.settings_dir.expanduser().resolve()
     local_root = args.local_root.expanduser().resolve()
     if action == "status":
-        return _status(config_dir, settings_dir, local_root, as_json=args.json)
+        return _status(
+            config_dir, settings_dir, local_root, as_json=args.json, prog=parser.prog
+        )
     if action in ("upload", "download"):
         if bool(args.entries) == args.all:
             parser.error("Specify entry names or --all, but not both.")
@@ -287,7 +289,7 @@ def _run(default_local_root: Path, default_settings_dir: Path) -> int:
         selection = load_settings(settings_dir)
         if selection is None and not sys.stdin.isatty():
             print(
-                "Not configured. Run 'transfer_results.py setup' on your desktop first; CLI transfer did not start a GUI.",
+                f"Not configured. Run '{parser.prog} setup' on your desktop first; CLI transfer did not start a GUI.",
                 file=sys.stderr,
             )
             return 2
@@ -318,18 +320,17 @@ def _run(default_local_root: Path, default_settings_dir: Path) -> int:
 def main(default_local_root: Path, default_settings_dir: Path) -> int:
     """Run the transfer CLI with caller-supplied checkout defaults.
 
-    default_local_root is the local entry parent (the checkout's result/);
-    default_settings_dir holds that checkout's transfer.json, so different
-    checkouts keep separate cloud parents while sharing the per-user rclone
-    account. Parses process arguments, installs signal handling, and returns a
-    shell exit status. Library installation paths never determine where result
-    data or settings are written.
+    default_local_root is the local entry parent. default_settings_dir holds
+    transfer.json for this entry point and checkout. Each keeps a separate
+    cloud parent while sharing the per-user rclone account. Parses process
+    arguments, installs signal handling, and returns a shell exit status.
+    Library installation paths never determine where data or settings are written.
     """
     signal.signal(signal.SIGTERM, _interrupt)
     try:
         return _run(default_local_root, default_settings_dir)
     except KeyboardInterrupt:
-        print("\nResult transfer cancelled.", file=sys.stderr)
+        print("\nTransfer cancelled.", file=sys.stderr)
         return 130
     except subprocess.CalledProcessError as exc:
         print(
@@ -338,5 +339,5 @@ def main(default_local_root: Path, default_settings_dir: Path) -> int:
         )
         return exc.returncode
     except (OSError, RuntimeError, ValueError, zipfile.BadZipFile) as exc:
-        print(f"Result transfer failed: {exc}", file=sys.stderr)
+        print(f"Transfer failed: {exc}", file=sys.stderr)
         return 1

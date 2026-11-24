@@ -1,9 +1,9 @@
 # 結果傳輸：首次 GUI 設定，之後 CLI
 
-**讀者：** operator、agent。設定雲端位置，並從 CLI 上傳或下載結果。
+**讀者：** operator、agent。設定雲端位置，並從 CLI 上傳或下載 `result/` 與 `Database/` 的 entry。
 入口使用專案準備的固定版 rclone。
 
-**Last updated:** 2026-10-21
+**Last updated:** 2026-11-24
 
 ## 第一次在桌面設定
 
@@ -83,6 +83,26 @@ GUI 關閉、主機重新開機後仍可使用。OAuth token 由 rclone 在需�
 uv run --directory . --no-sync -- python scripts/transfer_results.py --local-root /data/result download Si001
 ```
 
+## 傳輸 Database
+
+`transfer_database.py` 傳輸 `Database/<name>/`，包括 entry 內的 `runs/`、`Labber/`
+和 `arb_waveforms/` 等子目錄。第一次在桌面執行下列 `setup`。在官方 GUI 沿用既有
+rclone 帳號，不用重新登入；選好雲端父資料夾後，回終端機核對並確認。
+位置保存在目前 checkout 的 `.database-transfer/transfer.json`，與結果傳輸設定分開。
+
+```bash
+uv run --directory . --no-sync -- python scripts/transfer_database.py setup
+uv run --directory . --no-sync -- python scripts/transfer_database.py upload ftf-demo
+uv run --directory . --no-sync -- python scripts/transfer_database.py download ftf-demo
+```
+
+**不要讓 `transfer_database.py` 與 `transfer_results.py` 指向同一個雲端父資料夾。**
+例如，兩邊都有 `ftf-demo` 時，選同一個父資料夾會把兩份資料複製進同一個雲端 `ftf-demo/`。
+可分別選用 `measurement-database/` 和 `measurement-results/`。
+
+Database 也使用 copy，不刪檔，並排除 `*.lock`。量測正在存檔時，上傳可能只複製到尚未寫完的檔案版本。
+等存檔完成後再執行一次 `upload`，便會補上較新的版本。
+
 ## Agent／Bash 使用
 
 從任何工作目錄呼叫同一入口即可，不必啟動桌面或 GUI：
@@ -132,8 +152,9 @@ CLI 僅提供 copy，來源與目的地各自保留檔案，雙向傳輸時也�
 
 ## 重新設定與憑證保存
 
-換帳號或改雲端父資料夾時，再執行 `setup`。
-兩個設定檔分開保存：`rclone.conf` 含帳號與 token，放在下表的使用者設定目錄，同一使用者的所有 checkout 共用，登入一次即可；`transfer.json` 只保存選定的 remote 路徑，放在各 checkout 的 `.result-transfer/`（已 gitignore），所以不同 checkout 各自選雲端父資料夾、不會上傳到同一處。每個 checkout 第一次使用時執行一次 `setup` 選資料夾。
+換帳號或改雲端父資料夾時，再執行對應入口的 `setup`。
+`rclone.conf` 含帳號與 token，放在下表的使用者設定目錄。兩個入口與同一使用者的所有 checkout 共用帳號。
+`transfer.json` 只保存選定的 remote 路徑。每個 checkout 的兩個入口各自保存位置，分別使用 `.result-transfer/` 與 `.database-transfer/`（皆已 gitignore）。
 不讀舊 `.env`、`token.json` 或 `GOOGLE_DRIVE_PARENT_FOLDER_ID`，也不自動刪除舊憑證檔。
 舊入口已移除，沒有相容 wrapper。
 

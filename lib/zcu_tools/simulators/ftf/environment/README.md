@@ -178,7 +178,8 @@ Projection diagnostics live in `extras` for the latest solved round. Both
 arrays are indexed by flattened C-order point and then by transition in
 logical-event order, including the transition to the terminal event.
 
-- `ftf.projection_continued_states` counts the DC source states solved for that transition.
+- `ftf.projection_continued_states` counts the DC source states actually solved
+  at each transition. Reused rows do not count as new solves.
 - `ftf.projection_identity_weight` sums the source marginal assigned to identity
   rows for that transition. FTF does not discard this weight.
 
@@ -391,8 +392,15 @@ populations and conditional response when the snapshot and solve shape match.
 The split pilot round does not supply a preparation for the next full batch.
 Every round draws a new stream.
 Opening another acquire invalidates the old session and drops its references.
-Projection continuation densities exist only during span preparation. A later shot, round or acquire does not inherit a preceding
-outcome's terminal state or sampled herald result. Immutable outcome weights,
+Projection continuation densities exist only during span preparation. At a single
+point, two interior cells can share solved source-state rows: both must start in
+vacuum and have one span, constant flux, and the same single flat cavity tone
+apart from phase. Span duration and pulse support must match exactly. Any
+nonempty, declared active microwave track that overlaps the half-open cell
+blocks reuse, even at zero gain. Each cell applies the floor to its own marginal
+and solves only selected sources without a reusable row. The terminal cell is
+solved separately to retain its full density. A later shot, round or acquire does
+not inherit a preceding outcome's terminal state or sampled herald result. Immutable outcome weights,
 event populations and conditional sums follow the complete-preparation reuse
 rules below. See [ADR-0078](../../../../../docs/adr/0078-evolution-module-boundary.md#損耗漂移下的結構與-preparation-lifetime).
 On a preparation build or refresh, FTF lends the same [sampled RWA probe memo](../../../simulate/evolution/README.md#workplan-and-cache-ownership)
@@ -623,10 +631,10 @@ This check belongs to environment preparation, not the program frontend.
 FTF projective acquisitions build a `ProjectionChain` for
 [ADC projection-chain sampling](../../../simulate/adc/README.md#projection-chain-sampling).
 The first projection uses the normalized diagonal of the incoming DC density.
-At each projective start, FTF continues each selected DC energy state once
-from its rank-1 density and a vacuum cavity field. The projective pulse drives the
-cavity during continuation. FTF uses the normalized diagonal at the next
-event start as that state's transition row. The state axis uses retained
+At each projective start, FTF checks for a reusable transition row for each
+selected DC energy state. On a miss, FTF evolves the state's rank-1 density
+from vacuum with the projective cavity pulse. FTF uses the normalized diagonal
+at the next event start as that state's transition row. The state axis uses retained
 physical energy levels, not IQ classification groups. ADC starts each readout
 event from vacuum too. Its herald CTMC jumps affect that event's IQ and do not
 feed back into the quantum transition rows. The model excludes active reset and
@@ -635,9 +643,8 @@ measurement-induced state transitions.
 `N_occ` refers to the number of occupied DC energy levels at a point and event.
 The old `ftf.projection_outcomes` diagnostic counted retained outcome histories,
 which the chain does not enumerate. In [routing telemetry](#routing-telemetry),
-`ftf.projection_continued_states` counts the source levels selected for evolution
-by the floor at each transition. This count includes zero-weight levels when
-the floor is zero.
+`ftf.projection_continued_states` counts the source levels actually solved at
+each transition, excluding reused rows.
 
 FTF applies `numerics.projection_weight_floor` when building transition rows.
 The setting is required and accepts finite values in `[0, 1)`. The standard
@@ -645,8 +652,10 @@ The setting is required and accepts finite values in `[0, 1)`. The standard
 At each point and transition, a source state with current marginal below the
 floor skips evolution and gets an identity row. FTF keeps that weight in the
 same state without redistributing or renormalizing it. Even an all-identity
-layer keeps all probability. Floor zero solves every state, including zero-weight
-states, and removes the identity approximation within this vacuum-reset model.
+layer keeps all probability. At floor zero, every source, including zero-weight
+states, gets a solved or reused transition row instead of an identity substitute.
+The terminal transition still solves each selected source separately to keep the
+full DC density.
 
 In the Markov model, six same-seed comparisons of the template floor against floor zero, including the original first point of chain amp_rabi, found maximum differences of 6.921e-6 in the full final density and 6.964e-6 in per-readout populations (commit cc6b252c0). This checks the floor within the model, not accuracy against an independent reference.
 
