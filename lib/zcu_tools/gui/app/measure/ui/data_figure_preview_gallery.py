@@ -97,21 +97,6 @@ class _ReadingRequest:
     button: QPushButton
 
 
-class _NamedPreviewPane(FigurePaneLayout):
-    def __init__(self) -> None:
-        super().__init__()
-        # Let tiling own member geometry without the native single-page layout.
-        layout = self.layout()
-        if layout is not None:
-            layout.setEnabled(False)
-
-    def eventFilter(self, a0: QObject | None, a1: QEvent | None) -> bool:
-        if a1 is not None and a1.type() == QEvent.Type.LayoutRequest:
-            # A disabled native layout will not propagate a changed tile hint.
-            self.updateGeometry()
-        return super().eventFilter(a0, a1)
-
-
 class _PreviewCard(QWidget):
     """Single named source preview card (header + raster/empty/error)."""
 
@@ -178,7 +163,7 @@ class _PreviewCard(QWidget):
         named_layout.setContentsMargins(0, 0, 0, 0)
         self._named_names: tuple[str, ...] = ()
         self._member_scope = LifetimeScope(self)
-        self._named_stack = _NamedPreviewPane()
+        self._named_stack = FigurePaneLayout()
         self._named_stack.addWidget(QLabel("No figure yet"))
         named_layout.addWidget(FigurePager(self._named_stack, f"data.{source_key}"))
         named_layout.addWidget(self._named_stack, stretch=1)
