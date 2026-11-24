@@ -1,6 +1,6 @@
 # ADC probability and readout contracts
 
-**Last updated:** 2026-11-24, readout rates, FTF projection handoff, projected prefixes for raw sampling, and simulator optimization index
+**Last updated:** 2026-11-24, shared cavity product integrals and flat jump baselines
 
 **讀者：** framework-dev、agent。ADC 機率、讀出訊號與 interval moment 契約。
 
@@ -57,7 +57,9 @@ Queries before the initial time fail with both times in the error. `cavity_field
 returns `CavityFieldAverage`: photon occupations and same-time field products
 averaged over an emitted-time interval, including coherent carriers and full
 ringdown. Flat inputs use analytic constant-line propagation and quadratic
-integrals. Shaped inputs retain the field ODE and converged quadrature, split at
+integrals. Small flat blocks [share the short-step product integral](../../../../docs/simulator-attempts/2026-11-24-adc-cavity-product-integrals.md)
+across states and keep augmented exponentials as a fallback.
+Shaped inputs retain the field ODE and converged quadrature, split at
 pulse boundaries, envelope corners and the decay timescale. ADC owns these
 field integrals; consumers project them into their own Stark or dephasing models.
 See the [FTF cavity span handoff](../../simulators/ftf/environment/README.md#cavity-drives)
@@ -380,7 +382,9 @@ sample sums. Uniform samples use binary geometric sums; irregular samples keep
 their original coordinates. When a jump wave saves enough work to pay for setup,
 ADC sums cavity memory using a difference of per-state projected propagator prefixes
 at the actual sample times and one propagation per segment.
-Flat baselines use singular-safe phi1 propagation.
+Flat baselines use singular-safe phi1 propagation. With more than two states,
+flat-only raw materialization [evaluates only the source and destination](../../../../docs/simulator-attempts/2026-11-24-adc-flat-jump-baselines.md)
+at each jump. Sample-grid baselines and trace requests still solve all states.
 Shaped and opaque envelopes retain the existing DOP853 vacuum-baseline tolerances.
 There is no ODE per shot, jump-time LUT, path-count conditioning or tail cutoff.
 Windows within one event share its path through ringdown and gaps. Offset is
