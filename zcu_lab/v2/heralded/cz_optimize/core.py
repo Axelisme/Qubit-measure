@@ -18,13 +18,11 @@ from numpy.typing import NDArray
 from pydantic import Field, FiniteFloat, model_validator
 from scipy.fft import fft, fftfreq, fftshift, next_fast_len
 from zcu_tools.cfg_model import ConfigBase, FieldMeta
-from zcu_tools.core.waveform_format import WaveformSamples
 from zcu_tools.experiment import Experiment, RunRecord
 from zcu_tools.experiment.axes_spec import GroupedAxesSpec
 from zcu_tools.experiment.context import RunContext
 from zcu_tools.experiment.v2.runtime.schedule import (
     Schedule,
-    ScheduleStep,
     SignalBuffer,
 )
 from zcu_tools.plotting.plots import Plots
@@ -56,7 +54,7 @@ from zcu_lab.v2.support.paired_counts import (
 )
 from zcu_lab.v2.support.paired_drive import QubitDriveCfg
 from zcu_lab.v2.support.paired_rb_scheduling import emit_sequence, validate_x_pulses
-from zcu_lab.v2.support.paired_rb_sequence import RBArm, make_rb_arms
+from zcu_lab.v2.support.paired_rb_sequence import make_rb_arms
 
 from ._analysis import (
     CZParameterValue,
@@ -355,12 +353,16 @@ class _CandidateCZ:
     phases: CZPhasePair
 
 
-def _candidate_cfg(
+def _render_candidate_cfg(
     cfg: HeraldedCZOptimizeCfg,
-    samples: WaveformSamples,
     result: HeraldedCZOptimizeResult,
     index: int,
-) -> _CandidateCZ:
+) -> tuple[float, _CandidateCZ | None]:
+    """Return the envelope peak and pulses for the saved parameters, or no pulses at zero."""
+    samples = result.render_candidate(index)
+    peak = samples.peak_abs
+    if not peak > 0.0:
+        return peak, None
     waveform = InMemoryArbWaveformCfg(samples=samples)
     params = result.params[index]
     gains = result.candidate_raw_gains(index)
@@ -372,54 +374,13 @@ def _candidate_cfg(
             update={"waveform": waveform, "gain": gains[1]}
         ),
     )
-    return _CandidateCZ(
+    return peak, _CandidateCZ(
         drive,
         CZPhasePair(
             correction_qubit1_deg=math.degrees(params[Z1]),
             correction_qubit2_deg=math.degrees(params[Z2]),
         ),
     )
-
-
-def _measure_candidate(
-    cfg: HeraldedCZOptimizeCfg,
-    context: RunContext,
-    step: ScheduleStep[int],
-    arms: dict[int, RBArm],
-    candidate: _CandidateCZ,
-) -> None:
-    """Acquire each scheduled seed once, preserving all completed count tables."""
-    for seed, seed_step in step.scan("seed", cfg.seed):
-        builder = TimelineBuilder(
-            context.soccfg,
-            reps=cfg.reps,
-            initial_delay=cfg.initial_delay,
-            relax_delay=cfg.relax_delay,
-        )
-        readout = MuxReadout("readout", cfg.readout)
-        if cfg.reset is not None:
-            builder.emit(Reset("reset", cfg.reset))
-        builder.emit(readout, tag="herald")
-        emit_sequence(
-            builder,
-            arms[seed],
-            cfg.depth,
-            x90=(cfg.x90_qubit1, cfg.x90_qubit2),
-            x180=(cfg.x180_qubit1, cfg.x180_qubit2),
-            cz=(candidate.drive, candidate.phases),
-        )
-        builder.emit(readout, tag="terminal")
-        prog = builder.build()
-        reducer = shot_sums(
-            prog,
-            [
-                Classify("herald", cfg.qubit1_tone),
-                Classify("herald", cfg.qubit2_tone),
-                Classify("terminal", cfg.qubit1_tone),
-                Classify("terminal", cfg.qubit2_tone),
-            ],
-        )
-        seed_step.run_acquire_summed(prog, context.soc, reducer=reducer, rounds=1)
 
 
 def _start_live_view(
@@ -500,7 +461,6 @@ def _plot_seed_returns(
         bbox_to_anchor=(0.5, -0.12),
         ncols=2,
     )
-    fig.show()
 
 
 def _display_value(index: int, value: float) -> tuple[float, str]:
@@ -583,7 +543,6 @@ def _plot_selection(
     params_ax.text(
         0.02, 0.96, "\n".join(lines), transform=params_ax.transAxes, va="top"
     )
-    fig.show()
 
 
 def _played_fit(result: HeraldedCZOptimizeResult, index: int) -> NDArray[np.complex128]:
@@ -623,7 +582,6 @@ def _plot_envelopes(
         )
         q_ax.stairs(iq.imag, times, baseline=None, linestyle=style, color=color)
     i_ax.legend(loc="upper center", bbox_to_anchor=(0.5, 1.18), ncols=3)
-    fig.show()
 
 
 def _plot_spectrum(
@@ -672,7 +630,6 @@ def _plot_spectrum(
     )
     ax.set(xlim=(-display_span, display_span), ylim=(-100, None))
     ax.legend(loc="best")
-    fig.show()
 
 
 class HeraldedCZOptimizeExp(
@@ -718,8 +675,7 @@ class HeraldedCZOptimizeExp(
             field_at_one=float(start.field_at_one),
             start_asset_fingerprints=start_assets,
         )
-        progress = np.full((3, evaluations), np.nan)
-        targets, best, errors = progress
+        targets, best, errors = np.full((3, evaluations), np.nan)
         update = _start_live_view(
             context.plots, np.arange(evaluations, dtype=np.float64)
         )
@@ -744,22 +700,52 @@ class HeraldedCZOptimizeExp(
                     result.params[index] = _physical_params(
                         cfg, coordinates, wrap_angles=True
                     )
-                    samples = result.render_candidate(index)
-                    result.peak[index] = samples.peak_abs
-                    candidate = (
-                        _candidate_cfg(cfg, samples, result, index)
-                        if result.peak[index] > 0.0
-                        else None
+                    result.peak[index], candidate = _render_candidate_cfg(
+                        cfg, result, index
                     )
                 target = 0.0
                 if candidate is not None:
-                    _measure_candidate(cfg, context, step, arms, candidate)
+                    for seed, seed_step in step.scan("seed", cfg.seed):
+                        builder = TimelineBuilder(
+                            context.soccfg,
+                            reps=cfg.reps,
+                            initial_delay=cfg.initial_delay,
+                            relax_delay=cfg.relax_delay,
+                        )
+                        readout = MuxReadout("readout", cfg.readout)
+                        if cfg.reset is not None:
+                            builder.emit(Reset("reset", cfg.reset))
+                        builder.emit(readout, tag="herald")
+                        emit_sequence(
+                            builder,
+                            arms[seed],
+                            cfg.depth,
+                            x90=(cfg.x90_qubit1, cfg.x90_qubit2),
+                            x180=(cfg.x180_qubit1, cfg.x180_qubit2),
+                            cz=(candidate.drive, candidate.phases),
+                        )
+                        builder.emit(readout, tag="terminal")
+                        prog = builder.build()
+                        seed_step.run_acquire_summed(
+                            prog,
+                            context.soc,
+                            reducer=shot_sums(
+                                prog,
+                                [
+                                    Classify("herald", cfg.qubit1_tone),
+                                    Classify("herald", cfg.qubit2_tone),
+                                    Classify("terminal", cfg.qubit1_tone),
+                                    Classify("terminal", cfg.qubit2_tone),
+                                ],
+                            ),
+                            rounds=1,
+                        )
                     observed = return_observations(result.sums[index : index + 1])
                     target = float(observed.targets[0])
                     errors[index] = observed.sem[0]
                     best_target = float(np.fmax(best_target, target))
                 targets[index], best[index] = target, best_target
-                update(np.vstack((progress, result.peak)))
+                update(np.vstack((targets, best, errors, result.peak)))
                 if context.scope.cancelled or not np.isfinite(target):
                     break
                 if index > 0:

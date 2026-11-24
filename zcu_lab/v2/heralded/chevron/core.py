@@ -65,7 +65,8 @@ class HeraldedChevronCfg(ConfigBase):
 
     Drive gains and relative phase are fixed; both lines use the same scanned
     carrier and positive full-envelope duration. Preparation and contrast use
-    the Xπ pulses on the corresponding drive generators. Tone indices are
+    calibrated Xπ pulses on the corresponding drive generators with the same
+    scalar pre-delay in µs. Tone indices are
     positions in the full mux readout, in Qubit1/Qubit2 order. The selected
     tones require GE Post radii. Reset may prepare the ensemble but may not
     mask shots. Invalid routes, classifiers and durations raise ValueError.
@@ -173,13 +174,18 @@ class HeraldedChevronCfg(ConfigBase):
 
     @model_validator(mode="after")
     def validate_scan(self) -> Self:
-        """Reject invalid tones, mismatched generators and nonpositive durations."""
+        """Reject invalid tones, mismatched generators or Xπ pre-delays, and nonpositive durations."""
         validate_qubit_tones(self.readout, self.qubit1_tone, self.qubit2_tone)
         if (
             self.drive.qubit1.ch != self.x180_qubit1.ch
             or self.drive.qubit2.ch != self.x180_qubit2.ch
         ):
             raise ValueError("Each drive must use its qubit's calibrated Xπ generator")
+        pre1, pre2 = self.x180_qubit1.pre_delay, self.x180_qubit2.pre_delay
+        if not isinstance(pre1, float) or not np.isfinite(pre1) or pre1 != pre2:
+            raise ValueError(
+                "The two Xπ pulses must have the same pre-delay (a finite scalar in µs)"
+            )
         if np.any(sweep2array(self.duration) <= 0):
             raise ValueError("Drive durations must be positive")
         return self

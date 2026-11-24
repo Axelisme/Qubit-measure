@@ -37,6 +37,16 @@ class CZReturnFit:
     fit_quality: FitQuality | None
     reason: str | None
 
+    def evaluate(self, scales: NDArray[np.float64]) -> NDArray[np.float64]:
+        """Evaluate the same fixed-phase model at dimensionless gain multipliers.
+
+        Callers choose points inside the finite span of curve. Raise ValueError
+        if the fit has no model parameters.
+        """
+        if self.period is None or self.offset is None or self.contrast is None:
+            raise ValueError("No fixed-phase CZ return model was fitted")
+        return _cosine(scales, self.offset, self.contrast, 1 / self.period, 0.0)
+
 
 def fit_return(
     scales: NDArray[np.float64],

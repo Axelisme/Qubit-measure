@@ -8,8 +8,12 @@ from zcu_tools.experiment.records import RunRecord
 from zcu_tools.gui.app.measure.adapter import Adapter, Analysis, AnalyzeRequest
 from zcu_tools.plotting.plots import Plots
 
-from ._analysis import IdleZZHeraldedAnalysis
-from .core import IdleZZHeraldedCfg, IdleZZHeraldedExp, IdleZZHeraldedResult
+from .core import (
+    IdleZZHeraldedAnalysis,
+    IdleZZHeraldedCfg,
+    IdleZZHeraldedExp,
+    IdleZZHeraldedResult,
+)
 from .form import make_form
 
 IdleZZHeraldedRun: TypeAlias = RunRecord[IdleZZHeraldedCfg, IdleZZHeraldedResult]

@@ -557,16 +557,17 @@ def _plot_target(
                         where=shots > 1,
                     )
                 )
+                phase = fitted.model.accumulated_phase_deg(
+                    grid, channel=s, coordinate=0, group=h
+                )
+                marker = ("o", "s")[h]
                 ax.errorbar(
                     ns,
                     group.values[s, q],
                     yerr=sem,
-                    fmt=("o", "s")[h],
+                    fmt=f"{marker}-" if phase is None else marker,
                     color=color,
                     label=f"{label} · {quadrature}",
-                )
-                phase = fitted.model.accumulated_phase_deg(
-                    grid, channel=s, coordinate=0, group=h
                 )
                 if fit is not None and phase is not None:
                     model = fit.values[f"amplitude_{h}"] * (np.cos, np.sin)[q](

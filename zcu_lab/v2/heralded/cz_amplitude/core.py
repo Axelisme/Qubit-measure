@@ -519,7 +519,9 @@ def _plot_returns(
 
     gg = fig.axes[0]
     if fitted.any():
-        gg.plot(scales[fitted], fit.curve[fitted], "k-", label="Fixed-phase cosine fit")
+        measured_span = scales[fitted]
+        dense = np.linspace(measured_span[0], measured_span[-1], 401)
+        gg.plot(dense, fit.evaluate(dense), "k-", label="Fixed-phase cosine fit")
     if fit.scale is None:
         diagnostic = fill(f"No gg first return: {fit.reason}", width=85)
     else:

@@ -6,7 +6,7 @@
 
 Select `heralded/chevron`. Bind Qubit1, Qubit2, mux and coupler as described in the [two-qubit setup](../../two_qubit/guide.md#綁定位置與讀出-tones).
 
-- Choose calibrated Qubit1 and Qubit2 Xπ pulses and a full mux readout with GE Post circles and radii on both tones. Both reads use the same mux module. Check that its `post_delay` leaves enough time after herald before the drive, including the ADC integration window. The ADC window does not extend the programmed wait.
+- Choose calibrated Qubit1 and Qubit2 Xπ pulses and a full mux readout with GE Post circles and radii on both tones. Set the same pre-delay (µs) on both Xπ pulses so they start together in preparation and terminal contrast. Both reads use the same mux module. Check that its `post_delay` leaves enough time after herald before the drive, including the ADC integration window. The ADC window does not extend the programmed wait.
 - Leave **Reset** blank or select an ordinary reset. This experiment acquires its own herald read and does not accept a herald reset mask.
 - Use the coupler's `cz_qubit1` and `cz_qubit2` slots or fill the two drives in the form. Keep their signed gains and relative phase fixed. The common CZ frequency sweep replaces both carriers. The duration sweep changes the full envelope on both lines, not just the plateau. Use positive durations. See [ordinary chevron setup](../../two_qubit/chevron/guide.md#prepare-the-form) for choosing the sweep span and spacing.
 - **Reps × Rounds** gives the attempted shots **per preparation** at each frequency and duration. A full scan attempts four times that many shots per point. Check retained counts if you stop early or a branch is blank.
