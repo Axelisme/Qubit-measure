@@ -1,6 +1,8 @@
 """Smooth-envelope periods from shared finite Hilbert Fourier matrices."""
 
+from collections.abc import Callable
 from dataclasses import dataclass
+from typing import cast
 
 import numpy as np
 from numba import njit
@@ -120,23 +122,17 @@ class _SpectralFamily:
             tuple[int, int], tuple[NDArray[np.complex128], float, float]
         ] = {}
 
-    def _physical(self, kind: str, orders: tuple[int, int]) -> NDArray[np.complex128]:
+    def _physical(
+        self,
+        kind: str,
+        orders: tuple[int, int],
+        build_at: Callable[[float, float], NDArray[np.complex128]],
+    ) -> NDArray[np.complex128]:
         """Build or interpolate physical arrays with all noncarrier inputs fixed."""
         subdivisions = int(round(1 / (abs(self.frequency) * self.step)))
 
         def build(frequency: float) -> NDArray[np.complex128]:
-            step = 1 / (abs(frequency) * subdivisions)
-            if kind == "peak":
-                modes = orders[1]
-                return np.array(
-                    [
-                        _spectral(self.model, self.port, frequency, self.bound, k, step)
-                        for k in (modes, modes + 1)
-                    ]
-                )
-            return _coefficients(
-                self.model, self.port, frequency, self.bound, step, orders
-            )
+            return build_at(frequency, 1 / (abs(frequency) * subdivisions))
 
         workspace = self.workspace
         if workspace is None:
@@ -152,13 +148,42 @@ class _SpectralFamily:
         )
         return workspace.evaluate(identity, self.frequency, build, group=identity[:5])
 
-    def error(self, modes: int) -> float:
-        if modes not in self.errors:
-            coarse, fine = self._physical("peak", (0, modes))
-            self.errors[modes] = float(
-                np.sum(np.linalg.norm(fine - coarse, axis=(-2, -1)))
+    def guard_cutoff(self, cycles: float, budget: float) -> tuple[int, float]:
+        """Compare 2/3 and, if needed, 3/4 peak blocks at the existing threshold."""
+        # At the exact signed carrier, the family also fixes coupling and step.
+        # Retain one (16, dim, dim) complex128 array for this decision only.
+        peak_three: NDArray[np.complex128] | None = None
+
+        def peak(frequency: float, step: float, modes: int) -> NDArray[np.complex128]:
+            nonlocal peak_three
+            reuse = modes == 3 and frequency == self.frequency
+            if reuse and peak_three is not None:
+                return peak_three
+            blocks = _spectral(
+                self.model, self.port, frequency, self.bound, modes, step
             )
-        return self.errors[modes]
+            if reuse:
+                peak_three = blocks
+            return blocks
+
+        def error(modes: int) -> float:
+            if modes not in self.errors:
+                coarse, fine = self._physical(
+                    "peak",
+                    (0, modes),
+                    lambda frequency, step: np.array(
+                        [peak(frequency, step, k) for k in (modes, modes + 1)]
+                    ),
+                )
+                self.errors[modes] = float(
+                    np.sum(np.linalg.norm(fine - coarse, axis=(-2, -1)))
+                )
+            return self.errors[modes]
+
+        coarse_error = error(2)
+        if coarse_error * cycles > budget / 4:
+            return 3, error(3)
+        return 2, coarse_error
 
     def polynomial(
         self,
@@ -166,7 +191,13 @@ class _SpectralFamily:
     ) -> tuple[NDArray[np.complex128], float, float]:
         if orders not in self.polynomials:
             nodes, _ = orders
-            coefficients = self._physical("polynomial", orders)
+            coefficients = self._physical(
+                "polynomial",
+                orders,
+                lambda frequency, step: _coefficients(
+                    self.model, self.port, frequency, self.bound, step, orders
+                ),
+            )
             last = float(
                 np.sum(np.linalg.norm(coefficients[:, nodes - 1], axis=(-2, -1)))
             )
@@ -363,8 +394,8 @@ class ShapedSambeKernel:
             # Start with a cubic amplitude polynomial; refine its estimated
             # omitted tail before accepting a key.
             nodes = 4
-            cycles = max(1, table.duration_ns[rows[index]] / step)
-            modes = 2
+            duration = cast(float, table.duration_ns[rows[index]])
+            cycles = max(1, duration / step)
             # Compare the limiting amplitude, not 128 carrier-phase ODEs.
             # The bandwidth guard and the retained polynomial's last degree
             # accompany this calibrated (not rigorous) convergence estimate.
@@ -374,10 +405,7 @@ class ShapedSambeKernel:
                     model, port, f, bound, step, context.work_plan.carrier_workspace()
                 )
                 families[family_plan] = family
-            error = family.error(modes)
-            if error * cycles > budget / 4:
-                modes = 3
-                error = family.error(modes)
+            modes, error = family.guard_cutoff(cycles, budget)
             coefficients, interpolation, ratio = family.polynomial((nodes, modes))
             if ratio > 0.25 or interpolation * cycles > budget / 8:
                 nodes = 8
