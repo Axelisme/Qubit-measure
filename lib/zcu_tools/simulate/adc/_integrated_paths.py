@@ -192,6 +192,13 @@ def _segment_traces(a, scattering, grid, wave, step, output):
 
 @njit(nogil=True, cache=False)
 def _jump_memory(a, step, baselines, wave, paired):
+    """Update cavity memory in place for the jumps in ``step``.
+
+    ``baselines`` has shape (jump, column, cavity). Row i contains vacuum
+    fields at ``step``'s i-th jump time, aligned with its shot and destination.
+    If ``paired=True``, columns 0 and 1 are (source, destination) for that jump.
+    Otherwise, columns are indexed by model state.
+    """
     shots, jumps, targets = step
     states, left, memory = wave
     for index, shot in enumerate(shots):
