@@ -14,7 +14,11 @@
 
 - `app/run_measure_gui.py`：工作站 Python 3.13 GUI profile 的主要量測 GUI。Workflow tabs 與 Experiment tabs 共用這個入口及 session，切換只改 GUI 呈現。啟動後在背景執行選定的 `startup(ctx)`，預設在 repo `logs/gui/measure/` 建立 session log。遠端控制預設只接受本機連線，允許外部連線的選項會擴大網路曝露範圍。`--clean` 以空白 session 開啟，略過全部啟動腳本。未給 `--script` 時使用框架的 `lib/zcu_tools/gui/app/measure/default_startup.py`；給了就只跑指定腳本，且不能與 `--clean` 並用。量測 GUI 可透過 QICK 連接硬體。入口見 `app/run_measure_gui.py`，GUI 責任見 [gui README](../lib/zcu_tools/gui/README.md)。
 - `app/run_fluxdep_gui.py`、`app/run_dispersive_gui.py`：工作站 Python 3.13 GUI profile，分別啟動 fluxonium flux-dependence 與 dispersive-shift 分析 GUI。使用 `--project-root`、`--entry` 與可選的 `--component` 開啟分析對象。遠端控制預設 port 為 8766、8767，未指定 port 且預設值已占用時會選用臨時 port。分析與存檔由各自 app 執行。見 [fluxdep](../lib/zcu_tools/gui/app/fluxdep/README.md) 與 [dispersive](../lib/zcu_tools/gui/app/dispersive/README.md)。
-- 三個 GUI 的 `.bat` 檔放在 `app/`，會先切換至 repo root，使用 `uv run --directory . --extra gui -- python -m apps.<app>` 啟動對應組合根，`<app>` 為 `measure`、`fluxdep` 或 `dispersive`。`.bat` 直接使用 module，與 MCP 使用同一組裝邏輯。
+- 三個 GUI 的 `.bat` 檔放在 `app/`，使用 `uv run --directory . --extra gui -- python -m apps.<app>` 啟動對應組合根，並把收到的參數轉交給 app。`<app>` 為 `measure`、`fluxdep` 或 `dispersive`，與 MCP 使用同一組裝邏輯。
+  - cmd：在 repo root 執行 `scripts\app\run_measure_gui.bat --script zcu_lab\simulation_envs\FTF\startup.py`。
+  - Windows 捷徑：為 `run_measure_gui.bat` 建立捷徑，在捷徑內容的「目標」欄最後加上參數，例如 `--script zcu_lab\kickstart\FTF\startup.py`。
+
+  `.bat` 會先切換至 repo root，所以 `--script` 等相對路徑以 repo root 為準。`--project-root` 仍須是既存目錄的絕對路徑。
 - `start_server.py`、`start_server.ipynb`：ZCU 板端 PYNQ Python 3.8 啟動 QICK Pyro nameserver 與 proxy server。Python 腳本接收 daemon port、nameserver port、SoC 版本與網卡；板端環境須能 import repo-root [`bitfiles`](../bitfiles/README.md) 與 [`zcu_tools.qick_remote`](../lib/zcu_tools/qick_remote/README.md)，會開網路服務並連接板端 SoC；板端需自行安裝或放置 QICK。板端部署、啟動與資產版本相容性**待核實**，尚未在硬體上測試。請使用板端 PYNQ Python 執行。
 
 ## 量測 GUI 啟動腳本

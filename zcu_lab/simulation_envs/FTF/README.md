@@ -41,6 +41,8 @@ uv run --directory . --no-sync -- python -m apps.measure \
   --script zcu_lab/simulation_envs/FTF/startup.py
 ```
 
+Windows 也可將相同的參數傳給 [`run_measure_gui.bat`](../../../scripts/README.md#gui-與板端-server)。
+
 `--project-root` 須指向既存的絕對目錄。省略時使用 repo root。
 Script 在該專案建立 `ftf-demo`。它從 [entry-template.yaml](entry-template.yaml) 加入元件，並從 [entry-library.yaml](entry-library.yaml) 安裝脈衝和讀出模組到 entry 根目錄的 library。接著建立並選取 `initial`，從 global 繼承元件與模組，並初始化 point aliases。
 MG12 依序綁定 Q1／R1 與 Q2／R2。
