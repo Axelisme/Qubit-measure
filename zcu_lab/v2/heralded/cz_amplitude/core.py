@@ -444,11 +444,11 @@ def _live_returns(
     fig.show()
 
     @plots.on_plot_thread
-    def update(sums: NDArray[np.float64]) -> Figure:
+    def update(sums: NDArray[np.float64]) -> tuple[Figure]:
         returns = _conditional_returns(sums)
         for viewer, (q1, q2) in zip(viewers, np.ndindex(2, 2), strict=True):
             viewer.set(scales, returns.probability[:, q1, q2], returns.sem[:, q1, q2])
-        return fig
+        return (fig,)
 
     return update
 
