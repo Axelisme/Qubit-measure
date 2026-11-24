@@ -42,11 +42,11 @@ def run_t2ramsey(
     microseconds. context supplies SoC, plots and the cancellation token.
     retry is the workflow's transient acquisition retry count.
     The second pi/2 phase advances by 360*detune*delay. Return rounded delays,
-    complex IQ and actual activated detune in MHz. Cooperative cancellation
-    returns partial data. Producer errors propagate unchanged after retry is
-    exhausted. Converter and update errors propagate without retry. The
-    cancellation token does not store errors. No setup, fit or save occurs,
-    and cfg remains unchanged.
+    complex IQ and actual activated detune in MHz, or None if it cannot be
+    estimated. Cooperative cancellation returns partial data. Producer errors
+    propagate unchanged after retry is exhausted. Converter and update errors
+    propagate without retry. The cancellation token does not store errors.
+    No setup, fit or save occurs, and cfg remains unchanged.
     """
     cfg = deepcopy(cfg)
     soc, soccfg = context.soc, context.soccfg
@@ -88,16 +88,17 @@ def run_t2ramsey(
                 ),
             ),
         )
+    true_detune = actual_detune(
+        cfg.delay,
+        detune=cfg.detune,
+        gen_ch=cfg.pi2_pulse.ch,
+        soccfg=soccfg,
+        time_scaler=1.0,
+    )
     return T2RamseyResult(
         times=times,
         signals=buffer.array,
-        true_activate_detune=actual_detune(
-            cfg.delay,
-            detune=cfg.detune,
-            gen_ch=cfg.pi2_pulse.ch,
-            soccfg=soccfg,
-            time_scaler=1.0,
-        ),
+        true_activate_detune=true_detune if np.isfinite(true_detune) else None,
     )
 
 

@@ -25,6 +25,7 @@ from zcu_tools.experiment import Experiment, config
 from zcu_tools.experiment.axes_spec import (
     GroupedAxesSpec,
     GroupedLoadData,
+    RunValueSpec,
     VariableAxisSpec,
     VariableSpec,
     VariableZSpec,
@@ -61,9 +62,10 @@ class T2EchoResult:
     """Total delays in us and mean complex IQ, one sample per delay.
 
     true_activate_detune is the phase-ramp frequency in MHz after hardware
-    time/phase rounding, not a fitted qubit detuning. It is run-only metadata
-    and is None after canonical load. iq_moments contains corrected shot sums
-    [N, ΣI, ΣQ, ΣI², ΣIQ, ΣQ²] with shape (len(times), 6) from the same
+    time/phase rounding, not a fitted qubit detuning. It is None if the
+    applied frequency was not recorded or could not be estimated.
+    iq_moments contains corrected shot sums [N, ΣI, ΣQ, ΣI², ΣIQ, ΣQ²]
+    with shape (len(times), 6) from the same
     run as signals. It is None when only mean IQ is available, including when
     loading Native data saved without shot sums.
     """
@@ -162,9 +164,10 @@ def _build_result(data: GroupedLoadData[T2EchoCfg]) -> T2EchoResult:
     """Restore mean IQ and optional moments aligned to the same delays."""
     signal = data.variable("data")
     (times,) = signal.axes
+    detune = data.run_values.nullable_scalar("true_activate_detune")
     moments = data.variables.get(DataVariable("iq_moments"))
     if moments is None:
-        return T2EchoResult(times, signal.z)
+        return T2EchoResult(times, signal.z, true_activate_detune=detune)
     columns, moment_times = moments.axes
     if not np.array_equal(times, moment_times):
         raise ValueError("/vars/iq_moments: Time axis must equal /vars/data Time axis")
@@ -172,7 +175,9 @@ def _build_result(data: GroupedLoadData[T2EchoCfg]) -> T2EchoResult:
         raise ValueError(
             "/vars/iq_moments: Moment axis must contain columns 0 through 5"
         )
-    return T2EchoResult(times, signal.z, iq_moments=moments.z)
+    return T2EchoResult(
+        times, signal.z, true_activate_detune=detune, iq_moments=moments.z
+    )
 
 
 class T2EchoExp(Experiment[T2EchoResult, T2EchoCfg]):
@@ -204,6 +209,15 @@ class T2EchoExp(Experiment[T2EchoResult, T2EchoCfg]):
         tag="twotone/ge/t2echo",
         result_builder=_build_result,
         labber_variables=("data",),
+        run_values=(
+            RunValueSpec(
+                field_name="true_activate_detune",
+                wire_name="true_activate_detune",
+                unit="Hz",
+                scale=1e6,
+                allow_unknown=True,
+            ),
+        ),
     )
 
     def run(self, cfg: T2EchoCfg, *, context: RunContext) -> T2EchoResult:
@@ -298,7 +312,7 @@ class T2EchoExp(Experiment[T2EchoResult, T2EchoCfg]):
         return T2EchoResult(
             times=lengths,
             signals=split_sums(moments_buffer.array)[1],
-            true_activate_detune=true_detune,
+            true_activate_detune=true_detune if np.isfinite(true_detune) else None,
             iq_moments=moments_buffer.array,
         )
 

@@ -125,8 +125,8 @@ def compare_roundtrip(
     never an array. Otherwise field values compare as np.asarray(value), so a
     scalar float field restored as None differs in dtype (float64 vs object).
     AxesSpec and
-    GroupedAxesSpec fields with a finite, nonzero scale other than 1 allow
-    relative error <= 2*eps, atol=0, for
+    GroupedAxesSpec axes, channels and fixed run values with a finite, nonzero
+    scale other than 1 allow relative error <= 2*eps, atol=0, for
     floating values (each real/imaginary component for complex arrays). eps is
     the actual real storage dtype's machine epsilon. NaN component positions
     must match and infinities must match sign. Zero has no absolute allowance.
@@ -181,7 +181,7 @@ def compare_roundtrip(
                 if isinstance(declaration, VariableZSpec)
                 else -1,
             )
-            for declaration in declarations
+            for declaration in (*declarations, *spec.run_values)
             if declaration.field_name == item.name
         ]
         field_equal = _compare_field(

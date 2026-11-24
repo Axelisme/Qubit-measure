@@ -41,6 +41,7 @@ from .metadata import (
     validate_run_metadata,
 )
 from .records import RunRecord
+from .run_values import decode_run_values, encode_run_values
 
 CfgT = TypeVar("CfgT", bound=ConfigBase)
 ResultT = TypeVar("ResultT")
@@ -78,7 +79,9 @@ class PreparedRunData:
     experiment_tag is the persistence declaration identity, independent of
     mutable Labber export tags. Construction copies mappings and cfg/metadata
     but shares large arrays.
-    Callers must not mutate arrays during saving. Preparation performs no I/O.
+    Fixed run values are captured during preparation. Only Native output uses
+    them or reports an encoding error. Callers must not mutate shared measurement
+    arrays during saving. Preparation performs no I/O.
     """
 
     container: Container
@@ -87,6 +90,9 @@ class PreparedRunData:
     experiment_tag: str
     labber_layout: Literal["common", "independent"] = "common"
     labber_variables: tuple[str, ...] | None = field(default=None, kw_only=True)
+    _run_values: JsonObject | Exception | None = field(
+        default=None, kw_only=True, repr=False, compare=False
+    )
 
     def __post_init__(self) -> None:
         object.__setattr__(
@@ -135,19 +141,23 @@ class PreparedRunData:
         return projected
 
     def to_container(self, metadata: JsonObject) -> Container:
-        """Return the prepared arrays with validated docs/cfg and docs/metadata.
+        """Return prepared arrays and validated cfg, metadata and run value docs.
 
         metadata is the saving record's JSON document. Validate the native schema
-        and declaration tag while retaining every key. Invalid cfg or metadata
-        raises ValueError;
-        no live state is captured, paths chosen or files written. Unknown prepared
-        docs/groups and container attributes remain intact.
+        and declaration tag while retaining every key. Include the captured
+        docs/run_values or raise its preparation error. Invalid cfg or metadata
+        raises ValueError. No live state is captured, paths chosen or files written.
+        Unknown prepared docs/groups and container attributes remain intact.
         """
         validate_cfg_snapshot(self.cfg)
         self.validate_metadata(metadata)
         docs = dict(self.container.docs)
         docs["cfg"] = _JSON.validate_python(_CFG.dump_python(self.cfg, mode="json"))
         docs["metadata"] = deepcopy(_JSON.validate_python(metadata))
+        if isinstance(self._run_values, Exception):
+            raise self._run_values.with_traceback(None)
+        if self._run_values is not None:
+            docs["run_values"] = deepcopy(self._run_values)
         return replace(self.container, docs=docs)
 
 
@@ -165,8 +175,9 @@ def prepare_run_data(
     Variable errors identify the experiment tag and /vars/<name>. Preserve the
     declared Labber layout without checking common-grid compatibility here.
     Metadata may be absent during preparation; native saving requires it.
-    Bad inputs raise TypeError, ValueError or AttributeError. No I/O, live
-    capture or source mutation occurs.
+    Snapshot declared fixed values as a Native document or a Native-only error.
+    Invalid shared inputs raise TypeError, ValueError or AttributeError.
+    No I/O, live capture or source mutation occurs.
     """
     if source.cfg is None:
         raise ValueError("RunRecord.cfg is None; cannot save without configuration")
@@ -200,6 +211,18 @@ def prepare_run_data(
         cfg_type=spec.cfg_type.__name__,
         schema_version=spec.cfg_schema_version,
     )
+    run_values: JsonObject | Exception | None = None
+    if spec.run_values:
+        try:
+            run_values = encode_run_values(
+                variables,
+                result=source.result,
+                declarations=spec.run_values,
+                version=spec.run_values_version,
+            )
+        except (ValueError, TypeError, AttributeError) as error:
+            # Keep invalid run values from blocking Labber; detach the stack.
+            run_values = error.with_traceback(None)
     return PreparedRunData(
         container,
         cfg,
@@ -209,6 +232,7 @@ def prepare_run_data(
         labber_variables=spec.labber_variables
         if isinstance(spec, GroupedAxesSpec)
         else None,
+        _run_values=run_values,
     )
 
 
@@ -253,10 +277,11 @@ def save_run(
     """Save a typed record with its own metadata at the exact native path.
 
     source.cfg and metadata must be present; metadata.experiment must match tag.
-    Map arrays to declared SI/discrete units and serialize cfg/metadata as JSON
-    docs. Invalid inputs raise ValueError/TypeError before I/O. Existing files
-    raise FileExistsError unless replace=True. Atomic single-file publication
-    and I/O errors belong to datafile. No live state or legacy format is guessed.
+    Map arrays to declared SI/discrete units and serialize cfg, metadata and any
+    declared fixed run values as JSON docs. Invalid inputs raise ValueError or
+    TypeError before I/O. Existing files raise FileExistsError unless replace=True.
+    Atomic publication and I/O errors belong to datafile. No live state or legacy
+    format is guessed.
     """
     metadata = validate_run_metadata(source.metadata)
     if metadata.experiment != spec.tag:
@@ -391,9 +416,10 @@ def restore_run(
     cfg envelope. Keep the original metadata JSON detached from the container;
     readers validate requested fields through RunMetadataContent or the complete
     document through RunMetadata.model_validate. Reconstruct and validate Result
-    before concrete cfg validation; grouped builders receive only loaded arrays,
-    without absent optional variables. The reader performs no container I/O,
-    but the concrete cfg validator may open referenced assets.
+    before concrete cfg validation; grouped builders receive loaded arrays
+    without absent optional variables, plus decoded fixed values. Missing run
+    values become unknown only when allowed by their declaration. The reader
+    performs no container I/O, but the concrete cfg validator may open assets.
     Extra variables/unknown cfg keys remain in the Container, not the typed record.
     Malformed docs or data raise ValueError/TypeError. An incompatible cfg
     type/schema/model or a cfg asset I/O failure yields cfg=None, cfg_issue and
@@ -424,11 +450,10 @@ def restore_run(
     except (KeyError, ValidationError) as error:
         raise ValueError(f"/docs/cfg: {error}") from error
     validate_cfg_snapshot(cfg_snapshot)
+    run_values = decode_run_values(stored.docs, spec.run_values, stored.vars)
     if isinstance(spec, GroupedAxesSpec):
         result = spec.result_builder(
-            GroupedLoadData(
-                variables=loaded,
-            )
+            GroupedLoadData(variables=loaded, run_values=run_values)
         )
         if not isinstance(result, spec.result_type):
             raise TypeError(
@@ -444,7 +469,7 @@ def restore_run(
             if axis.field_name is not None
         }
         fields[spec.z.field_name] = variable.z
-        result = spec.result_type(**fields)
+        result = spec.result_type(**fields, **run_values.result_fields())
     cfg, cfg_issue = _restore_cfg(cfg_snapshot, spec=spec)
     if cfg_issue is not None:
         warnings.warn(cfg_issue, CfgUnavailableWarning, stacklevel=2)

@@ -239,7 +239,7 @@ Notebook run／load 正常返回後更新目前 RunRecord，清空目前分析�
 
 ### 保存、發現與範圍
 
-實驗透過 AXES_SPEC／GroupedAxesSpec 擁有 RunRecord 到保存資料的映射，datafile 擁有檔案格式。保留 inner-first axes、Result-native shape、SI disk units、roles、labels、dtype、comment／tag 與 complex calibration。Caller 指定 exact path，save 不依目前 run。本機單檔 save 是明示 Labber 匯出，load 只讀 native data.h5，兩者不是對稱格式。只有 Labber 的舊資料須先用既有 migrations 離線轉換，不提供執行期 fallback，也不代跑真實資料遷移。Run 保存與重存的 native replace、Labber 新檔及失敗語意由 [[0063]] 規定。
+實驗透過 AXES_SPEC／GroupedAxesSpec 擁有 RunRecord 到保存資料的映射，datafile 擁有檔案格式。保留 inner-first axes、Result-native shape、SI disk units、roles、labels、dtype、comment／tag 與 complex calibration。Caller 指定 exact path，save 不依目前 run。本機單檔 save 是明示 Labber 匯出，load 只讀 native data.h5，兩者不是對稱格式。只有 Labber 的舊資料須先用既有 migrations 離線轉換，不提供執行期 fallback，也不代跑真實資料遷移。Run 保存與重存的 native replace、Labber 新檔及失敗語意由 [[0063]] 規定。Run 時固定值的宣告與存讀規則見 [ADR-0063〈Run 時固定值〉](0063-persistence-ownership.md#run-時固定值)。
 
 2026-10-24 使用者要求「實驗基底只剩宣告」。`Experiment[Result, Cfg]` 只保留 `AXES_SPEC` 與 run／analyze／post_analyze 簽名；`from_stored` 契約改為外部函式 `restore_run(stored, spec=...)`，不重讀 Container、不查 registry 或動態匯入實驗。具體 cfg 驗證可讀取自身引用的資產。Notebook 的 load 只收 Path，先以 datafile 讀成 StoredRun，再經同一轉換回 typed RunRecord。GUI LoadService 讀檔後交 adapter.restore；GUI 只持有 adapter 的 opaque result。RestoredRun 以 record 型別為泛型，同時保留核心 typed record 與 GUI opaque handle 的型別資訊，cfg_issue 為 None 或非空的不可用原因。
 
@@ -276,6 +276,16 @@ Notebook save 吸收 unique path 的便利層並回傳實際 path，再呼叫 ex
 例如 `two_qubit/local_z` 將掃描欄位 `gate_counts` 改為 `gate_count` 並提升 cfg schema major，Result 欄位與存檔軸維持原樣。若只改 guide、表單標籤或圖上的文字就能達到目的，保留 cfg 欄位與版本。若必須保留舊 run 依原 cfg 重新分析的能力，先不改名；相容方案要另外裁定。
 
 使用者在 2026-11-19 對以單數改名為先例、不提供 alias 的提案回覆「全采用建议」。選項與首批範圍見[實驗命名與顯示討論](../discussions/2026-11-20-experiment-naming-and-display.md)。
+
+#### Cfg 值域擴張升 minor
+
+**規則。** 新 writer 若能寫出舊 validator 不接受的值，就提升 `cfg_schema_version` 的 minor。新 writer 寫出的每份 cfg 都用新 minor，不按當筆值選版號。新版照原樣讀回舊版合法的 inline cfg，不做遷移。舊版載入新檔時，若舊 validator 拒絕 cfg，Load 只保留 Result 與 metadata，並回報 `cfg_issue`。要重做 Analyze，改用新版。
+
+**例子。** 掃頻 drive 允許兩路來源 carrier 不同後，Chevron 從 5.0 升至 5.1，Conditional phase 從 7.0 升至 7.1，其 heralded 入口從 4.0 升至 4.1。Conditional spectroscopy 從 7.0 升至 7.1，其 heralded 入口從 3.0 升至 3.1。
+
+**邊界。** 這條規則適用於 cfg 結構不變、舊合法值仍合法的值域擴張。欄位改名仍升 major。舊版若能驗過新檔的 cfg，就照常讀取，不因 minor 不同而拒讀。長期從原始 `data.h5` 搭配實驗程式碼及其 Git 歷史找回原值與數組。不要求舊 Analyze 仍能執行，也不為此打包 decoder。
+
+**依據。** 2026-11-24，liaison 依使用者的「讓agent解析或是經Load看，前者是當資料格式不兼容時使用」和「其實是可以依賴程式碼的，至少是當前的對應實驗，只要能讀得懂就好」代答。使用者覆核代裁並回覆「接受代采。」升 minor 標記 writer 的值域改變，又不切斷新版讀取舊合法 cfg 的路徑。見[掃頻 drive cfg 的版號討論](../discussions/2026-11-24-swept-drive-cfg-minor.md)。
 
 #### 只有模擬測試資料時的舊結果格式
 

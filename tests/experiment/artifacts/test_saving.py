@@ -1,7 +1,7 @@
 """Shared saving through typed artifacts, real writers and a real entry ledger."""
 
 import json
-from dataclasses import replace
+from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 from io import BytesIO
 from pathlib import Path
@@ -11,19 +11,25 @@ import h5py
 import numpy as np
 import pytest
 from matplotlib.figure import Figure
+from numpy.typing import NDArray
 from zcu_tools.datafile import (
+    DataVariable,
     load,
     load_grouped_labber_data,
     load_labber_data,
+    read_doc,
 )
 from zcu_tools.experiment import (
     AnalysisDocument,
     AnalysisItem,
     ArtifactRef,
+    AxesSpec,
     DataItem,
     FigureItem,
     RunMetadata,
     RunRecord,
+    RunValueAxis,
+    RunValueSpec,
     SaveArtifact,
     prepare_run_data,
     save_artifacts,
@@ -47,7 +53,12 @@ from tests.experiment._optional_variables_support import (
     diagnostic_spec,
     invalid_diagnostic_export_spec,
 )
-from tests.experiment._saving_support import SavingCfg, SavingCore, saving_figure
+from tests.experiment._saving_support import (
+    SavingCfg,
+    SavingCore,
+    SavingResult,
+    saving_figure,
+)
 
 
 def storage(tmp_path: Path) -> tuple[RunMetadata, SaveLayout, RecordsLedger]:
@@ -348,6 +359,75 @@ def test_nonfinite_author_metadata_rejects_before_any_output_or_ledger(
 
     assert set(tmp_path.rglob("*")) == before
     assert ledger.events() == ()
+
+
+@pytest.mark.parametrize("start", [0.25, float("inf")], ids=["valid", "nonfinite"])
+def test_prepared_run_value_snapshot_and_failures_are_native_only(
+    tmp_path: Path, start: float
+) -> None:
+    @dataclass
+    class ResultWithFixedValues(SavingResult):
+        start: float
+        offsets: NDArray[np.float64]
+
+    metadata, layout, ledger = storage(tmp_path)
+    original = SavingCore.AXES_SPEC
+    spec = AxesSpec(
+        axes=original.axes,
+        z=original.z,
+        result_type=ResultWithFixedValues,
+        cfg_type=original.cfg_type,
+        tag=original.tag,
+        run_values=(
+            RunValueSpec(field_name="start", wire_name="start", unit="s"),
+            RunValueSpec(
+                field_name="offsets",
+                wire_name="offsets",
+                unit="Hz",
+                dtype=np.float64,
+                axis=RunValueAxis(variable=DataVariable("data"), label="frequency"),
+            ),
+        ),
+    )
+    cfg = SavingCfg()
+    signal = SavingCore().run(cfg, context=None)
+    record = RunRecord(
+        cfg,
+        ResultWithFixedValues(
+            signal.frequency, signal.signal, start, np.array([1.0, 2.0, 3.0])
+        ),
+        metadata=metadata.model_dump(mode="json"),
+    )
+    item = DataItem.from_run(
+        ArtifactKey("run", "measurement_data", "data"), record, spec=spec, comment=""
+    )
+    record.result.start = 0.5
+    record.result.offsets[:] = [4.0, 5.0, 6.0]
+    report = save_artifacts(
+        (SaveArtifact(ArtifactRef("run", "measurement_data"), (item,)),),
+        layout=layout,
+        record=record,
+        ledger=ledger,
+        origin="gui",
+    )
+    outputs = {result.output.format: result for result in report.outputs}
+    labber = outputs["labber"]
+    assert labber.status == "saved"
+    assert labber.output.path.is_file()
+    native = outputs["data_h5"]
+    if np.isfinite(start):
+        assert native.status == "saved"
+        assert read_doc(native.output.path, "run_values") == {
+            "version": 1,
+            "values": {
+                "start": {"unit": "s", "value": 0.25},
+                "offsets": {"unit": "Hz", "value": [1.0, 2.0, 3.0]},
+            },
+        }
+    else:
+        assert native.status == "failed"
+        assert native.error and "/docs/run_values/values/start/value" in native.error
+        assert not native.output.path.exists()
 
 
 def test_one_failed_destination_does_not_block_other_outputs(tmp_path: Path) -> None:

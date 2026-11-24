@@ -188,6 +188,11 @@ def _convert_run(
         try:
             payload = _load_payload(source, legacy, session, entry, mapping)
             validate_cfg(legacy.experiment, cfg)
+            projection = mapping.run_payload_projections.get(
+                (legacy.experiment, cfg.cfg_type)
+            )
+            if projection is not None:
+                payload = projection(payload)
         except MigrationInputError:
             raise
         except ValueError as exc:
@@ -278,6 +283,7 @@ def _convert_run(
             replace(
                 payload,
                 docs={
+                    **payload.docs,
                     "cfg": {
                         "values": cfg.values,
                         "cfg_type": cfg.cfg_type,

@@ -149,6 +149,19 @@ def _analyze(
     )
 
 
+def _source_carrier(cfg: MuxT2RamseyCfg | None, index: int) -> float | None:
+    if cfg is None:
+        return None
+    drive = cfg.tones[index].drive
+    if (
+        drive is None
+        or not isinstance(drive.freq, float)
+        or not math.isfinite(drive.freq)
+    ):
+        return None
+    return drive.freq
+
+
 def _get_writeback_items(
     req: WritebackRequest[MuxT2RamseyRunResult, MuxT2RamseyAnalyzeResult],
 ) -> Sequence[WritebackItem]:
@@ -217,17 +230,15 @@ def _get_writeback_items(
                     note=t2_note,
                 )
             )
-        data = req.run_result.result
+        applied_detune = req.run_result.result.actual_detunes[row]
+        carrier = _source_carrier(snapshot, outcome.index)
         if (
-            snapshot is not None
+            carrier is not None
             and outcome.fit_fringe
-            and np.isfinite(data.actual_detunes[row])
-            and np.isfinite(data.source_frequencies[row])
+            and np.isfinite(applied_detune)
             and np.isfinite(outcome.detune)
         ):
-            frequency = (
-                data.source_frequencies[row] + data.actual_detunes[row] - outcome.detune
-            )
+            frequency = carrier + applied_detune - outcome.detune
             frequency_note = _frequency_review_note(outcome, t2_note)
             row_items.append(
                 ParameterWriteback(
@@ -259,8 +270,8 @@ def _summary_lines(source: MuxT2RamseyRunResult) -> tuple[str, ...]:
         detune = result.actual_detunes[row]
         if np.isfinite(detune):
             lines.append(f"{tone} · Applied detune = {detune:.6f} MHz")
-        carrier = result.source_frequencies[row]
-        if np.isfinite(carrier):
+        carrier = _source_carrier(cfg, int(index))
+        if carrier is not None:
             lines.append(f"{tone} · π/2 pulse source frequency = {carrier:.6f} MHz")
     return tuple(lines)
 

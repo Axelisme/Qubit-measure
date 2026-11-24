@@ -6,7 +6,7 @@ Shorter pulses wait for the longest branch at each stage; native pre/post
 delays stay unchanged. The final x90 phase includes each tone's detune.
 
 Return original tone indices (K,), requested total delays (P,) in us and mean
-complex IQ (K,P), plus actual detunes and source frequencies in MHz. Missing
+complex IQ (K,P), plus actual detunes in MHz. Missing
 rounds leave IQ NaN. Analyze each tone with decay or fringe fits, omitting the
 original first point. Zero source detune forces decay. Report T2E/error in us,
 fringe rate/error in MHz, fit quality or a per-tone numerical failure.
@@ -286,7 +286,7 @@ class MuxT2EchoExp(Experiment[MuxCoherenceResult, MuxT2EchoCfg]):
         in us. Each pulse stage starts together; the next wait or readout starts
         after its longest pulse. The final x90 phase ramps with each tone's MHz
         detune. Return requested total delays (P,), averaged complex IQ (K,P),
-        original tone indices, actual detunes and source frequencies (K,), plus
+        original tone indices, actual detunes (K,), plus
         completed-round IQ sums (K,P,6) for this Run's plots.
         context supplies hardware and live plots. Cancellation keeps acquired
         averages and NaN gaps. Acquisition and program errors propagate.
@@ -310,9 +310,6 @@ class MuxT2EchoExp(Experiment[MuxCoherenceResult, MuxT2EchoCfg]):
                 for tone in tones
             ],
             dtype=np.float64,
-        )
-        frequencies = np.asarray(
-            [float(tone.require_drive().freq) for tone in tones], dtype=np.float64
         )
         readout = cfg.readout.with_updates(
             tones=[cfg.readout.tones[index] for index in indices]
@@ -396,7 +393,6 @@ class MuxT2EchoExp(Experiment[MuxCoherenceResult, MuxT2EchoCfg]):
             times,
             means.T,
             detunes,
-            frequencies,
             moments.array.transpose(1, 0, 2).copy(),
         )
 
