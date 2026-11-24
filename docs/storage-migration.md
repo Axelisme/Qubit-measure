@@ -71,7 +71,7 @@ V2 CSV 自帶 `dev_value/dev_unit`，不需 legacy CSV 宣告。假設單位只�
 
 `--run-evidence <file>` 提供歷史 run 事實，包括 experiment tag、cfg_type 與完整歷史 cfg。開始時間與 run_id 可以未知；路徑日期、mtime、目前設定與裝置狀態都不能代填歷史事實。
 
-工具用歷史 disk schema 將舊 Labber logs 對應到輸出變數。`MigrationMapping.data_schemas` 按歷史 `(tag, cfg_type)` 提供 schema，不填在 run evidence。缺必要證據或找不到對應 schema 時，工具保留 Labber 原檔並列為 pending。對應規則見[遷移規格〈Native 歷史證據〉](../migrations/storage_migration/README.md#native-歷史證據)。
+工具依歷史 `(tag, cfg_type)` 選擇宣告，從舊 Labber logs 取得量測資料和可證實的 Run 固定值。Run evidence 不填 disk schema。缺必要證據、找不到對應 schema 或來源 log 值不合宣告時，工具保留 Labber 原檔並列為 pending。對應規則見[遷移規格〈Native 歷史證據〉](../migrations/storage_migration/README.md#native-歷史證據)。
 
 核對 stdout JSON report 中每個來源的去向、pending 原因、備份與目的路徑。確認後移除 `--dry-run`，其餘參數保持相同。
 

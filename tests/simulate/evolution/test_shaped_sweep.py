@@ -22,14 +22,14 @@ from zcu_tools.simulate.evolution.kernels import shaped_sambe
 
 
 def _triangle_track(
-    starts: NDArray[np.float64], durations: NDArray[np.float64]
+    starts: NDArray[np.float64], durations: NDArray[np.float64], frequency: float = 2.0
 ) -> DriveTrack:
     count = len(durations)
     return DriveTrack(
         "drive",
         starts,
         durations,
-        np.full(count, 2.0),
+        np.full(count, frequency),
         np.full(count, 0.37),
         np.ones(count),
         tuple(
@@ -45,8 +45,14 @@ def _triangle_track(
     )
 
 
-@pytest.mark.parametrize("workers", [1, 2])
-def test_shared_period_fallback_builds_one_table(workers: int) -> None:
+@pytest.mark.parametrize(
+    ("workers", "frequency"),
+    [(1, 2.0), (2, 2.0), (1, -2.0)],
+    ids=["1", "2", "serial-negative"],
+)
+def test_shared_period_fallback_builds_one_table(
+    workers: int, frequency: float
+) -> None:
     """Distinct duration guards can refuse rows that need the same band table."""
     x = np.array([[0, 0.15], [0.15, 0]], dtype=complex)
     model = SecularModel(
@@ -62,7 +68,7 @@ def test_shared_period_fallback_builds_one_table(workers: int) -> None:
     count = len(durations)
     batch = TimelineBatch(
         np.arange(count),
-        (_triangle_track(np.zeros(count), durations),),
+        (_triangle_track(np.zeros(count), durations, frequency),),
         FluxSchedule(np.arange(count + 1), np.zeros(count), np.zeros((count, 1), int)),
         durations,
     )

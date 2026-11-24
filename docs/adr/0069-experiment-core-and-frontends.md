@@ -239,7 +239,7 @@ Notebook run／load 正常返回後更新目前 RunRecord，清空目前分析�
 
 ### 保存、發現與範圍
 
-實驗透過 AXES_SPEC／GroupedAxesSpec 擁有 RunRecord 到保存資料的映射，datafile 擁有檔案格式。保留 inner-first axes、Result-native shape、SI disk units、roles、labels、dtype、comment／tag 與 complex calibration。Caller 指定 exact path，save 不依目前 run。本機單檔 save 是明示 Labber 匯出，load 只讀 native data.h5，兩者不是對稱格式。只有 Labber 的舊資料須先用既有 migrations 離線轉換，不提供執行期 fallback，也不代跑真實資料遷移。Run 保存與重存的 native replace、Labber 新檔及失敗語意由 [[0063]] 規定。
+實驗透過 AXES_SPEC／GroupedAxesSpec 擁有 RunRecord 到保存資料的映射，datafile 擁有檔案格式。保留 inner-first axes、Result-native shape、SI disk units、roles、labels、dtype、comment／tag 與 complex calibration。Caller 指定 exact path，save 不依目前 run。本機單檔 save 是明示 Labber 匯出，load 只讀 native data.h5，兩者不是對稱格式。只有 Labber 的舊資料須先用既有 migrations 離線轉換，不提供執行期 fallback，也不代跑真實資料遷移。Run 保存與重存的 native replace、Labber 新檔及失敗語意由 [[0063]] 規定。Run 時固定值的宣告與存讀規則見 [ADR-0063〈Run 時固定值〉](0063-persistence-ownership.md#run-時固定值)。
 
 2026-10-24 使用者要求「實驗基底只剩宣告」。`Experiment[Result, Cfg]` 只保留 `AXES_SPEC` 與 run／analyze／post_analyze 簽名；`from_stored` 契約改為外部函式 `restore_run(stored, spec=...)`，不重讀 Container、不查 registry 或動態匯入實驗。具體 cfg 驗證可讀取自身引用的資產。Notebook 的 load 只收 Path，先以 datafile 讀成 StoredRun，再經同一轉換回 typed RunRecord。GUI LoadService 讀檔後交 adapter.restore；GUI 只持有 adapter 的 opaque result。RestoredRun 以 record 型別為泛型，同時保留核心 typed record 與 GUI opaque handle 的型別資訊，cfg_issue 為 None 或非空的不可用原因。
 

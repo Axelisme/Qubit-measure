@@ -8,7 +8,7 @@ from typing import Literal
 from uuid import UUID
 
 from pydantic import JsonValue
-from zcu_tools.datafile import JsonObject
+from zcu_tools.datafile import Container, JsonObject
 from zcu_tools.experiment.metadata import CfgSnapshot, SoftwareProvenance
 from zcu_tools.resources.parameter_upgrade import ParameterUpgradeDocument
 
@@ -83,6 +83,11 @@ class MigrationMapping:
     native_tags maps declared historical pairs to canonical native experiment tags;
     absent pairs keep their historical tag. It never changes source evidence,
     Labber tags or callback lookup identities, and is not a runtime alias.
+    run_payload_projections maps selected historical pairs to pure transforms.
+    Each receives the validated legacy payload before assignment/publication.
+    Preserve raw groups and unmodified arrays. Raise ValueError for invalid
+    source data; unexpected exceptions propagate. An omitted pair keeps the
+    legacy payload. Change mapping_version when changing a projection.
     module_rules declares deferred flat module names in reference priority order.
     The composition root registers the seeds' kinds with entry before use.
     parameter_transform optionally converts detached complete seed/value batches
@@ -100,6 +105,9 @@ class MigrationMapping:
     data_schemas: Mapping[tuple[str, str], tuple[LegacyVariableSchema, ...]]
     module_rules: tuple[ModuleRule, ...] = ()
     native_tags: Mapping[tuple[str, str], str] = field(default_factory=dict)
+    run_payload_projections: Mapping[
+        tuple[str, str], Callable[[Container], Container]
+    ] = field(default_factory=dict)
     parameter_transform: (
         Callable[[ParameterUpgradeDocument], ParameterUpgradeDocument] | None
     ) = None

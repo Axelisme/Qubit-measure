@@ -64,8 +64,7 @@ save files or cache a previous result.
 
 `MuxCoherenceResult` contains original active `tone_indices (K,)`, common requested
 `times (P,)` in us, `signals (K,P)` as ADC-length-normalized complex average IQ,
-`actual_detunes (K,)` and `source_frequencies (K,)` in MHz. Source frequencies are
-the supplied x90 carriers before the phase ramp; full pulse settings remain in cfg.
+and `actual_detunes (K,)` in MHz. The source x90 carriers remain in cfg.
 Actual detunes may be NaN when a nonzero nominal detune has no positive rounded
 delay. The core preserves the owner's diagnostics and NaN, without substituting a
 nominal rate. Save/load and analysis still accept this source.
@@ -348,7 +347,7 @@ class MuxT2RamseyExp(Experiment[MuxCoherenceResult, MuxT2RamseyCfg]):
         sweep; it is copied before use. Each pulse stage starts together, and
         the delay begins after the longest first pulse. Return requested times
         (P,), average complex IQ (K,P), original tone indices, actual MHz detunes
-        and source frequencies in participant order, plus completed-round IQ
+        in participant order, plus completed-round IQ
         sums (K,P,6) for this Run's plots. context supplies hardware
         and plots. Cancellation keeps completed-round means and NaN for no data.
         Acquisition, validation, build and conversion errors propagate.
@@ -372,9 +371,6 @@ class MuxT2RamseyExp(Experiment[MuxCoherenceResult, MuxT2RamseyCfg]):
                 for tone, drive in zip(tones, drives, strict=True)
             ],
             dtype=np.float64,
-        )
-        frequencies = np.asarray(
-            [float(drive.freq) for drive in drives], dtype=np.float64
         )
         readout = cfg.readout.with_updates(
             tones=[cfg.readout.tones[index] for index in indices]
@@ -440,7 +436,6 @@ class MuxT2RamseyExp(Experiment[MuxCoherenceResult, MuxT2RamseyCfg]):
             times,
             means.T,
             detunes,
-            frequencies,
             moments.array.transpose(1, 0, 2).copy(),
         )
 

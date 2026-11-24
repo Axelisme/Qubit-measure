@@ -256,6 +256,7 @@
 - 2026-11-23 [舊 MIST gain Labber 的同版轉換](2026-11-23-mist-legacy-labber-equivalence.md)：歷史格式。固定原單 log 宣告，兩種 profile 證明等價才保留版號。
 - 2026-11-24 [掃頻 drive cfg 的值域擴張升 minor](2026-11-24-swept-drive-cfg-minor.md)：資料格式。五個入口保留完整來源值，舊等頻 cfg 可由新版載入；舊版讀新異頻檔保留結果但不還原 cfg。
 - 2026-11-24 [CZ 最佳化的具名 Native 與 Labber 欄位](2026-11-24-cz-optimize-native-labber-format.md)：資料格式。逐欄保存參數及單位；cfg 無法還原時保留量測和分析，舊格式用原版本開啟。
+- 2026-11-24 [Run 時固定值另存 Native 文件](2026-11-24-run-values-native-document.md)：資料格式。Run 時固定值另存獨立的 `docs/run_values` 文件，由實驗層宣告與編解碼；缺文件等同缺欄。
 
 ## 量測策略
 

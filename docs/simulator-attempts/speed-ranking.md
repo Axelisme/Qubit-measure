@@ -26,7 +26,7 @@ The tables use SHA-256 prefixes. All three blocks used FTF settings `127360cb65e
 | Scene | Core s/cell | Largest stage | Families | Block · commit / manifest | Scope | Status | Task or attempt |
 | --- | ---: | --- | --- | --- | --- | --- | --- |
 | `chain/len_rabi` | 13.6952 | readout | `t4`, `floquet_period` | 1 · `593426c2` / `931fa4f599f4` | 11 cells, 1 Run, warm | `ok` | [ADC readout](#adc-readout) 106.060 → 93.163 core s |
-| `two_qubit/conditional_spectroscopy_heralded` | 8.2706 | evolve | `t4`, `shaped_sambe`, `single_tone_rwa`, `floquet_period`, `dop853` | 2 · `addd6c8fb` / `c2b6b9e0522e` | 11 cells, 1 Run, cold | `ok` | — |
+| `two_qubit/conditional_spectroscopy_heralded` | 8.2706 | evolve | `t4`, `shaped_sambe`, `single_tone_rwa`, `floquet_period`, `dop853` | 2 · `addd6c8fb` / `c2b6b9e0522e` | 11 cells, 1 Run, cold | `ok` | [Shaped Sambe cutoff reuse](#2026-11-24-shaped-sambe-cutoff-reuse) 9.46859 → 9.04786 core s/cell |
 | `twotone/ro_optimize/chain_power` | 7.0092 | materialize | `t4` | 1 · `593426c2` / `931fa4f599f4` | 11 cells, 1 Run, warm | `ok` | [ADC flat jump](#adc-flat-jump) 67.333 → 54.952 core s |
 | `twotone/ro_optimize/chain_freq` | 6.9663 | materialize | `t4` | 1 · `593426c2` / `931fa4f599f4` | 11 cells, 1 Run, warm | `ok` | [ADC flat jump](#adc-flat-jump) 67.716 → 55.282 core s |
 | `chain/amp_rabi` | 6.6886 | evolve | `t4`, `shaped_sambe` | 1 · `593426c2` / `931fa4f599f4` | 11 cells, 1 Run, cold | `ok` | [ADC readout](#adc-readout) 67.767 → 66.059 core s; [Banded Sambe](#banded-sambe) 6.294 → 8.912 core s/cell |
@@ -106,7 +106,7 @@ A stage or family on a timeout row describes only the recorded work. A dash in t
 | `singleshot/t1_tone` | — | — | — | 1 · `593426c2` / `931fa4f599f4` | 1 attempt, warm, no Result cells | uncovered: Run failed, GE classifier missing | — |
 | `singleshot/t1_tone_sweep_freq` | — | — | — | 1 · `593426c2` / `931fa4f599f4` | 1 attempt, warm, no Result cells | uncovered: Run failed, GE classifier missing | — |
 | `singleshot/t1_tone_sweep_gain` | — | — | — | 1 · `593426c2` / `931fa4f599f4` | 1 attempt, warm, no Result cells | uncovered: Run failed, GE classifier missing | — |
-| `two_qubit/conditional_phase_heralded` | — | evolve | `shaped_sambe`, `t4`, `single_tone_rwa` | 2 · `addd6c8fb` / `c2b6b9e0522e` | 1 attempt, cold, no Result cells | timeout: ≥180 wall s; ≥116.970 core s | — |
+| `two_qubit/conditional_phase_heralded` | — | evolve | `shaped_sambe`, `t4`, `single_tone_rwa` | 2 · `addd6c8fb` / `c2b6b9e0522e` | 1 attempt, cold, no Result cells | timeout: ≥180 wall s; ≥116.970 core s | [Shaped Sambe cutoff reuse](#2026-11-24-shaped-sambe-cutoff-reuse) 5.54331 → 5.44032 core s/cell |
 | `two_qubit/constructive_phase` | — | evolve | `t4`, `single_tone_gate`, `multitone_gate`, `single_tone_rwa`, `shaped_sambe`, `dop853`, `multitone_rwa`, `dyson` | 2 · `addd6c8fb` / `c2b6b9e0522e` | 1 attempt, cold, no Result cells | timeout: ≥180 wall s; ≥183.776 core s | — |
 | `two_qubit/cz_optimize` | — | — | — | 2 · `addd6c8fb` / `c2b6b9e0522e` | 1 attempt, cold, no Result cells | uncovered: Run failed, generator 2 buffer exceeded 8192 samples | [Same-carrier fold](#same-carrier-fold) 3.108 → 0.140 process CPU s |
 | `two_qubit/rb_heralded` | — | evolve | `t4`, `shaped_sambe`, `single_tone_rwa`, `dop853` | 2 · `addd6c8fb` / `c2b6b9e0522e` | 1 attempt, cold, no Result cells | timeout: ≥180 wall s; ≥119.475 core s | — |
@@ -146,6 +146,12 @@ The pairs show a change tested on fixed inputs. They do not overwrite the histor
 ### ADC flat jump
 
 [ADC flat jump baselines](2026-11-24-adc-flat-jump-baselines.md#實測) compares `addd6c8fb` → `5e43af2c7` on manifest `931fa4f599f4`. One cold-cache, 11-cell Run per side and scene, same CPU slot, offline fixture, FTF seed 123, one worker. Materialize remained the largest stage in both scenes.
+
+### 2026-11-24: Shaped Sambe cutoff reuse
+
+The [non-exclusive adoption pair](2026-11-24-shaped-sambe-peak-cutoff-reuse.md#正式非排他配對) compares `a41927789` → `be7ce2380` on the same manifest `c2b6b9e0522e`, fixture and ADC implementation. Each side ran one complete Run per scene, first the 33-cell cold phase scan, then the 11-cell warm spectroscopy scan. Both sides used offline FTF, seed 123, `time_scale=0`, CPU affinity 0–3, one worker and one native thread, OpenCL off, and separate empty caches at batch start. Both phase Runs completed within the 260 s row cap. The original survey's 180 s timeout still stands.
+
+The core times per Result cell fell by 1.86% for phase and 4.44% for spectroscopy. Each comparison has one observation per side, so it gives no measure of run-to-run variation. All six Result arrays match exactly, and routing counts match per acquire. The candidate's non-evolve core alone is 0.65474 s/cell for phase and 0.46012 s/cell for spectroscopy, above the 0.1 s/cell target. The earlier exclusive diagnostic used older ADC code; do not combine its readings with this pair.
 
 ### Banded Sambe
 
