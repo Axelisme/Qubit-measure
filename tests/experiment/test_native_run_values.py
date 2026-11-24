@@ -1,6 +1,6 @@
 """Fixed run values at the typed Native save and load boundary."""
 
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 
 import numpy as np
@@ -26,6 +26,7 @@ from zcu_tools.experiment import (
     save_labber,
     save_run,
 )
+from zcu_tools.experiment.run_values import encode_run_values
 
 from tests._native_support import native_metadata
 
@@ -266,6 +267,133 @@ def test_cfg_incompatibility_does_not_hide_fixed_values_but_blocks_typed_save(
     with pytest.raises(ValueError, match="cannot save without configuration"):
         save_run(record, destination, spec=incompatible)
     assert not destination.exists()
+
+
+@pytest.mark.parametrize("version", [True, 1.0, "1", 2])
+def test_public_encoder_rejects_versions_other_than_integer_one(version: int) -> None:
+    with pytest.raises(ValueError, match=r"run_values.*version.*integer 1"):
+        encode_run_values({}, result=object(), declarations=(), version=version)
+
+
+@pytest.mark.skipif(
+    np.dtype(np.longdouble).itemsize <= np.dtype(np.float64).itemsize,
+    reason="NumPy longdouble is binary64 on this platform",
+)
+def test_run_value_vector_declaration_rejects_dtype_wider_than_binary64() -> None:
+    with pytest.raises(ValueError, match=r"applied_offsets.*dtype.*binary64"):
+        replace(ALIGNED.run_values[0], dtype=np.longdouble)
+
+
+def test_axes_spec_rejects_run_values_not_accepted_by_result_constructor() -> None:
+    @dataclass(frozen=True)
+    class ComputedResult:
+        x: NDArray[np.float64]
+        signal: NDArray[np.float64]
+        fixed: float = field(init=False, default=0.25)
+
+    with pytest.raises(ValueError, match=r"run value.*fixed.*init"):
+        AxesSpec(
+            axes=SCALAR.axes,
+            z=SCALAR.z,
+            result_type=ComputedResult,
+            cfg_type=SyntheticCfg,
+            tag="test/computed",
+            run_values=SCALAR.run_values,
+        )
+
+
+@pytest.mark.parametrize("value", [5e-324, -5e-324])
+def test_native_encode_rejects_nonzero_run_value_scaled_to_zero(
+    scalar_path: Path, tmp_path: Path, value: float
+) -> None:
+    record = load_run_with_metadata(scalar_path, spec=SCALAR)
+    record = replace(record, result=replace(record.result, fixed=value))
+    spec = replace(SCALAR, run_values=(replace(SCALAR.run_values[0], scale=0.5),))
+
+    destination = tmp_path / "underflow.h5"
+    with pytest.raises(ValueError, match=r"/docs/run_values/values/start/value:"):
+        save_run(record, destination, spec=spec)
+    assert not destination.exists()
+
+
+@pytest.mark.parametrize("value", [5e-324, -5e-324])
+def test_native_decode_rejects_nonzero_run_value_scaled_to_zero(
+    scalar_path: Path, value: float
+) -> None:
+    replace_document(
+        scalar_path, {"version": 1, "values": {"start": {"unit": "s", "value": value}}}
+    )
+    spec = replace(NULLABLE, run_values=(replace(NULLABLE.run_values[0], scale=2.0),))
+
+    with pytest.raises(
+        ValueError, match=r"fixed\.h5: /docs/run_values/values/start/value:"
+    ):
+        load_run_with_metadata(scalar_path, spec=spec)
+
+
+@dataclass(frozen=True)
+class NarrowAlignedResult:
+    time: NDArray[np.float64]
+    tone: NDArray[np.int64]
+    signal: NDArray[np.float64]
+    offsets: NDArray[np.float32]
+
+
+def narrow_aligned_result(data: GroupedLoadData[SyntheticCfg]) -> NarrowAlignedResult:
+    channel = data.variable("signal")
+    time, tone = channel.axes
+    return NarrowAlignedResult(
+        time, tone, channel.z, data.run_values.vector("offsets", dtype=np.float32)
+    )
+
+
+NARROW_ALIGNED = GroupedAxesSpec(
+    variables=ALIGNED.variables,
+    result_type=NarrowAlignedResult,
+    cfg_type=ALIGNED.cfg_type,
+    tag=ALIGNED.tag,
+    result_builder=narrow_aligned_result,
+    run_values=(replace(ALIGNED.run_values[0], dtype=np.float32, scale=1.0),),
+)
+
+
+@pytest.mark.parametrize("value", [1e-50, -1e-50])
+def test_native_decode_rejects_nonzero_vector_item_narrowed_to_zero(
+    aligned_path: Path, value: float
+) -> None:
+    replace_document(
+        aligned_path,
+        {
+            "version": 1,
+            "values": {"applied_offsets": {"unit": "Hz", "value": [value, None]}},
+        },
+    )
+    with pytest.raises(
+        ValueError, match=r"aligned\.h5: /docs/run_values/values/applied_offsets/value:"
+    ):
+        load_run_with_metadata(aligned_path, spec=NARROW_ALIGNED)
+
+
+@pytest.mark.parametrize("negative_zero", [False, True])
+def test_native_decode_allows_rounding_and_signed_zero(
+    aligned_path: Path, negative_zero: bool
+) -> None:
+    replace_document(
+        aligned_path,
+        {
+            "version": 1,
+            "values": {
+                "applied_offsets": {
+                    "unit": "Hz",
+                    "value": [1.00000001, -0.0 if negative_zero else 0.0],
+                }
+            },
+        },
+    )
+    vector = load_run_with_metadata(aligned_path, spec=NARROW_ALIGNED).result.offsets
+    np.testing.assert_array_equal(vector, [1.0, 0.0])
+    assert vector.dtype == np.float32
+    assert bool(np.signbit(vector[1])) is negative_zero
 
 
 def test_bad_fixed_value_blocks_native_but_not_labber(

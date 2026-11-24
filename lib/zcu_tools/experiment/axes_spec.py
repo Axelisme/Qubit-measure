@@ -139,8 +139,8 @@ class AxesSpec(Generic[T_Result, T_Config]):
     save exports Labber; native load/save_run/load_run consume this same spec.
     zcu_lab declares child specs through ``AxesSpec.Axis`` and ``AxesSpec.Z``;
     the standalone Axis and ZSpec names remain available. run_values declares
-    fixed Result fields kept only in Native docs/run_values; run_values_version
-    is the independent document version (currently 1).
+    fixed Result fields accepted by the dataclass constructor and kept only in
+    Native docs/run_values; run_values_version is the document version (1).
     save_stem receives captured SaveContext and returns an exact filename stem.
     The default joins dotted frontend name, ordered role names and full run_id.
     Frontends append no prefix or ID. Invalid stems fail SaveLayout validation;
@@ -169,7 +169,8 @@ class AxesSpec(Generic[T_Result, T_Config]):
         result_type = self.result_type
         if not is_dataclass(result_type):
             raise TypeError(f"result_type {result_type!r} must be a dataclass")
-        result_fields = {f.name for f in fields(result_type)}
+        dataclass_fields = fields(result_type)
+        result_fields = {f.name for f in dataclass_fields}
         declared = {ax.field_name for ax in self.axes if ax.field_name is not None} | {
             self.z.field_name
         }
@@ -186,6 +187,11 @@ class AxesSpec(Generic[T_Result, T_Config]):
             declared,
             {self.data_variable: tuple(axis.label for axis in self.axes)},
         )
+        init_fields = {f.name for f in dataclass_fields if f.init}
+        if non_init := {value.field_name for value in self.run_values} - init_fields:
+            raise ValueError(
+                f"run value Result fields {sorted(non_init)} must be init parameters"
+            )
 
 
 @dataclass(frozen=True, kw_only=True)

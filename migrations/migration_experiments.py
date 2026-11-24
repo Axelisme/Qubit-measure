@@ -8,7 +8,11 @@ from migrations.experiment_declaration import (
     declare_migration_experiment as _declaration,
 )
 from migrations.legacy_labber import LegacyAxisSchema, LegacyVariableSchema
-from migrations.legacy_run_values import project_mux_coherence, project_unknown_detune
+from migrations.legacy_run_values import (
+    MUX_COHERENCE_SCHEMA,
+    project_mux_coherence,
+    project_unknown_detune,
+)
 from zcu_lab.v2.fastflux.distortion.acc_phase import (
     core as fastflux_distortion_acc_phase,
 )
@@ -137,37 +141,6 @@ _MIST_GAIN_SCHEMA = (
     ),
 )
 
-_TONE_AXIS = LegacyAxisSchema(name="Tone", unit="", dtype=np.dtype("float64"))
-_MUX_COHERENCE_SCHEMA = (
-    LegacyVariableSchema(
-        variable="signals",
-        axes=(
-            LegacyAxisSchema(
-                name="Requested delay", unit="s", dtype=np.dtype("float64")
-            ),
-            _TONE_AXIS,
-        ),
-        signal_name="Signal",
-        signal_unit="a.u.",
-        signal_dtype=np.dtype("complex128"),
-    ),
-    LegacyVariableSchema(
-        variable="actual_detunes",
-        axes=(_TONE_AXIS,),
-        signal_name="Actual detune",
-        signal_unit="Hz",
-        signal_dtype=np.dtype("float64"),
-    ),
-    LegacyVariableSchema(
-        variable="source_frequencies",
-        axes=(_TONE_AXIS,),
-        signal_name="Source frequency",
-        signal_unit="Hz",
-        signal_dtype=np.dtype("float64"),
-    ),
-)
-
-
 # Explicit core declarations, including notebook-only experiments. No discovery,
 # import of GUI definitions, mutable registry or kind registration occurs here.
 # Changes to this declaration surface also bump the concrete mapping revisions.
@@ -209,7 +182,7 @@ MIGRATION_EXPERIMENTS = (
     _declaration(
         mux_t2echo.MuxT2EchoExp.AXES_SPEC,
         source_tag="mux/time_domain/t2echo",
-        schemas=_MUX_COHERENCE_SCHEMA,
+        schemas=MUX_COHERENCE_SCHEMA,
         project_payload=partial(
             project_mux_coherence, spec=mux_t2echo.MuxT2EchoExp.AXES_SPEC
         ),
@@ -217,7 +190,7 @@ MIGRATION_EXPERIMENTS = (
     _declaration(
         mux_t2ramsey.MuxT2RamseyExp.AXES_SPEC,
         source_tag="mux/time_domain/t2ramsey",
-        schemas=_MUX_COHERENCE_SCHEMA,
+        schemas=MUX_COHERENCE_SCHEMA,
         project_payload=partial(
             project_mux_coherence, spec=mux_t2ramsey.MuxT2RamseyExp.AXES_SPEC
         ),

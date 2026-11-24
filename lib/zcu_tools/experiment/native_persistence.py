@@ -1,10 +1,8 @@
 """Typed Result/metadata mapping over the standalone numeric/JSON Container."""
 
 import warnings
-from collections.abc import Callable, Mapping
 from copy import deepcopy
 from dataclasses import dataclass, field, replace
-from functools import partial
 from pathlib import Path
 from typing import Generic, Literal, TypeVar
 
@@ -17,7 +15,6 @@ from zcu_tools.datafile import (
     ContainerAttrs,
     JsonObject,
     LabberMetadata,
-    Variable,
     encode_labber_comment,
     format_ext,
     load,
@@ -82,8 +79,9 @@ class PreparedRunData:
     experiment_tag is the persistence declaration identity, independent of
     mutable Labber export tags. Construction copies mappings and cfg/metadata
     but shares large arrays.
-    Callers must not mutate Result fields or arrays during saving. Preparation
-    performs no I/O. Only Native output encodes the declared run values.
+    Fixed run values are captured during preparation. Only Native output uses
+    them or reports an encoding error. Callers must not mutate shared measurement
+    arrays during saving. Preparation performs no I/O.
     """
 
     container: Container
@@ -92,7 +90,7 @@ class PreparedRunData:
     experiment_tag: str
     labber_layout: Literal["common", "independent"] = "common"
     labber_variables: tuple[str, ...] | None = field(default=None, kw_only=True)
-    _encode_run_values: Callable[[Mapping[str, Variable]], JsonObject] | None = field(
+    _run_values: JsonObject | Exception | None = field(
         default=None, kw_only=True, repr=False, compare=False
     )
 
@@ -146,9 +144,9 @@ class PreparedRunData:
         """Return prepared arrays and validated cfg, metadata and run value docs.
 
         metadata is the saving record's JSON document. Validate the native schema
-        and declaration tag while retaining every key. Encode declared fixed
-        fields as docs/run_values. Invalid cfg, metadata or run values raise
-        ValueError. No live state is captured, paths chosen or files written.
+        and declaration tag while retaining every key. Include the captured
+        docs/run_values or raise its preparation error. Invalid cfg or metadata
+        raises ValueError. No live state is captured, paths chosen or files written.
         Unknown prepared docs/groups and container attributes remain intact.
         """
         validate_cfg_snapshot(self.cfg)
@@ -156,8 +154,10 @@ class PreparedRunData:
         docs = dict(self.container.docs)
         docs["cfg"] = _JSON.validate_python(_CFG.dump_python(self.cfg, mode="json"))
         docs["metadata"] = deepcopy(_JSON.validate_python(metadata))
-        if self._encode_run_values is not None:
-            docs["run_values"] = self._encode_run_values(self.container.vars)
+        if isinstance(self._run_values, Exception):
+            raise self._run_values.with_traceback(None)
+        if self._run_values is not None:
+            docs["run_values"] = deepcopy(self._run_values)
         return replace(self.container, docs=docs)
 
 
@@ -175,8 +175,9 @@ def prepare_run_data(
     Variable errors identify the experiment tag and /vars/<name>. Preserve the
     declared Labber layout without checking common-grid compatibility here.
     Metadata may be absent during preparation; native saving requires it.
-    Bad inputs raise TypeError, ValueError or AttributeError. No I/O, live
-    capture or source mutation occurs.
+    Snapshot declared fixed values as a Native document or a Native-only error.
+    Invalid shared inputs raise TypeError, ValueError or AttributeError.
+    No I/O, live capture or source mutation occurs.
     """
     if source.cfg is None:
         raise ValueError("RunRecord.cfg is None; cannot save without configuration")
@@ -210,6 +211,18 @@ def prepare_run_data(
         cfg_type=spec.cfg_type.__name__,
         schema_version=spec.cfg_schema_version,
     )
+    run_values: JsonObject | Exception | None = None
+    if spec.run_values:
+        try:
+            run_values = encode_run_values(
+                variables,
+                result=source.result,
+                declarations=spec.run_values,
+                version=spec.run_values_version,
+            )
+        except (ValueError, TypeError, AttributeError) as error:
+            # Keep invalid run values from blocking Labber; detach the stack.
+            run_values = error.with_traceback(None)
     return PreparedRunData(
         container,
         cfg,
@@ -219,14 +232,7 @@ def prepare_run_data(
         labber_variables=spec.labber_variables
         if isinstance(spec, GroupedAxesSpec)
         else None,
-        _encode_run_values=partial(
-            encode_run_values,
-            result=source.result,
-            declarations=spec.run_values,
-            version=spec.run_values_version,
-        )
-        if spec.run_values
-        else None,
+        _run_values=run_values,
     )
 
 

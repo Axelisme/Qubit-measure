@@ -1,5 +1,6 @@
 """Project the four historical coherence Labber layouts to current Native data."""
 
+from collections.abc import Mapping
 from dataclasses import dataclass, replace
 
 import numpy as np
@@ -15,24 +16,71 @@ from zcu_tools.experiment import (
 from zcu_tools.experiment.axes_spec import LoadedVariableData
 from zcu_tools.experiment.run_values import encode_run_values
 
+from migrations.legacy_labber import LegacyAxisSchema, LegacyVariableSchema
 from zcu_lab.v2.support.mux_coherence import (
     MuxCoherenceResult,
     validate_coherence_result,
 )
 
-_TONE = VariableAxisSpec(
-    label="Tone", unit="", field_name="tone_indices", dtype=np.int64
+_TONE_AXIS = LegacyAxisSchema(name="Tone", unit="", dtype=np.dtype("float64"))
+_DETUNES_LOG = LegacyVariableSchema(
+    variable="actual_detunes",
+    axes=(_TONE_AXIS,),
+    signal_name="Actual detune",
+    signal_unit="Hz",
+    signal_dtype=np.dtype("float64"),
+)
+_CARRIER_LOG = LegacyVariableSchema(
+    variable="source_frequencies",
+    axes=(_TONE_AXIS,),
+    signal_name="Source frequency",
+    signal_unit="Hz",
+    signal_dtype=np.dtype("float64"),
+)
+# Historical disk schema, independent of the current Native and Labber outputs.
+MUX_COHERENCE_SCHEMA = (
+    LegacyVariableSchema(
+        variable="signals",
+        axes=(
+            LegacyAxisSchema(
+                name="Requested delay", unit="s", dtype=np.dtype("float64")
+            ),
+            _TONE_AXIS,
+        ),
+        signal_name="Signal",
+        signal_unit="a.u.",
+        signal_dtype=np.dtype("complex128"),
+    ),
+    _DETUNES_LOG,
+    _CARRIER_LOG,
 )
 
 
-def _load_tone_log(name: str, label: str, variable: Variable) -> LoadedVariableData:
-    return VariableSpec(
-        name,
-        (_TONE,),
-        VariableZSpec(
-            field_name=name, label=label, unit="Hz", scale=MHZ_TO_HZ, dtype=np.float64
+def _load_tone_log(
+    schema: LegacyVariableSchema, variables: Mapping[str, Variable]
+) -> LoadedVariableData:
+    (axis,) = schema.axes
+    spec = VariableSpec(
+        schema.variable,
+        (
+            VariableAxisSpec(
+                label=axis.name,
+                unit=axis.unit,
+                field_name="tone_indices",
+                dtype=np.int64,
+            ),
         ),
-    ).loaded_from_variable(variable, context=name)
+        VariableZSpec(
+            field_name=schema.variable,
+            label=schema.signal_name,
+            unit=schema.signal_unit,
+            scale=MHZ_TO_HZ,
+            dtype=np.float64,
+        ),
+    )
+    return spec.loaded_from_variable(
+        variables[schema.variable], context=schema.variable
+    )
 
 
 def project_mux_coherence[Cfg: ConfigBase](
@@ -52,12 +100,8 @@ def project_mux_coherence[Cfg: ConfigBase](
     )
     iq = signal_spec.loaded_from_variable(signals, context="signals")
     tone_indices = iq.axes[1]
-    detunes = _load_tone_log(
-        "actual_detunes", "Actual detune", payload.vars["actual_detunes"]
-    )
-    carrier = _load_tone_log(
-        "source_frequencies", "Source frequency", payload.vars["source_frequencies"]
-    )
+    detunes = _load_tone_log(_DETUNES_LOG, payload.vars)
+    carrier = _load_tone_log(_CARRIER_LOG, payload.vars)
     for log in (detunes, carrier):
         if not np.array_equal(log.axes[0], tone_indices):
             raise ValueError(

@@ -43,8 +43,9 @@ class RunValueSpec:
     field_name selects a Result dataclass field; wire_name is its stable
     lowercase snake_case key. unit is the exact disk unit (empty if unitless).
     disk = memory * scale; scale must be finite and nonzero. dtype is the
-    reconstructed memory type: float for scalars or the NumPy floating type
-    of a vector. axis selects the vector coordinates, or None for a scalar.
+    reconstructed memory type: float for scalars or a NumPy floating type
+    no wider than binary64 for vectors. axis selects the vector coordinates,
+    or None for a scalar.
     allow_unknown maps scalar None or vector NaN to JSON null and permits a
     missing entry on load. Invalid declarations raise ValueError.
     """
@@ -64,10 +65,15 @@ class RunValueSpec:
             raise ValueError(f"{self.wire_name}: scale must be finite and nonzero")
         if self.axis is None and self.dtype is not float:
             raise ValueError(f"{self.wire_name}: scalar dtype must be float")
-        if self.axis is not None and not issubclass(self.dtype, np.floating):
-            raise ValueError(
-                f"{self.wire_name}: vector dtype must be a NumPy floating type"
-            )
+        if self.axis is not None:
+            if not issubclass(self.dtype, np.floating):
+                raise ValueError(
+                    f"{self.wire_name}: vector dtype must be a NumPy floating type"
+                )
+            if np.dtype(self.dtype).itemsize > np.dtype(np.float64).itemsize:
+                raise ValueError(
+                    f"{self.wire_name}: vector dtype must be no wider than binary64"
+                )
 
 
 @dataclass(frozen=True)
@@ -162,8 +168,13 @@ def encode_run_values(
     """Encode all declared Result fields to the validated Native version.
 
     variables contains validated disk arrays and coordinates. Invalid values
-    raise ValueError with the document field path. No I/O or mutation occurs.
+    raise ValueError with the document field path. Only integer version 1 is
+    supported. No I/O or mutation occurs.
     """
+    if type(version) is not int or version != _VERSION:
+        raise ValueError(
+            f"{_DOCUMENT}/version: expected integer {_VERSION}, got {version!r}"
+        )
     values: JsonObject = {}
     for spec in declarations:
         path = f"{_DOCUMENT}/values/{spec.wire_name}/value"
@@ -285,13 +296,15 @@ def _decode_vector(
         _scaled_scalar(item, spec, path=f"{path}/{index}", saving=False)
         for index, item in enumerate(value)
     ]
-    with np.errstate(over="ignore"):
-        vector = np.asarray(
-            [np.nan if number is None else number for number in numbers],
-            dtype=spec.dtype,
-        )
+    wide = np.asarray(
+        [np.nan if number is None else number for number in numbers], dtype=np.float64
+    )
+    with np.errstate(over="ignore", under="ignore"):
+        vector = wide.astype(spec.dtype, copy=False)
     if np.isinf(vector).any():
         raise ValueError(f"{path}: number exceeds finite {np.dtype(spec.dtype)} range")
+    if ((vector == 0.0) & (wide != 0.0)).any():
+        raise ValueError(f"{path}: nonzero number underflows to zero in {vector.dtype}")
     return vector
 
 
@@ -308,4 +321,6 @@ def _scaled_scalar(
         raise ValueError(f"{path}: number exceeds finite float range") from error
     if not math.isfinite(scaled):
         raise ValueError(f"{path}: number exceeds finite float range")
+    if scaled == 0.0 and value != 0.0:
+        raise ValueError(f"{path}: nonzero number underflows to zero during scaling")
     return scaled
