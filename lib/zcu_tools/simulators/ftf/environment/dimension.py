@@ -17,15 +17,19 @@ from zcu_tools.simulate.evolution import (
     merge_path_diagnostics,
 )
 from zcu_tools.simulators.ftf.environment.cavity import CavityEvolutionOptions
-from zcu_tools.simulators.ftf.environment.numeric import EVOLUTION_BUDGET
+from zcu_tools.simulators.ftf.environment.numeric import (
+    EvolutionReuse,
+    evolution_budget,
+)
 from zcu_tools.simulators.ftf.environment.template import FTFModelFacts, FTFTemplatePlan
 
 # A short sequence does not amortize the dimension check over enough points.
 _MIN_POINTS = 8
 # Keep at least the smallest practical FTF evolution basis.
 _MIN_DIMENSION = 12
-# Leave half of the existing FTF Engine allowance for in-block error.
-_DROP_BUDGET = 0.5 * EVOLUTION_BUDGET
+# Basis truncation trades dimension for error independently of segment routing.
+_BASIS_CHECK_BUDGET = 1e-3
+_DROP_BUDGET = 0.5 * _BASIS_CHECK_BUDGET
 
 
 @dataclass(frozen=True)
@@ -145,11 +149,12 @@ def _isolated_evolve(
         source.flux_expansion(),
         slow_envelope_segments_per_period=source.slow_envelope_segments_per_period,
     )
+    batches = (batch,)
     with options.evolving():
         return engine.evolve(
             isolated,
-            (batch,),
-            budget=EVOLUTION_BUDGET,
+            batches,
+            budget=evolution_budget(batches),
             cancel=options.cancel,
             telemetry=options.telemetry,
             capture=options.capture,
@@ -222,7 +227,7 @@ def pilot_dimension(
     padded = np.zeros_like(upper)
     padded[:k, :k] = estimate
     error = float(np.max(np.abs(padded - upper)))
-    if error <= EVOLUTION_BUDGET:
+    if error <= _BASIS_CHECK_BUDGET:
         selection = replace(full, dimension=k, drop=drop, error=error)
         return selection, reduced, reference
     return replace(full, error=error), facts.source, reference
@@ -253,8 +258,8 @@ def evolve_terminal(
     options: CavityEvolutionOptions,
     upper: int,
     reference: EvolutionResult | None,
-) -> tuple[EvolutionResult, tuple[bytes, ...]]:
-    """Evolve terminal timelines, embedding in the upper basis, with route digests.
+) -> tuple[EvolutionResult, tuple[EvolutionReuse, ...]]:
+    """Evolve terminal timelines, embedding in the upper basis, with reuse facts.
 
     reference is the isolated upper result for one point, or None to solve the
     whole batch. If supplied, only the other points register production routing
@@ -267,10 +272,11 @@ def evolve_terminal(
         batches = _without_reference(batches, int(reference.points[0]))
         key = sha256(b"ftf-terminal-split\0" + key).digest()
     with options.evolving():
+        budget = evolution_budget(batches)
         result = engine.evolve(
             source,
             batches,
-            budget=EVOLUTION_BUDGET,
+            budget=budget,
             cancel=options.cancel,
             telemetry=options.telemetry,
             capture=options.capture,
@@ -284,7 +290,7 @@ def evolve_terminal(
             np.concatenate([result.densities, reference.densities]),
             merge_path_diagnostics((result.paths, reference.paths)),
         )
-    return result, (key,)
+    return result, (EvolutionReuse(key, budget),)
 
 
 def embed_upper(result: EvolutionResult, upper: int) -> EvolutionResult:
