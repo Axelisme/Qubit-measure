@@ -29,7 +29,11 @@
 - **Envelopes** 疊畫評估 0 的顯示包絡、CMA 初始均值和最佳 CMA 候選。時間用 µs，幅度用 Qubit1 的 DDS gain 等效尺度，包含原 `flat_top` ramp 與平台的相對幅度。
 - **Spectrum** 用複數 I/Q 比較評估 0 和最佳評估。0 MHz 是 CZ 載波，各曲線以自己的載波分量為 0 dB。避免頻率換算成相對載波偏移後以 ±0.5 MHz 帶標出。
 
-**Save All** 在 Native `data.h5` 儲存具名參數、歸一後的複數峰、分類計數和起點顯示包絡。時間用秒、角度用 rad。Labber 匯出同一組具名參數和峰值。從 Native 檔重開完整結果。舊格式需用當初寫檔的版本開啟。若 Load 報 cfg 無法還原，仍可看圖，但沒有避免頻率帶，也不能寫回。起點引用 `arb` 資產時，Native 檔也保存資產路徑和 SHA-256，包括 `flat_top` 的資產 ramp。若資產缺檔或內容已變更，Analyze 摘要會指出路徑和原因，圖仍從已存樣本繪製。
+**Save All** 在 Native `data.h5` 儲存具名參數、歸一後的複數峰、分類計數和起點顯示包絡。起點時長存在 `/docs/run_values` 的 `duration` 欄（秒）。參數中的角度用 rad。Labber 只匯出具名參數和峰值。
+
+Load 從 Native 檔還原起點時長。檔案缺少 `/docs/run_values` 或 `duration` 時，Load 會拒讀並指出來源檔；請用當初寫檔的版本開啟舊格式。若 Load 只報 cfg 無法還原，仍可看圖，但沒有避免頻率帶，也不能寫回。
+
+起點引用 `arb` 資產時，Native 檔也保存資產路徑和 SHA-256，包括 `flat_top` 的資產 ramp。若資產缺檔或內容已變更，Analyze 摘要會指出路徑和原因。分析用已保存的時長和樣本，不用目前資產重建起點。
 
 ## 審閱寫回並驗收
 

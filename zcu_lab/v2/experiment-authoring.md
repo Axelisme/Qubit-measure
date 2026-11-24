@@ -139,6 +139,7 @@ Z 各維度須匹配軸長，固定軸也計入；load 不將固定值寫進 Res
 `GroupedAxesSpec` 的 `VariableAxisSpec` 全用 keyword，`VariableZSpec` 只有 field_name 可用位置參數。
 `VariableAxisSpec.generated_arange(label=..., unit=...)` 也用 keyword。
 可選 native 變數與 Labber 選集各自宣告，見 [ADR-0069](../../docs/adr/0069-experiment-core-and-frontends.md#native-可選變數與-labber-投影)。
+Run 時才定出的固定值，例如實際 detune 或起點時長，用 [`run_values` 宣告](../../lib/zcu_tools/experiment/README.md#實驗介面與資料)，不放進 `vars`。
 單變數映射見 [PowerExp.AXES_SPEC](twotone/power_dep/core.py)，二維硬體掃描見 [FreqGainExp.AXES_SPEC](twotone/ro_optimize/freq_gain/core.py)。
 
 Native HDF5 的變數名（`VariableSpec.variable` 或 `AxesSpec.data_variable`）與存檔軸的 `label` 都是結果格式的一部分，不是圖上的標籤。Cfg 改名與舊檔相容性見 [ADR-0069〈Cfg 欄位改名與 schema 版本〉](../../docs/adr/0069-experiment-core-and-frontends.md#cfg-欄位改名與-schema-版本)。現行例子見 [Two-qubit 持久名稱](README.md#two-qubit-持久名稱)。

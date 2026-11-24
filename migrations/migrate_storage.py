@@ -7,6 +7,7 @@ import json
 import logging
 import sys
 from collections.abc import Callable, Sequence
+from dataclasses import replace
 from pathlib import Path
 
 from zcu_tools.experiment.metadata import CfgSnapshot
@@ -140,6 +141,14 @@ def main(
                     identity: item.native_tag
                     for identity, item in declarations.items()
                     if item.source_tag != item.native_tag
+                },
+            )
+            mapping = replace(
+                mapping,
+                run_payload_projections={
+                    identity: item.project_payload
+                    for identity, item in declarations.items()
+                    if item.project_payload is not None
                 },
             )
         request = MigrationRequest(

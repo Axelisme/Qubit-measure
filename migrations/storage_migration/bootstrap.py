@@ -51,7 +51,7 @@ _JSON = TypeAdapter(JsonObject)
 
 
 def validate_mapping(mapping: MigrationMapping) -> None:
-    """Require a revision, unique keys, explicit targets and declared native-tag renames.
+    """Require a revision, unique keys and declared historical identity bindings.
 
     Raise MigrationInputError for invalid declarations. No registration or I/O occurs."""
     if re.fullmatch(r"[0-9]+\.[0-9]+", mapping.mapping_version) is None:
@@ -60,6 +60,11 @@ def validate_mapping(mapping: MigrationMapping) -> None:
         if identity not in mapping.data_schemas or not native_tag:
             raise MigrationInputError(
                 f"native_tags: undeclared pair or empty target for {identity!r}"
+            )
+    for identity in mapping.run_payload_projections:
+        if identity not in mapping.data_schemas:
+            raise MigrationInputError(
+                f"run_payload_projections: undeclared historical pair {identity!r}"
             )
     seen: set[str] = set()
     for rule in mapping.rules:

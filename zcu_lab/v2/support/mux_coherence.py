@@ -77,8 +77,7 @@ class MuxCoherenceResult:
     actual_detunes: float64 (K,), MHz phase-ramp rates from actual_detune owner.
     May contain NaN when nonzero detune has no positive rounded delay; preserve
     the owner's diagnostics, never substitute zero/nominal detune.
-    source_frequencies: float64 (K,), MHz from each source x90 pulse before ramp.
-    Full pulse cfg and inactive tones remain in RunRecord.cfg. Cancellation and
+    Source x90 carriers and inactive tones remain in RunRecord.cfg. Cancellation and
     acquisition error status belong to the RunContext StopSignal, not these data.
     iq_moments: optional float64 (K,P,6) aligned with signals, in columns
     [N, ΣI, ΣQ, ΣI², ΣIQ, ΣQ²] after ADC offset correction. Run and Native
@@ -90,15 +89,14 @@ class MuxCoherenceResult:
     times: NDArray[np.float64]
     signals: NDArray[np.complex128]
     actual_detunes: NDArray[np.float64]
-    source_frequencies: NDArray[np.float64]
     iq_moments: NDArray[np.float64] | None = None
 
 
 def validate_coherence_result(result: MuxCoherenceResult) -> None:
-    """Check Ramsey/Echo delay, IQ and per-tone frequency array shapes and dtypes.
+    """Check Ramsey/Echo delay, IQ and applied detune array shapes and dtypes.
 
     Require K,P>0, unique nonnegative indices and nonnegative finite requested
-    times. Source frequencies must be finite. Actual detunes may be NaN when the
+    times. Actual detunes may be NaN when the
     owner cannot estimate a rate, but not infinite. Raises ValueError, never fits or
     changes data; callers must not turn source-contract errors into fit failures.
     """
@@ -130,17 +128,11 @@ def validate_coherence_result(result: MuxCoherenceResult) -> None:
     if np.any(np.isinf(result.signals)):
         raise ValueError("signals may contain NaN partial data, not infinity")
 
-    # An unavailable rounded detune stays NaN; source carriers must be known.
-    detunes, frequencies = result.actual_detunes, result.source_frequencies
+    # An unavailable rounded detune stays NaN.
+    detunes = result.actual_detunes
     if (
         detunes.dtype != np.dtype(np.float64)
         or detunes.shape != indices.shape
         or np.any(np.isinf(detunes))
     ):
         raise ValueError("actual_detunes must be float64 (K,), finite or NaN")
-    if (
-        frequencies.dtype != np.dtype(np.float64)
-        or frequencies.shape != indices.shape
-        or not np.all(np.isfinite(frequencies))
-    ):
-        raise ValueError("source_frequencies must be finite float64 (K,)")

@@ -172,7 +172,7 @@ def run_mux_t2echo(
     in us. Each pulse stage starts together; the next wait or readout starts
     after its longest pulse. The final x90 phase ramps with each tone's MHz
     detune. Return requested total delays (P,), averaged complex IQ (K,P),
-    original tone indices, actual detunes and source frequencies (K,).
+    original tone indices and actual detunes (K,).
     context supplies hardware and live plots; retry counts transient retries.
     Cancellation keeps acquired averages and NaN gaps. Inputs remain unchanged;
     acquisition and program errors propagate.
@@ -196,9 +196,6 @@ def run_mux_t2echo(
             for tone in tones
         ],
         dtype=np.float64,
-    )
-    frequencies = np.asarray(
-        [float(tone.require_drive().freq) for tone in tones], dtype=np.float64
     )
     readout = cfg.readout.with_updates(
         tones=[cfg.readout.tones[index] for index in indices]
@@ -294,5 +291,4 @@ def run_mux_t2echo(
         times,
         signals.array.copy(),
         detunes,
-        frequencies,
     )
