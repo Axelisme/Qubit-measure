@@ -45,8 +45,8 @@ from zcu_lab.v2.support.paired_counts import (
     validate_qubit_tones,
 )
 from zcu_lab.v2.support.paired_drive import QubitDriveCfg
+from zcu_lab.v2.support.rabi_duration import cosine
 
-from .._rabi_analysis import cosine
 from .._readout import MuxResetCfg
 
 _X_LABEL = "Common CZ gain multiplier (a.u.)"
