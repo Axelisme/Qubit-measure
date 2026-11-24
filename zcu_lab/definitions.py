@@ -25,6 +25,7 @@ from zcu_lab.v2.heralded.conditional_phase.gui import (
 from zcu_lab.v2.heralded.conditional_spectroscopy.gui import (
     DEFINITION as SPECTROSCOPY_HERALDED_DEFINITION,
 )
+from zcu_lab.v2.heralded.idle_zz.gui import DEFINITION as IDLE_ZZ_HERALDED_DEFINITION
 from zcu_lab.v2.heralded.rb.gui import (
     DEFINITION as TWO_QUBIT_RB_HERALDED_DEFINITION,
 )
@@ -322,6 +323,7 @@ def register_all(
         "two_qubit/conditional_phase": CONDITIONAL_PHASE_DEFINITION,
         "two_qubit/local_z": LOCAL_Z_DEFINITION,
         "two_qubit/idle_zz": IDLE_ZZ_DEFINITION,
+        "heralded/idle_zz": IDLE_ZZ_HERALDED_DEFINITION,
         "two_qubit/constructive_phase": CONSTRUCTIVE_PHASE_DEFINITION,
         "two_qubit/rb": TWO_QUBIT_RB_DEFINITION,
         "heralded/conditional_spectroscopy": SPECTROSCOPY_HERALDED_DEFINITION,
