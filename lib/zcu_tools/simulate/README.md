@@ -1,6 +1,6 @@
 # Numeric simulation tools
 
-**Last updated:** 2026-11-23, acquisition and loss boundaries, physical v2
+**Last updated:** 2026-11-24, simulator speed ranking
 
 **讀者：** framework-dev、agent。查閱數值模擬的責任邊界、快取契約與實測效能。
 
@@ -10,6 +10,8 @@ prediction tools remain separate. ADR-0072 defines the package dependency rules.
 
 Before adding or changing a kernel, a guard, a price or a measurement scene, or
 optimizing speed, follow the [simulator maintenance rules](maintenance.md).
+The [speed ranking](../../../docs/simulator-attempts/speed-ranking.md) lists measured
+experiment bottlenecks and links to optimization attempts.
 
 ## Acquisition boundary
 

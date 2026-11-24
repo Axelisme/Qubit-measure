@@ -45,7 +45,13 @@ components:
     flux_dev: f2_bias
   coupler:
     kind: qubit/transmon
-    ext: {}
+    ext:
+      # Synthetic Local Z pair for path timing only; not a calibration.
+      cz_phase:
+        qubit1: Q1
+        qubit2: Q2
+        correction_qubit1_deg: 0.0
+        correction_qubit2_deg: 0.0
     module:
       cz_qubit1: coupler.pulses.cz_qubit1
       cz_qubit2: coupler.pulses.cz_qubit2

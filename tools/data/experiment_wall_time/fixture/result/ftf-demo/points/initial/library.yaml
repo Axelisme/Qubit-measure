@@ -15,13 +15,31 @@ components:
           phase: 0.0
           ro_ch: 2
           label: R1
+          # Low-shot simulated GE input for path timing only; not a calibration.
           classifier:
+            mode: circle
+            g_center: {__complex__: [-43.16906942272348, 13.151282191503519]}
+            e_center: {__complex__: [56.72400754417115, -35.70526211042693]}
+            radius: 111.20066882460927
+            confusion_matrix:
+            - [0.6955408855807671, 0.022468226677333062, 0.28199088774189984]
+            - [0.3107283941613239, 0.6892716058386761, 0.0]
+            - [0.0, 0.0, 1.0]
         - freq: 7079.652710129052
           gain: 0.03
           phase: 0.0
           ro_ch: 3
           label: R2
+          # Low-shot simulated GE input for path timing only; not a calibration.
           classifier:
+            mode: circle
+            g_center: {__complex__: [-80.61037252182221, -4.342861563392393]}
+            e_center: {__complex__: [131.7915958002446, -1.8327704369864541]}
+            radius: 169.58803121472826
+            confusion_matrix:
+            - [0.0, 0.9814349952786497, 0.018565004721350257]
+            - [0.7688307314130842, 0.0, 0.23116926858691572]
+            - [0.0, 0.0, 1.0]
         length: 4.167795864838565
         ro_length: 3.0
         pre_delay: 0.0
@@ -101,7 +119,16 @@ components:
         ro_ch: 0
         ro_length: 0.99
         trig_offset: 1.110801351175282
+        # Synthetic GE input for path timing only; not a calibration.
         classifier:
+          mode: circle
+          g_center: {__complex__: [0.0, 0.0]}
+          e_center: {__complex__: [1.0, 0.0]}
+          radius: 0.5
+          confusion_matrix:
+          - [1.0, 0.0, 0.0]
+          - [0.0, 1.0, 0.0]
+          - [0.0, 0.0, 1.0]
         nqz: 2
         phase: 0.0
         mixer_freq:
@@ -134,7 +161,7 @@ components:
         desc:
         waveform:
           style: const
-          length: 0.8
+          length: 0.78
         ch: 2
         freq: 5799.976979080261
         gain: 0.024144059109456696
@@ -148,7 +175,7 @@ components:
         desc:
         waveform:
           style: const
-          length: 0.8
+          length: 0.78
         ch: 3
         freq: 5799.976979080261
         gain: 0.024144059109456696
