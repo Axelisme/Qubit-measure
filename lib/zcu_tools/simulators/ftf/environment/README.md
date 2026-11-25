@@ -1,6 +1,6 @@
 # FTF environment composition
 
-**Last updated:** 2026-11-25, native drive timing
+**Last updated:** 2026-11-25, start-independent drive duration
 
 **讀者：** framework-dev、agent。FTF 環境的組裝接縫、數值接線與 acquisition 契約。
 
@@ -472,8 +472,11 @@ inputs; standalone calls build their own facts. `FTFSource.model_facts` supplies
 the source-owned latest facts and rejects calls after close.
 `plan_template` requires the originating request's `time_base` keyword.
 It converts QICK ticks/MHz/degrees into ns/GHz/radians with point arrays.
-`TimeBase.ns` converts compiled drive and readout pulse endpoints without
-resnapping and converts complete integer ADC sample grids. Preparation keys
+`TimeBase.ns` converts drive start and duration ticks separately without
+resnapping, so equal duration ticks give equal durations at any onset. The
+drive ends at `start_ns + duration_ns`, within one ulp of the converted absolute
+end tick. Readout converts absolute start and end ticks separately without
+resnapping. ADC grids are built in ticks before conversion. Preparation keys
 include the clock. The shared `drive_track` converter preserves signed gains,
 complex sampled envelopes and the common carrier origin for evolution. See the [evolution input contract](../../../simulate/evolution/README.md#public-entry-points)
 for the signed carrier and pulse support in `DriveTrack`, `EnvelopeSpec.values`
