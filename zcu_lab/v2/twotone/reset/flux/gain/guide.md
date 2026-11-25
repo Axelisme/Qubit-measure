@@ -18,6 +18,6 @@ For complex means S[a,b] at before/after switch settings a,b, let d₀ = S[0,0]�
 
 Analyze selects the smallest finite estimate; ties use the first point in scan order. The vertical dashed line marks the chosen gain. Zero d₀ or nonfinite IQ, contrast or estimate excludes a point; if nothing qualifies, Analyze shows no candidate and proposes nothing.
 
-The proposal updates only `$qubit.ext.flux_reset_gain`. Verify the accepted setting with the `flux_reset` template. Use `twotone/reset/check` for the averaged Rabi response or `singleshot/reset_check` to check the state distribution.
+The proposal updates only `$qubit.ext.flux_reset_gain`. Verify the accepted setting with the `flux_reset` template. Use `twotone/reset/rabi_check` for the averaged Rabi response or `singleshot/reset_check` to check the state distribution.
 
 Shared GUI steps: [`zcu_lab/v2/operator-workflow.md`](../../../../operator-workflow.md).

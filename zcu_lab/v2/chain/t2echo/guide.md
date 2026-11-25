@@ -37,6 +37,6 @@ The model assumes independent thermalized cycles, Markov transitions, and three 
 
 ## Use the result
 
-Check that the data resolve the decay and that the residuals do not show a persistent ripple. This experiment proposes no writeback. Use [`twotone/t2echo`](../../twotone/time_domain/t2echo/guide.md) for a separate qubit calibration.
+Check that the data resolve the decay and that the residuals do not show a persistent ripple. This experiment proposes no writeback. Use [`twotone/time_domain/t2echo`](../../twotone/time_domain/t2echo/guide.md) for a separate qubit calibration.
 
 `chain_t2echo` rejects `null` for `readout_ref`, `pi_ref` and `pi2_ref` at the required Form selector, before Run. For `max_delay_us`, `points`, `reps` and `rounds`, omission keeps the Form value and `null` clears the required value. The readiness check stops before acquisition if it is still blank after overrides. Set K with an override on `relax_delay`.

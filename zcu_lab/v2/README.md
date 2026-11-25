@@ -14,7 +14,7 @@
 - [Two-qubit bring-up 與 CZ 校準](two_qubit/guide.md) 說明 Qubit1、Qubit2 的單 qubit 校準、位置綁定、舊 point 重綁與資料保存。FTF 控制鏈可執行仍不代表物理校準或 fidelity 已驗收。
 - [Heralded 實驗家族](heralded/README.md) 列出八個保留多類 herald 計數的入口。用各入口的 guide 判讀主估計和診斷。
 - [K-cycle 讀出鏈 amp Rabi](chain/amp_rabi/guide.md)、[len Rabi](chain/len_rabi/guide.md)、[T1](chain/t1/guide.md)、[T2 Ramsey](chain/t2ramsey/guide.md) 與 [T2 echo](chain/t2echo/guide.md) 說明每個 rep 是一個 cycle（K 後 (D, 讀, 讀) × 8）、兩條 live 曲線、聯合擬合與 joint residual 的判讀方式。數值契約見 [analysis〈Readout chain K-cycle〉](../../lib/zcu_tools/analysis/README.md#readout-chain-k-cycle)。
-- [`twotone/t1_cov`](twotone/time_domain/t1_cov/guide.md) 用兩次單 tone 讀出的二階矩自校準，擬合狀態改變機率以估計 T1。可選脈衝 reset，不需 classifier。
+- [`twotone/time_domain/t1_cov`](twotone/time_domain/t1_cov/guide.md) 用兩次單 tone 讀出的二階矩自校準，擬合狀態改變機率以估計 T1。可選脈衝 reset，不需 classifier。
 - [Experiment authoring](experiment-authoring.md) 說明核心 records 與資料形狀，新實驗從[寫法慣例](experiment-authoring.md#寫法慣例)選 cfg、分析與圖 API 的寫法。
 - [Measure authoring](measure-authoring.md) 說明 cfg defaults、operator guides、writeback 與 reload。
 - [GUI contracts](gui-contracts.md) 說明 concrete adapter hooks 與 capability。
@@ -78,8 +78,9 @@ Leaf 的 `__init__.py` 只提供 core exports，不載入 GUI。
 只放基本 T1，[t1_with_tone.py](twotone/time_domain/t1/t1_with_tone.py) 與
 [scan_t1_with_tone.py](twotone/time_domain/t1/scan_t1_with_tone.py) 各放固定 tone 與 gain sweep。
 兩者共用基本 T1 的 Result、Analysis 或訊號轉換，不增加 GUI adapter。
-AC Stark spectroscopy 的 [core.py](twotone/ac_stark/core.py) 對應 `twotone/ac_stark`，
-[ramsey_core.py](twotone/ac_stark/ramsey_core.py) 對應 `twotone/ac_stark_ramsey`。
+AC Stark spectroscopy 與 Ramsey 各有自己的實驗目錄。
+`twotone/ac_stark` 對應 [spectroscopy core](twotone/ac_stark/core.py)，
+`twotone/ac_stark_ramsey` 對應 [Ramsey core](twotone/ac_stark_ramsey/core.py)。
 註冊位置與 Ramsey guide 見 [Lab 組裝與註冊](../README.md#lab-組裝與註冊)。
 Singleshot GE 與 mux GE 的混淆矩陣求解由 `zcu_tools.analysis.singleshot` 擁有。
 兩個 core 在 Analyze 都啟用 [共用 GE 診斷](../../lib/zcu_tools/experiment/README.md#ge-模型診斷)。擬合成功時，Single 發布 `diagnostic`，mux 以原始 tone 序號發布 `diagnostic_i`；各 core 仍另外產生 Fit 圖。

@@ -38,6 +38,6 @@ The model assumes independent thermalized cycles, Markov transitions, and three 
 
 ## Use the result
 
-The fringe frequency includes the phase ramp and drive–qubit mismatch; the cosine does not identify its sign. Use a second run with a known different ramp to resolve the sign, or calibrate with [`twotone/t2ramsey`](../../twotone/time_domain/t2ramsey/guide.md). This chain experiment proposes no writeback.
+The fringe frequency includes the phase ramp and drive–qubit mismatch; the cosine does not identify its sign. Use a second run with a known different ramp to resolve the sign, or calibrate with [`twotone/time_domain/t2ramsey`](../../twotone/time_domain/t2ramsey/guide.md). This chain experiment proposes no writeback.
 
 `chain_t2ramsey` rejects `null` for `readout_ref` and `pi2_ref` at the required Form selector, before Run. For `max_delay_us`, `detune_mhz`, `points`, `reps` and `rounds`, omission keeps the Form value and `null` clears the required value. The readiness check stops before acquisition if it is still blank after overrides. Set K with an override on `relax_delay`.

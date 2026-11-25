@@ -1,225 +1,137 @@
 """Explicit user-owned measure catalog; importing it performs no registration."""
 
+from collections.abc import Callable
+from types import ModuleType
+
 from zcu_tools.gui.app.measure.registry import Registry
 from zcu_tools.resources.entry.registry import ComponentRegistry
 
 from zcu_lab.components import register_all as register_components
-from zcu_lab.v2.chain.amp_rabi.gui import DEFINITION as CHAIN_AMP_RABI_DEFINITION
-from zcu_lab.v2.chain.len_rabi.gui import DEFINITION as CHAIN_LEN_RABI_DEFINITION
-from zcu_lab.v2.chain.t1.gui import DEFINITION as CHAIN_T1_DEFINITION
-from zcu_lab.v2.chain.t2echo.gui import DEFINITION as CHAIN_T2ECHO_DEFINITION
-from zcu_lab.v2.chain.t2ramsey.gui import DEFINITION as CHAIN_T2RAMSEY_DEFINITION
-from zcu_lab.v2.fastflux.distortion.acc_phase.gui import (
-    DEFINITION as ACC_PHASE_DEFINITION,
+from zcu_lab.v2.chain.amp_rabi import gui as chain_amp_rabi_gui
+from zcu_lab.v2.chain.len_rabi import gui as chain_len_rabi_gui
+from zcu_lab.v2.chain.t1 import gui as chain_t1_gui
+from zcu_lab.v2.chain.t2echo import gui as chain_t2echo_gui
+from zcu_lab.v2.chain.t2ramsey import gui as chain_t2ramsey_gui
+from zcu_lab.v2.fastflux.distortion.acc_phase import gui as acc_phase_gui
+from zcu_lab.v2.fastflux.distortion.freq import gui as distortion_freq_gui
+from zcu_lab.v2.fastflux.distortion.phase import gui as distortion_phase_gui
+from zcu_lab.v2.fastflux.mist import gui as mist_gui
+from zcu_lab.v2.fastflux.t1 import gui as fastflux_t1_gui
+from zcu_lab.v2.fastflux.twotone import gui as twotone_gui
+from zcu_lab.v2.heralded.chevron import gui as heralded_chevron_gui
+from zcu_lab.v2.heralded.conditional_phase import gui as heralded_conditional_phase_gui
+from zcu_lab.v2.heralded.conditional_spectroscopy import (
+    gui as heralded_conditional_spectroscopy_gui,
 )
-from zcu_lab.v2.fastflux.distortion.freq.gui import (
-    DEFINITION as FAST_FLUX_FREQ_DEFINITION,
+from zcu_lab.v2.heralded.cz_amplitude import gui as heralded_cz_amplitude_gui
+from zcu_lab.v2.heralded.cz_optimize import gui as heralded_cz_optimize_gui
+from zcu_lab.v2.heralded.idle_zz import gui as heralded_idle_zz_gui
+from zcu_lab.v2.heralded.local_z import gui as heralded_local_z_gui
+from zcu_lab.v2.heralded.rb import gui as heralded_rb_gui
+from zcu_lab.v2.jpa.auto_optimize import gui as auto_optimize_gui
+from zcu_lab.v2.jpa.check import gui as jpa_check_gui
+from zcu_lab.v2.jpa.flux import gui as flux_gui
+from zcu_lab.v2.jpa.flux_onetone import gui as flux_onetone_gui
+from zcu_lab.v2.jpa.freq import gui as jpa_freq_gui
+from zcu_lab.v2.jpa.power import gui as jpa_power_gui
+from zcu_lab.v2.lookback import gui as lookback_gui
+from zcu_lab.v2.mist.flux_dep import gui as mist_flux_dep_gui
+from zcu_lab.v2.mist.power_dep.drive_freq import gui as drive_freq_gui
+from zcu_lab.v2.mist.power_dep.single_trace import gui as single_trace_gui
+from zcu_lab.v2.mux.amp_rabi import gui as mux_amp_rabi_gui
+from zcu_lab.v2.mux.len_rabi import gui as mux_len_rabi_gui
+from zcu_lab.v2.mux.onetone import gui as onetone_gui
+from zcu_lab.v2.mux.onetone_flux_global import gui as onetone_flux_global_gui
+from zcu_lab.v2.mux.onetone_flux_local import gui as onetone_flux_local_gui
+from zcu_lab.v2.mux.singleshot_ge import gui as singleshot_ge_gui
+from zcu_lab.v2.mux.t1 import gui as mux_t1_gui
+from zcu_lab.v2.mux.t2echo import gui as mux_t2echo_gui
+from zcu_lab.v2.mux.t2ramsey import gui as mux_t2ramsey_gui
+from zcu_lab.v2.mux.twotone_flux_global import gui as twotone_flux_global_gui
+from zcu_lab.v2.mux.twotone_flux_local import gui as twotone_flux_local_gui
+from zcu_lab.v2.mux.twotone_spectrum import gui as twotone_spectrum_gui
+from zcu_lab.v2.onetone.flux_dep import gui as onetone_flux_dep_gui
+from zcu_lab.v2.onetone.freq import gui as onetone_freq_gui
+from zcu_lab.v2.onetone.power_dep import gui as onetone_power_dep_gui
+from zcu_lab.v2.onetone.range_find import gui as range_find_gui
+from zcu_lab.v2.singleshot.ac_stark import gui as singleshot_ac_stark_gui
+from zcu_lab.v2.singleshot.amp_rabi import gui as singleshot_amp_rabi_gui
+from zcu_lab.v2.singleshot.check import gui as singleshot_check_gui
+from zcu_lab.v2.singleshot.ge import gui as ge_gui
+from zcu_lab.v2.singleshot.len_rabi import gui as singleshot_len_rabi_gui
+from zcu_lab.v2.singleshot.mist.freq import gui as mist_freq_gui
+from zcu_lab.v2.singleshot.mist.power import gui as mist_power_gui
+from zcu_lab.v2.singleshot.mist.power_freq import gui as power_freq_gui
+from zcu_lab.v2.singleshot.mist.pre_freq import gui as pre_freq_gui
+from zcu_lab.v2.singleshot.qutrit_population import gui as qutrit_population_gui
+from zcu_lab.v2.singleshot.reset_check import gui as reset_check_gui
+from zcu_lab.v2.singleshot.t1 import gui as singleshot_t1_gui
+from zcu_lab.v2.singleshot.t1_tone import gui as t1_tone_gui
+from zcu_lab.v2.singleshot.t1_tone_sweep import gui as t1_tone_sweep_gui
+from zcu_lab.v2.two_qubit.chevron import gui as two_qubit_chevron_gui
+from zcu_lab.v2.two_qubit.conditional_phase import (
+    gui as two_qubit_conditional_phase_gui,
 )
-from zcu_lab.v2.fastflux.distortion.phase.gui import DEFINITION as PHASE_DEFINITION
-from zcu_lab.v2.fastflux.mist.gui import DEFINITION as MIST_DEFINITION
-from zcu_lab.v2.fastflux.t1.gui import DEFINITION as FAST_FLUX_T1_DEFINITION
-from zcu_lab.v2.fastflux.twotone.gui import DEFINITION as TWO_TONE_DEFINITION
-from zcu_lab.v2.heralded.chevron.gui import DEFINITION as HERALDED_CHEVRON_DEFINITION
-from zcu_lab.v2.heralded.conditional_phase.gui import (
-    DEFINITION as CONDITIONAL_PHASE_HERALDED_DEFINITION,
+from zcu_lab.v2.two_qubit.conditional_spectroscopy import (
+    gui as two_qubit_conditional_spectroscopy_gui,
 )
-from zcu_lab.v2.heralded.conditional_spectroscopy.gui import (
-    DEFINITION as SPECTROSCOPY_HERALDED_DEFINITION,
-)
-from zcu_lab.v2.heralded.cz_amplitude.gui import (
-    DEFINITION as HERALDED_CZAMPLITUDE_DEFINITION,
-)
-from zcu_lab.v2.heralded.cz_optimize.gui import (
-    DEFINITION as HERALDED_CZOPTIMIZE_DEFINITION,
-)
-from zcu_lab.v2.heralded.idle_zz.gui import DEFINITION as IDLE_ZZ_HERALDED_DEFINITION
-from zcu_lab.v2.heralded.local_z.gui import DEFINITION as LOCAL_Z_HERALDED_DEFINITION
-from zcu_lab.v2.heralded.rb.gui import (
-    DEFINITION as TWO_QUBIT_RB_HERALDED_DEFINITION,
-)
-from zcu_lab.v2.jpa.auto_optimize.gui import DEFINITION as JPA_AUTO_OPTIMIZE_DEFINITION
-from zcu_lab.v2.jpa.check.gui import DEFINITION as JPA_CHECK_DEFINITION
-from zcu_lab.v2.jpa.flux.gui import DEFINITION as JPA_FLUX_DEFINITION
-from zcu_lab.v2.jpa.flux_onetone.gui import DEFINITION as JPA_FLUX_ONE_TONE_DEFINITION
-from zcu_lab.v2.jpa.freq.gui import DEFINITION as JPA_FREQ_DEFINITION
-from zcu_lab.v2.jpa.power.gui import DEFINITION as JPA_POWER_DEFINITION
-from zcu_lab.v2.lookback.gui import DEFINITION as LOOKBACK_DEFINITION
-from zcu_lab.v2.mist.flux_dep.gui import DEFINITION as MIST_FLUX_DEP_DEFINITION
-from zcu_lab.v2.mist.power_dep.drive_freq.gui import DEFINITION as DRIVE_FREQ_DEFINITION
-from zcu_lab.v2.mist.power_dep.single_trace.gui import (
-    DEFINITION as MIST_TRACE_DEFINITION,
-)
-from zcu_lab.v2.mux.amp_rabi.gui import DEFINITION as MUX_AMP_RABI_DEFINITION
-from zcu_lab.v2.mux.len_rabi.gui import DEFINITION as MUX_LEN_RABI_DEFINITION
-from zcu_lab.v2.mux.onetone.gui import DEFINITION as MUX_ONETONE_DEFINITION
-from zcu_lab.v2.mux.onetone_flux_global.gui import (
-    DEFINITION as ONETONE_FLUX_GLOBAL_DEFINITION,
-)
-from zcu_lab.v2.mux.onetone_flux_local.gui import (
-    DEFINITION as ONETONE_FLUX_LOCAL_DEFINITION,
-)
-from zcu_lab.v2.mux.singleshot_ge.gui import DEFINITION as MUX_GE_DEFINITION
-from zcu_lab.v2.mux.t1.gui import DEFINITION as MUX_T1_DEFINITION
-from zcu_lab.v2.mux.t2echo.gui import DEFINITION as MUX_T2_ECHO_DEFINITION
-from zcu_lab.v2.mux.t2ramsey.gui import DEFINITION as MUX_T2_RAMSEY_DEFINITION
-from zcu_lab.v2.mux.twotone_flux_global.gui import (
-    DEFINITION as TWOTONE_FLUX_GLOBAL_DEFINITION,
-)
-from zcu_lab.v2.mux.twotone_flux_local.gui import (
-    DEFINITION as TWOTONE_FLUX_LOCAL_DEFINITION,
-)
-from zcu_lab.v2.mux.twotone_spectrum.gui import DEFINITION as MUX_FREQ_DEFINITION
-from zcu_lab.v2.onetone.flux_dep.gui import DEFINITION as ONE_TONE_FLUX_DEP_DEFINITION
-from zcu_lab.v2.onetone.freq.gui import DEFINITION as ONE_TONE_FREQ_DEFINITION
-from zcu_lab.v2.onetone.power_dep.gui import DEFINITION as ONE_TONE_POWER_DEP_DEFINITION
-from zcu_lab.v2.onetone.range_find.gui import DEFINITION as RANGE_FIND_DEFINITION
-from zcu_lab.v2.singleshot.ac_stark.gui import DEFINITION as SS_AC_STARK_DEFINITION
-from zcu_lab.v2.singleshot.amp_rabi.gui import DEFINITION as SS_AMP_RABI_DEFINITION
-from zcu_lab.v2.singleshot.check.gui import DEFINITION as CHECK_DEFINITION
-from zcu_lab.v2.singleshot.ge.gui import DEFINITION as GE_DEFINITION
-from zcu_lab.v2.singleshot.len_rabi.gui import DEFINITION as SS_LEN_RABI_DEFINITION
-from zcu_lab.v2.singleshot.mist.freq.gui import DEFINITION as MIST_FREQ_DEFINITION
-from zcu_lab.v2.singleshot.mist.power.gui import DEFINITION as MIST_POWER_DEFINITION
-from zcu_lab.v2.singleshot.mist.power_freq.gui import (
-    DEFINITION as MIST_POWER_FREQ_DEFINITION,
-)
-from zcu_lab.v2.singleshot.mist.pre_freq.gui import (
-    DEFINITION as MIST_PRE_FREQ_DEFINITION,
-)
-from zcu_lab.v2.singleshot.qutrit_population.gui import (
-    DEFINITION as QUTRIT_POPULATION_DEFINITION,
-)
-from zcu_lab.v2.singleshot.reset_check.gui import (
-    DEFINITION as SS_RESET_CHECK_DEFINITION,
-)
-from zcu_lab.v2.singleshot.t1.t1.gui import DEFINITION as SS_T1_DEFINITION
-from zcu_lab.v2.singleshot.t1.t1_with_tone.gui import (
-    DEFINITION as SS_T1_TONE_DEFINITION,
-)
-from zcu_lab.v2.singleshot.t1.t1_with_tone_sweep.gui import (
-    FREQ_DEFINITION as SS_T1_TONE_SWEEP_FREQ_DEFINITION,
-)
-from zcu_lab.v2.singleshot.t1.t1_with_tone_sweep.gui import (
-    GAIN_DEFINITION as SS_T1_TONE_SWEEP_GAIN_DEFINITION,
-)
-from zcu_lab.v2.two_qubit.chevron.gui import DEFINITION as CHEVRON_DEFINITION
-from zcu_lab.v2.two_qubit.conditional_phase.gui import (
-    DEFINITION as CONDITIONAL_PHASE_DEFINITION,
-)
-from zcu_lab.v2.two_qubit.conditional_spectroscopy.gui import (
-    DEFINITION as SPECTROSCOPY_DEFINITION,
-)
-from zcu_lab.v2.two_qubit.constructive_phase.gui import (
-    DEFINITION as CONSTRUCTIVE_PHASE_DEFINITION,
-)
-from zcu_lab.v2.two_qubit.cz_amplitude.gui import DEFINITION as CZAMPLITUDE_DEFINITION
-from zcu_lab.v2.two_qubit.cz_optimize.gui import DEFINITION as CZOPTIMIZE_DEFINITION
-from zcu_lab.v2.two_qubit.idle_zz.gui import DEFINITION as IDLE_ZZ_DEFINITION
-from zcu_lab.v2.two_qubit.joint_readout.gui import (
-    DEFINITION as JOINT_READOUT_DEFINITION,
-)
-from zcu_lab.v2.two_qubit.local_z.gui import DEFINITION as LOCAL_Z_DEFINITION
-from zcu_lab.v2.two_qubit.rb.gui import DEFINITION as TWO_QUBIT_RB_DEFINITION
-from zcu_lab.v2.twotone.ac_stark.gui import DEFINITION as AC_STARK_DEFINITION
-from zcu_lab.v2.twotone.ac_stark.gui import (
-    RAMSEY_DEFINITION as AC_STARK_RAMSEY_DEFINITION,
-)
-from zcu_lab.v2.twotone.allxy.gui import DEFINITION as ALL_XY_DEFINITION
-from zcu_lab.v2.twotone.chain.gui import DEFINITION as CHAIN_DEFINITION
-from zcu_lab.v2.twotone.ckp.gui import DEFINITION as CKP_DEFINITION
-from zcu_lab.v2.twotone.dispersive.gui import DEFINITION as DISPERSIVE_DEFINITION
-from zcu_lab.v2.twotone.fluxdep.gui import DEFINITION as FLUX_DEP_DEFINITION
-from zcu_lab.v2.twotone.freq.gui import DEFINITION as FREQ_DEFINITION
-from zcu_lab.v2.twotone.power_dep.gui import DEFINITION as POWER_DEP_DEFINITION
-from zcu_lab.v2.twotone.rabi.amp_rabi.gui import DEFINITION as AMP_RABI_DEFINITION
-from zcu_lab.v2.twotone.rabi.len_rabi.gui import DEFINITION as LEN_RABI_DEFINITION
-from zcu_lab.v2.twotone.raman_gf.gui import DEFINITION as RAMAN_GF_DEFINITION
-from zcu_lab.v2.twotone.rb.gui import DEFINITION as RB_DEFINITION
-from zcu_lab.v2.twotone.reset.bath.freq.gui import (
-    DEFINITION as BATH_FREQ_GAIN_DEFINITION,
-)
-from zcu_lab.v2.twotone.reset.bath.length.gui import (
-    DEFINITION as BATH_LENGTH_DEFINITION,
-)
-from zcu_lab.v2.twotone.reset.bath.phase.gui import DEFINITION as BATH_PHASE_DEFINITION
-from zcu_lab.v2.twotone.reset.dual_tone.freq.gui import (
-    DEFINITION as DUAL_TONE_FREQ_DEFINITION,
-)
-from zcu_lab.v2.twotone.reset.dual_tone.length.gui import (
-    DEFINITION as DUAL_TONE_LENGTH_DEFINITION,
-)
-from zcu_lab.v2.twotone.reset.dual_tone.power.gui import (
-    DEFINITION as DUAL_TONE_POWER_DEFINITION,
-)
-from zcu_lab.v2.twotone.reset.flux.gain.gui import (
-    DEFINITION as FLUX_RESET_GAIN_DEFINITION,
-)
-from zcu_lab.v2.twotone.reset.flux.length.gui import (
-    DEFINITION as FLUX_RESET_LENGTH_DEFINITION,
-)
-from zcu_lab.v2.twotone.reset.rabi_check.gui import DEFINITION as RABI_CHECK_DEFINITION
-from zcu_lab.v2.twotone.reset.single_tone.freq.gui import (
-    DEFINITION as SINGLE_TONE_FREQ_DEFINITION,
-)
-from zcu_lab.v2.twotone.reset.single_tone.length.gui import (
-    DEFINITION as SINGLE_TONE_LENGTH_DEFINITION,
-)
-from zcu_lab.v2.twotone.ro_optimize.auto_optimize.gui import (
-    DEFINITION as RO_OPT_AUTO_DEFINITION,
-)
-from zcu_lab.v2.twotone.ro_optimize.chain_freq.gui import (
-    DEFINITION as RO_OPT_CHAIN_FREQ_DEFINITION,
-)
-from zcu_lab.v2.twotone.ro_optimize.chain_length.gui import (
-    build_adapter as chain_length_adapter,
-)
-from zcu_lab.v2.twotone.ro_optimize.chain_power.gui import (
-    DEFINITION as RO_OPT_CHAIN_POWER_DEFINITION,
-)
-from zcu_lab.v2.twotone.ro_optimize.freq.gui import DEFINITION as RO_OPT_FREQ_DEFINITION
-from zcu_lab.v2.twotone.ro_optimize.freq_gain.gui import (
-    DEFINITION as RO_OPT_FREQ_GAIN_DEFINITION,
-)
-from zcu_lab.v2.twotone.ro_optimize.length.gui import (
-    DEFINITION as RO_OPT_LENGTH_DEFINITION,
-)
-from zcu_lab.v2.twotone.ro_optimize.power.gui import (
-    DEFINITION as RO_OPT_POWER_DEFINITION,
-)
-from zcu_lab.v2.twotone.ro_optimize.rpi_freq.gui import (
-    DEFINITION as RO_OPT_RPI_FREQ_DEFINITION,
-)
-from zcu_lab.v2.twotone.ro_optimize.rpi_length.gui import (
-    build_adapter as rpi_length_adapter,
-)
-from zcu_lab.v2.twotone.ro_optimize.rpi_power.gui import (
-    DEFINITION as RO_OPT_RPI_POWER_DEFINITION,
-)
-from zcu_lab.v2.twotone.stirap.amplitude.gui import (
-    DEFINITION as STIRAP_AMPLITUDE_DEFINITION,
-)
-from zcu_lab.v2.twotone.stirap.delay.gui import DEFINITION as STIRAP_DELAY_DEFINITION
-from zcu_lab.v2.twotone.stirap.detuning.gui import (
-    DEFINITION as STIRAP_DETUNING_DEFINITION,
-)
-from zcu_lab.v2.twotone.time_domain.cpmg.gui import DEFINITION as CPMG_DEFINITION
-from zcu_lab.v2.twotone.time_domain.t1.gui import DEFINITION as T1_DEFINITION
-from zcu_lab.v2.twotone.time_domain.t1_cov.gui import DEFINITION as T1_COV_DEFINITION
-from zcu_lab.v2.twotone.time_domain.t2echo.gui import DEFINITION as T2_ECHO_DEFINITION
-from zcu_lab.v2.twotone.time_domain.t2ramsey.gui import (
-    DEFINITION as T2_RAMSEY_DEFINITION,
-)
-from zcu_lab.v2.twotone.zigzag.gui import DEFINITION as ZIG_ZAG_DEFINITION
-from zcu_lab.v2.twotone.zigzag_sweep.gui import (
-    FREQ_DEFINITION as ZIG_ZAG_SCAN_FREQ_DEFINITION,
-)
-from zcu_lab.v2.twotone.zigzag_sweep.gui import (
-    GAIN_DEFINITION as ZIG_ZAG_SCAN_GAIN_DEFINITION,
-)
+from zcu_lab.v2.two_qubit.constructive_phase import gui as constructive_phase_gui
+from zcu_lab.v2.two_qubit.cz_amplitude import gui as two_qubit_cz_amplitude_gui
+from zcu_lab.v2.two_qubit.cz_optimize import gui as two_qubit_cz_optimize_gui
+from zcu_lab.v2.two_qubit.idle_zz import gui as two_qubit_idle_zz_gui
+from zcu_lab.v2.two_qubit.joint_readout import gui as joint_readout_gui
+from zcu_lab.v2.two_qubit.local_z import gui as two_qubit_local_z_gui
+from zcu_lab.v2.two_qubit.rb import gui as two_qubit_rb_gui
+from zcu_lab.v2.twotone.ac_stark import gui as twotone_ac_stark_gui
+from zcu_lab.v2.twotone.ac_stark_ramsey import gui as ac_stark_ramsey_gui
+from zcu_lab.v2.twotone.allxy import gui as allxy_gui
+from zcu_lab.v2.twotone.chain import gui as chain_gui
+from zcu_lab.v2.twotone.ckp import gui as ckp_gui
+from zcu_lab.v2.twotone.dispersive import gui as dispersive_gui
+from zcu_lab.v2.twotone.flux_dep import gui as twotone_flux_dep_gui
+from zcu_lab.v2.twotone.freq import gui as twotone_freq_gui
+from zcu_lab.v2.twotone.power_dep import gui as twotone_power_dep_gui
+from zcu_lab.v2.twotone.rabi.amp_rabi import gui as rabi_amp_rabi_gui
+from zcu_lab.v2.twotone.rabi.len_rabi import gui as rabi_len_rabi_gui
+from zcu_lab.v2.twotone.raman_gf import gui as raman_gf_gui
+from zcu_lab.v2.twotone.rb import gui as twotone_rb_gui
+from zcu_lab.v2.twotone.reset.bath.freq_gain import gui as bath_freq_gain_gui
+from zcu_lab.v2.twotone.reset.bath.length import gui as bath_length_gui
+from zcu_lab.v2.twotone.reset.bath.phase import gui as bath_phase_gui
+from zcu_lab.v2.twotone.reset.dual_tone.freq import gui as dual_tone_freq_gui
+from zcu_lab.v2.twotone.reset.dual_tone.length import gui as dual_tone_length_gui
+from zcu_lab.v2.twotone.reset.dual_tone.power import gui as dual_tone_power_gui
+from zcu_lab.v2.twotone.reset.flux.gain import gui as gain_gui
+from zcu_lab.v2.twotone.reset.flux.length import gui as flux_length_gui
+from zcu_lab.v2.twotone.reset.rabi_check import gui as rabi_check_gui
+from zcu_lab.v2.twotone.reset.single_tone.freq import gui as single_tone_freq_gui
+from zcu_lab.v2.twotone.reset.single_tone.length import gui as single_tone_length_gui
+from zcu_lab.v2.twotone.ro_optimize.auto import gui as auto_gui
+from zcu_lab.v2.twotone.ro_optimize.chain_freq import gui as chain_freq_gui
+from zcu_lab.v2.twotone.ro_optimize.chain_length import gui as chain_length_gui
+from zcu_lab.v2.twotone.ro_optimize.chain_power import gui as chain_power_gui
+from zcu_lab.v2.twotone.ro_optimize.freq import gui as ro_optimize_freq_gui
+from zcu_lab.v2.twotone.ro_optimize.freq_gain import gui as ro_optimize_freq_gain_gui
+from zcu_lab.v2.twotone.ro_optimize.length import gui as ro_optimize_length_gui
+from zcu_lab.v2.twotone.ro_optimize.power import gui as ro_optimize_power_gui
+from zcu_lab.v2.twotone.ro_optimize.rpi_freq import gui as rpi_freq_gui
+from zcu_lab.v2.twotone.ro_optimize.rpi_length import gui as rpi_length_gui
+from zcu_lab.v2.twotone.ro_optimize.rpi_power import gui as rpi_power_gui
+from zcu_lab.v2.twotone.stirap.amplitude import gui as amplitude_gui
+from zcu_lab.v2.twotone.stirap.delay import gui as delay_gui
+from zcu_lab.v2.twotone.stirap.detuning import gui as detuning_gui
+from zcu_lab.v2.twotone.time_domain.cpmg import gui as cpmg_gui
+from zcu_lab.v2.twotone.time_domain.t1 import gui as time_domain_t1_gui
+from zcu_lab.v2.twotone.time_domain.t1_cov import gui as t1_cov_gui
+from zcu_lab.v2.twotone.time_domain.t2echo import gui as time_domain_t2echo_gui
+from zcu_lab.v2.twotone.time_domain.t2ramsey import gui as time_domain_t2ramsey_gui
+from zcu_lab.v2.twotone.zigzag import gui as zigzag_gui
+from zcu_lab.v2.twotone.zigzag_scan import gui as zigzag_scan_gui
 
 
 def register_all(
     registry: Registry,
+    record_source: Callable[[str, ModuleType], None] | None = None,
     *,
     components: ComponentRegistry | None = None,
 ) -> None:
@@ -232,128 +144,244 @@ def register_all(
 
     Pass the shared ComponentRegistry as components at startup to register
     component models and roles. Omit it on reload to preserve that registry.
-    Duplicate adapters raise ValueError. Registration does not build forms or
-    validate templates; Open and Reset do.
+    If supplied, record_source receives each registered key and its direct
+    declaration module after Registry accepts the adapter. Duplicate adapters
+    raise ValueError. Registration does not build forms or validate templates;
+    Open and Reset do.
     """
     if components is not None:
         register_components(components)
-    adapters: dict[str, object] = {
-        "lookback": LOOKBACK_DEFINITION,
-        "onetone/freq": ONE_TONE_FREQ_DEFINITION,
-        "onetone/power_dep": ONE_TONE_POWER_DEP_DEFINITION,
-        "onetone/flux_dep": ONE_TONE_FLUX_DEP_DEFINITION,
-        "twotone/freq": FREQ_DEFINITION,
-        "twotone/chain": CHAIN_DEFINITION,
-        "twotone/stirap/delay": STIRAP_DELAY_DEFINITION,
-        "twotone/stirap/detuning": STIRAP_DETUNING_DEFINITION,
-        "twotone/stirap/amplitude": STIRAP_AMPLITUDE_DEFINITION,
-        "twotone/flux_dep": FLUX_DEP_DEFINITION,
-        "twotone/power_dep": POWER_DEP_DEFINITION,
-        "twotone/rabi/len_rabi": LEN_RABI_DEFINITION,
-        "twotone/rabi/amp_rabi": AMP_RABI_DEFINITION,
-        "twotone/raman_gf": RAMAN_GF_DEFINITION,
-        "twotone/t1": T1_DEFINITION,
-        "twotone/t1_cov": T1_COV_DEFINITION,
-        "twotone/t2ramsey": T2_RAMSEY_DEFINITION,
-        "twotone/t2echo": T2_ECHO_DEFINITION,
-        "chain/amp_rabi": CHAIN_AMP_RABI_DEFINITION,
-        "chain/len_rabi": CHAIN_LEN_RABI_DEFINITION,
-        "chain/t1": CHAIN_T1_DEFINITION,
-        "chain/t2ramsey": CHAIN_T2RAMSEY_DEFINITION,
-        "chain/t2echo": CHAIN_T2ECHO_DEFINITION,
-        "singleshot/ge": GE_DEFINITION,
-        "singleshot/qutrit_population": QUTRIT_POPULATION_DEFINITION,
-        "singleshot/check": CHECK_DEFINITION,
-        "singleshot/len_rabi": SS_LEN_RABI_DEFINITION,
-        "singleshot/amp_rabi": SS_AMP_RABI_DEFINITION,
-        "singleshot/t1": SS_T1_DEFINITION,
-        "singleshot/ac_stark": SS_AC_STARK_DEFINITION,
-        "singleshot/reset_check": SS_RESET_CHECK_DEFINITION,
-        "singleshot/t1_tone": SS_T1_TONE_DEFINITION,
-        "singleshot/t1_tone_sweep_gain": SS_T1_TONE_SWEEP_GAIN_DEFINITION,
-        "singleshot/t1_tone_sweep_freq": SS_T1_TONE_SWEEP_FREQ_DEFINITION,
-        "twotone/dispersive": DISPERSIVE_DEFINITION,
-        "twotone/ac_stark": AC_STARK_DEFINITION,
-        "twotone/ac_stark_ramsey": AC_STARK_RAMSEY_DEFINITION,
-        "twotone/ckp": CKP_DEFINITION,
-        "twotone/cpmg": CPMG_DEFINITION,
-        "twotone/allxy": ALL_XY_DEFINITION,
-        "twotone/zigzag": ZIG_ZAG_DEFINITION,
-        "twotone/zigzag_scan/gain": ZIG_ZAG_SCAN_GAIN_DEFINITION,
-        "twotone/zigzag_scan/freq": ZIG_ZAG_SCAN_FREQ_DEFINITION,
-        "twotone/rb": RB_DEFINITION,
-        "twotone/ro_optimize/freq": RO_OPT_FREQ_DEFINITION,
-        "twotone/ro_optimize/power": RO_OPT_POWER_DEFINITION,
-        "twotone/ro_optimize/length": RO_OPT_LENGTH_DEFINITION,
-        "twotone/ro_optimize/freq_gain": RO_OPT_FREQ_GAIN_DEFINITION,
-        "twotone/ro_optimize/auto": RO_OPT_AUTO_DEFINITION,
-        "twotone/ro_optimize/chain_power": RO_OPT_CHAIN_POWER_DEFINITION,
-        "twotone/ro_optimize/chain_freq": RO_OPT_CHAIN_FREQ_DEFINITION,
-        "twotone/ro_optimize/chain_length": chain_length_adapter(registry.templates),
-        "twotone/ro_optimize/rpi_power": RO_OPT_RPI_POWER_DEFINITION,
-        "twotone/ro_optimize/rpi_freq": RO_OPT_RPI_FREQ_DEFINITION,
-        "twotone/ro_optimize/rpi_length": rpi_length_adapter(registry.templates),
-        "twotone/reset/single_tone/freq": SINGLE_TONE_FREQ_DEFINITION,
-        "twotone/reset/single_tone/length": SINGLE_TONE_LENGTH_DEFINITION,
-        "twotone/reset/dual_tone/freq": DUAL_TONE_FREQ_DEFINITION,
-        "twotone/reset/dual_tone/length": DUAL_TONE_LENGTH_DEFINITION,
-        "twotone/reset/dual_tone/power": DUAL_TONE_POWER_DEFINITION,
-        "twotone/reset/bath/freq_gain": BATH_FREQ_GAIN_DEFINITION,
-        "twotone/reset/bath/length": BATH_LENGTH_DEFINITION,
-        "twotone/reset/bath/phase": BATH_PHASE_DEFINITION,
-        "twotone/reset/check": RABI_CHECK_DEFINITION,
-        "twotone/reset/flux/gain": FLUX_RESET_GAIN_DEFINITION,
-        "twotone/reset/flux/length": FLUX_RESET_LENGTH_DEFINITION,
-        "mux/onetone": MUX_ONETONE_DEFINITION,
-        "mux/onetone_flux_global": ONETONE_FLUX_GLOBAL_DEFINITION,
-        "mux/onetone_flux_local": ONETONE_FLUX_LOCAL_DEFINITION,
-        "mux/twotone_flux_global": TWOTONE_FLUX_GLOBAL_DEFINITION,
-        "mux/twotone_flux_local": TWOTONE_FLUX_LOCAL_DEFINITION,
-        "onetone/range_find": RANGE_FIND_DEFINITION,
-        "mux/twotone_spectrum": MUX_FREQ_DEFINITION,
-        "mux/len_rabi": MUX_LEN_RABI_DEFINITION,
-        "mux/amp_rabi": MUX_AMP_RABI_DEFINITION,
-        "mux/t1": MUX_T1_DEFINITION,
-        "mux/t2ramsey": MUX_T2_RAMSEY_DEFINITION,
-        "mux/t2echo": MUX_T2_ECHO_DEFINITION,
-        "mux/singleshot_ge": MUX_GE_DEFINITION,
-        "jpa/flux_onetone": JPA_FLUX_ONE_TONE_DEFINITION,
-        "jpa/freq": JPA_FREQ_DEFINITION,
-        "jpa/flux": JPA_FLUX_DEFINITION,
-        "jpa/power": JPA_POWER_DEFINITION,
-        "jpa/auto_optimize": JPA_AUTO_OPTIMIZE_DEFINITION,
-        "jpa/check": JPA_CHECK_DEFINITION,
-        "two_qubit/joint_readout": JOINT_READOUT_DEFINITION,
-        "two_qubit/conditional_spectroscopy": SPECTROSCOPY_DEFINITION,
-        "two_qubit/chevron": CHEVRON_DEFINITION,
-        "two_qubit/cz_amplitude": CZAMPLITUDE_DEFINITION,
-        "two_qubit/cz_optimize": CZOPTIMIZE_DEFINITION,
-        "two_qubit/conditional_phase": CONDITIONAL_PHASE_DEFINITION,
-        "two_qubit/local_z": LOCAL_Z_DEFINITION,
-        "two_qubit/idle_zz": IDLE_ZZ_DEFINITION,
-        "heralded/idle_zz": IDLE_ZZ_HERALDED_DEFINITION,
-        "two_qubit/constructive_phase": CONSTRUCTIVE_PHASE_DEFINITION,
-        "two_qubit/rb": TWO_QUBIT_RB_DEFINITION,
-        "heralded/conditional_spectroscopy": SPECTROSCOPY_HERALDED_DEFINITION,
-        "heralded/conditional_phase": CONDITIONAL_PHASE_HERALDED_DEFINITION,
-        "heralded/cz_amplitude": HERALDED_CZAMPLITUDE_DEFINITION,
-        "heralded/cz_optimize": HERALDED_CZOPTIMIZE_DEFINITION,
-        "heralded/local_z": LOCAL_Z_HERALDED_DEFINITION,
-        "heralded/rb": TWO_QUBIT_RB_HERALDED_DEFINITION,
-        "heralded/chevron": HERALDED_CHEVRON_DEFINITION,
-        "fastflux/twotone": TWO_TONE_DEFINITION,
-        "fastflux/t1": FAST_FLUX_T1_DEFINITION,
-        "fastflux/distortion/freq": FAST_FLUX_FREQ_DEFINITION,
-        "fastflux/distortion/phase": PHASE_DEFINITION,
-        "fastflux/distortion/acc_phase": ACC_PHASE_DEFINITION,
-        "fastflux/mist": MIST_DEFINITION,
-        "mist/flux_dep": MIST_FLUX_DEP_DEFINITION,
-        "mist/power_dep/drive_freq": DRIVE_FREQ_DEFINITION,
-        "mist/power_dep/single_trace": MIST_TRACE_DEFINITION,
-        "singleshot/mist/freq": MIST_FREQ_DEFINITION,
-        "singleshot/mist/power": MIST_POWER_DEFINITION,
-        "singleshot/mist/power_freq": MIST_POWER_FREQ_DEFINITION,
-        "singleshot/mist/pre_freq": MIST_PRE_FREQ_DEFINITION,
+    # Keep the definition (or factory result) and its declaring module together.
+    adapters: dict[str, tuple[object, ModuleType]] = {
+        "lookback": (lookback_gui.DEFINITION, lookback_gui),
+        "onetone/freq": (onetone_freq_gui.DEFINITION, onetone_freq_gui),
+        "onetone/power_dep": (onetone_power_dep_gui.DEFINITION, onetone_power_dep_gui),
+        "onetone/flux_dep": (onetone_flux_dep_gui.DEFINITION, onetone_flux_dep_gui),
+        "twotone/freq": (twotone_freq_gui.DEFINITION, twotone_freq_gui),
+        "twotone/chain": (chain_gui.DEFINITION, chain_gui),
+        "twotone/stirap/delay": (delay_gui.DEFINITION, delay_gui),
+        "twotone/stirap/detuning": (detuning_gui.DEFINITION, detuning_gui),
+        "twotone/stirap/amplitude": (amplitude_gui.DEFINITION, amplitude_gui),
+        "twotone/flux_dep": (twotone_flux_dep_gui.DEFINITION, twotone_flux_dep_gui),
+        "twotone/power_dep": (twotone_power_dep_gui.DEFINITION, twotone_power_dep_gui),
+        "twotone/rabi/len_rabi": (rabi_len_rabi_gui.DEFINITION, rabi_len_rabi_gui),
+        "twotone/rabi/amp_rabi": (rabi_amp_rabi_gui.DEFINITION, rabi_amp_rabi_gui),
+        "twotone/raman_gf": (raman_gf_gui.DEFINITION, raman_gf_gui),
+        "twotone/time_domain/t1": (time_domain_t1_gui.DEFINITION, time_domain_t1_gui),
+        "twotone/time_domain/t1_cov": (t1_cov_gui.DEFINITION, t1_cov_gui),
+        "twotone/time_domain/t2ramsey": (
+            time_domain_t2ramsey_gui.DEFINITION,
+            time_domain_t2ramsey_gui,
+        ),
+        "twotone/time_domain/t2echo": (
+            time_domain_t2echo_gui.DEFINITION,
+            time_domain_t2echo_gui,
+        ),
+        "chain/amp_rabi": (chain_amp_rabi_gui.DEFINITION, chain_amp_rabi_gui),
+        "chain/len_rabi": (chain_len_rabi_gui.DEFINITION, chain_len_rabi_gui),
+        "chain/t1": (chain_t1_gui.DEFINITION, chain_t1_gui),
+        "chain/t2ramsey": (chain_t2ramsey_gui.DEFINITION, chain_t2ramsey_gui),
+        "chain/t2echo": (chain_t2echo_gui.DEFINITION, chain_t2echo_gui),
+        "singleshot/ge": (ge_gui.DEFINITION, ge_gui),
+        "singleshot/qutrit_population": (
+            qutrit_population_gui.DEFINITION,
+            qutrit_population_gui,
+        ),
+        "singleshot/check": (singleshot_check_gui.DEFINITION, singleshot_check_gui),
+        "singleshot/len_rabi": (
+            singleshot_len_rabi_gui.DEFINITION,
+            singleshot_len_rabi_gui,
+        ),
+        "singleshot/amp_rabi": (
+            singleshot_amp_rabi_gui.DEFINITION,
+            singleshot_amp_rabi_gui,
+        ),
+        "singleshot/t1": (singleshot_t1_gui.DEFINITION, singleshot_t1_gui),
+        "singleshot/ac_stark": (
+            singleshot_ac_stark_gui.DEFINITION,
+            singleshot_ac_stark_gui,
+        ),
+        "singleshot/reset_check": (reset_check_gui.DEFINITION, reset_check_gui),
+        "singleshot/t1_tone": (t1_tone_gui.DEFINITION, t1_tone_gui),
+        "singleshot/t1_tone_sweep/gain": (
+            t1_tone_sweep_gui.GAIN_DEFINITION,
+            t1_tone_sweep_gui,
+        ),
+        "singleshot/t1_tone_sweep/freq": (
+            t1_tone_sweep_gui.FREQ_DEFINITION,
+            t1_tone_sweep_gui,
+        ),
+        "twotone/dispersive": (dispersive_gui.DEFINITION, dispersive_gui),
+        "twotone/ac_stark": (twotone_ac_stark_gui.DEFINITION, twotone_ac_stark_gui),
+        "twotone/ac_stark_ramsey": (
+            ac_stark_ramsey_gui.DEFINITION,
+            ac_stark_ramsey_gui,
+        ),
+        "twotone/ckp": (ckp_gui.DEFINITION, ckp_gui),
+        "twotone/time_domain/cpmg": (cpmg_gui.DEFINITION, cpmg_gui),
+        "twotone/allxy": (allxy_gui.DEFINITION, allxy_gui),
+        "twotone/zigzag": (zigzag_gui.DEFINITION, zigzag_gui),
+        "twotone/zigzag_scan/gain": (zigzag_scan_gui.GAIN_DEFINITION, zigzag_scan_gui),
+        "twotone/zigzag_scan/freq": (zigzag_scan_gui.FREQ_DEFINITION, zigzag_scan_gui),
+        "twotone/rb": (twotone_rb_gui.DEFINITION, twotone_rb_gui),
+        "twotone/ro_optimize/freq": (
+            ro_optimize_freq_gui.DEFINITION,
+            ro_optimize_freq_gui,
+        ),
+        "twotone/ro_optimize/power": (
+            ro_optimize_power_gui.DEFINITION,
+            ro_optimize_power_gui,
+        ),
+        "twotone/ro_optimize/length": (
+            ro_optimize_length_gui.DEFINITION,
+            ro_optimize_length_gui,
+        ),
+        "twotone/ro_optimize/freq_gain": (
+            ro_optimize_freq_gain_gui.DEFINITION,
+            ro_optimize_freq_gain_gui,
+        ),
+        "twotone/ro_optimize/auto": (auto_gui.DEFINITION, auto_gui),
+        "twotone/ro_optimize/chain_power": (
+            chain_power_gui.DEFINITION,
+            chain_power_gui,
+        ),
+        "twotone/ro_optimize/chain_freq": (chain_freq_gui.DEFINITION, chain_freq_gui),
+        "twotone/ro_optimize/chain_length": (
+            chain_length_gui.build_adapter(registry.templates),
+            chain_length_gui,
+        ),
+        "twotone/ro_optimize/rpi_power": (rpi_power_gui.DEFINITION, rpi_power_gui),
+        "twotone/ro_optimize/rpi_freq": (rpi_freq_gui.DEFINITION, rpi_freq_gui),
+        "twotone/ro_optimize/rpi_length": (
+            rpi_length_gui.build_adapter(registry.templates),
+            rpi_length_gui,
+        ),
+        "twotone/reset/single_tone/freq": (
+            single_tone_freq_gui.DEFINITION,
+            single_tone_freq_gui,
+        ),
+        "twotone/reset/single_tone/length": (
+            single_tone_length_gui.DEFINITION,
+            single_tone_length_gui,
+        ),
+        "twotone/reset/dual_tone/freq": (
+            dual_tone_freq_gui.DEFINITION,
+            dual_tone_freq_gui,
+        ),
+        "twotone/reset/dual_tone/length": (
+            dual_tone_length_gui.DEFINITION,
+            dual_tone_length_gui,
+        ),
+        "twotone/reset/dual_tone/power": (
+            dual_tone_power_gui.DEFINITION,
+            dual_tone_power_gui,
+        ),
+        "twotone/reset/bath/freq_gain": (
+            bath_freq_gain_gui.DEFINITION,
+            bath_freq_gain_gui,
+        ),
+        "twotone/reset/bath/length": (bath_length_gui.DEFINITION, bath_length_gui),
+        "twotone/reset/bath/phase": (bath_phase_gui.DEFINITION, bath_phase_gui),
+        "twotone/reset/rabi_check": (rabi_check_gui.DEFINITION, rabi_check_gui),
+        "twotone/reset/flux/gain": (gain_gui.DEFINITION, gain_gui),
+        "twotone/reset/flux/length": (flux_length_gui.DEFINITION, flux_length_gui),
+        "mux/onetone": (onetone_gui.DEFINITION, onetone_gui),
+        "mux/onetone_flux_global": (
+            onetone_flux_global_gui.DEFINITION,
+            onetone_flux_global_gui,
+        ),
+        "mux/onetone_flux_local": (
+            onetone_flux_local_gui.DEFINITION,
+            onetone_flux_local_gui,
+        ),
+        "mux/twotone_flux_global": (
+            twotone_flux_global_gui.DEFINITION,
+            twotone_flux_global_gui,
+        ),
+        "mux/twotone_flux_local": (
+            twotone_flux_local_gui.DEFINITION,
+            twotone_flux_local_gui,
+        ),
+        "onetone/range_find": (range_find_gui.DEFINITION, range_find_gui),
+        "mux/twotone_spectrum": (twotone_spectrum_gui.DEFINITION, twotone_spectrum_gui),
+        "mux/len_rabi": (mux_len_rabi_gui.DEFINITION, mux_len_rabi_gui),
+        "mux/amp_rabi": (mux_amp_rabi_gui.DEFINITION, mux_amp_rabi_gui),
+        "mux/t1": (mux_t1_gui.DEFINITION, mux_t1_gui),
+        "mux/t2ramsey": (mux_t2ramsey_gui.DEFINITION, mux_t2ramsey_gui),
+        "mux/t2echo": (mux_t2echo_gui.DEFINITION, mux_t2echo_gui),
+        "mux/singleshot_ge": (singleshot_ge_gui.DEFINITION, singleshot_ge_gui),
+        "jpa/flux_onetone": (flux_onetone_gui.DEFINITION, flux_onetone_gui),
+        "jpa/freq": (jpa_freq_gui.DEFINITION, jpa_freq_gui),
+        "jpa/flux": (flux_gui.DEFINITION, flux_gui),
+        "jpa/power": (jpa_power_gui.DEFINITION, jpa_power_gui),
+        "jpa/auto_optimize": (auto_optimize_gui.DEFINITION, auto_optimize_gui),
+        "jpa/check": (jpa_check_gui.DEFINITION, jpa_check_gui),
+        "two_qubit/joint_readout": (joint_readout_gui.DEFINITION, joint_readout_gui),
+        "two_qubit/conditional_spectroscopy": (
+            two_qubit_conditional_spectroscopy_gui.DEFINITION,
+            two_qubit_conditional_spectroscopy_gui,
+        ),
+        "two_qubit/chevron": (two_qubit_chevron_gui.DEFINITION, two_qubit_chevron_gui),
+        "two_qubit/cz_amplitude": (
+            two_qubit_cz_amplitude_gui.DEFINITION,
+            two_qubit_cz_amplitude_gui,
+        ),
+        "two_qubit/cz_optimize": (
+            two_qubit_cz_optimize_gui.DEFINITION,
+            two_qubit_cz_optimize_gui,
+        ),
+        "two_qubit/conditional_phase": (
+            two_qubit_conditional_phase_gui.DEFINITION,
+            two_qubit_conditional_phase_gui,
+        ),
+        "two_qubit/local_z": (two_qubit_local_z_gui.DEFINITION, two_qubit_local_z_gui),
+        "two_qubit/idle_zz": (two_qubit_idle_zz_gui.DEFINITION, two_qubit_idle_zz_gui),
+        "heralded/idle_zz": (heralded_idle_zz_gui.DEFINITION, heralded_idle_zz_gui),
+        "two_qubit/constructive_phase": (
+            constructive_phase_gui.DEFINITION,
+            constructive_phase_gui,
+        ),
+        "two_qubit/rb": (two_qubit_rb_gui.DEFINITION, two_qubit_rb_gui),
+        "heralded/conditional_spectroscopy": (
+            heralded_conditional_spectroscopy_gui.DEFINITION,
+            heralded_conditional_spectroscopy_gui,
+        ),
+        "heralded/conditional_phase": (
+            heralded_conditional_phase_gui.DEFINITION,
+            heralded_conditional_phase_gui,
+        ),
+        "heralded/cz_amplitude": (
+            heralded_cz_amplitude_gui.DEFINITION,
+            heralded_cz_amplitude_gui,
+        ),
+        "heralded/cz_optimize": (
+            heralded_cz_optimize_gui.DEFINITION,
+            heralded_cz_optimize_gui,
+        ),
+        "heralded/local_z": (heralded_local_z_gui.DEFINITION, heralded_local_z_gui),
+        "heralded/rb": (heralded_rb_gui.DEFINITION, heralded_rb_gui),
+        "heralded/chevron": (heralded_chevron_gui.DEFINITION, heralded_chevron_gui),
+        "fastflux/twotone": (twotone_gui.DEFINITION, twotone_gui),
+        "fastflux/t1": (fastflux_t1_gui.DEFINITION, fastflux_t1_gui),
+        "fastflux/distortion/freq": (
+            distortion_freq_gui.DEFINITION,
+            distortion_freq_gui,
+        ),
+        "fastflux/distortion/phase": (
+            distortion_phase_gui.DEFINITION,
+            distortion_phase_gui,
+        ),
+        "fastflux/distortion/acc_phase": (acc_phase_gui.DEFINITION, acc_phase_gui),
+        "fastflux/mist": (mist_gui.DEFINITION, mist_gui),
+        "mist/flux_dep": (mist_flux_dep_gui.DEFINITION, mist_flux_dep_gui),
+        "mist/power_dep/drive_freq": (drive_freq_gui.DEFINITION, drive_freq_gui),
+        "mist/power_dep/single_trace": (single_trace_gui.DEFINITION, single_trace_gui),
+        "singleshot/mist/freq": (mist_freq_gui.DEFINITION, mist_freq_gui),
+        "singleshot/mist/power": (mist_power_gui.DEFINITION, mist_power_gui),
+        "singleshot/mist/power_freq": (power_freq_gui.DEFINITION, power_freq_gui),
+        "singleshot/mist/pre_freq": (pre_freq_gui.DEFINITION, pre_freq_gui),
     }
-    for name, definition in adapters.items():
+    for name, (definition, source) in adapters.items():
         registry.register(name, definition)
+        if record_source is not None:
+            record_source(name, source)

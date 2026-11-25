@@ -31,7 +31,7 @@ from zcu_tools.gui.app.measure.interactive_flux_pick import (
 
 from zcu_lab.v2.support.measure.ctx_helpers import flux_pick_initial_points
 from zcu_lab.v2.support.measure.writeback_helpers import fluxdep_writeback_items
-from zcu_lab.v2.twotone.fluxdep.core import FreqFluxCfg, FreqFluxExp, FreqFluxResult
+from zcu_lab.v2.twotone.flux_dep.core import FreqFluxCfg, FreqFluxExp, FreqFluxResult
 
 from .form import make_form
 

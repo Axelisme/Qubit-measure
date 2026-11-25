@@ -66,7 +66,7 @@ status: accepted
 
 **規則。** `acquire_summed` 與 Schedule 的 `run_acquire_summed` 接收單一 `reducer=`。框架持有 state，reducer 定義如何累加。硬體與模擬共用處理路徑；取消時只保留已完成 rounds 的 state。Round hook 與最終結果都取 reducer 輸出，框架只還原點的維度，不另加總或平均。Result 原樣保存 float64 總和，分析與繪圖才從總和與計數算比例、平均 IQ 或條件平均。需要分類時在取數時完成，不在 Analyze 分類。
 
-**例子。** `twotone/t1_cov` 不需要 classifier。它在同一 shot 用相同的 Pulse readout cfg 發射 `pre_readout` 和 `post_readout`，`shot_sums` 保存兩個二階 `IQ` 軸的 float64 `(N, 6, 6)` 外積總和。兩側共用的中心與 Gaussian width 由二階矩自校準。J 是兩次讀出的聯合機率，K 的每列是條件轉移機率；用 `C = 1 − tr J` 擬合與更新即時圖，K 只供診斷。播放、Analyze、Summary、live 與存檔契約由 [T1 cov guide](../../zcu_lab/v2/twotone/time_domain/t1_cov/guide.md) 擁有，自校準由 [analysis](../../lib/zcu_tools/analysis/README.md#雙讀出矩的自校準) 擁有。Cov 比較掃描點的變化，接受讀出期間衰減與拖尾帶來的偏差，不宣稱無偏的 gate fidelity。
+**例子。** `twotone/time_domain/t1_cov` 不需要 classifier。它在同一 shot 用相同的 Pulse readout cfg 發射 `pre_readout` 和 `post_readout`，`shot_sums` 保存兩個二階 `IQ` 軸的 float64 `(N, 6, 6)` 外積總和。兩側共用的中心與 Gaussian width 由二階矩自校準。J 是兩次讀出的聯合機率，K 的每列是條件轉移機率；用 `C = 1 − tr J` 擬合與更新即時圖，K 只供診斷。播放、Analyze、Summary、live 與存檔契約由 [T1 cov guide](../../zcu_lab/v2/twotone/time_domain/t1_cov/guide.md) 擁有，自校準由 [analysis](../../lib/zcu_tools/analysis/README.md#雙讀出矩的自校準) 擁有。Cov 比較掃描點的變化，接受讀出期間衰減與拖尾帶來的偏差，不宣稱無偏的 gate fidelity。
 
 **邊界。** Reducer 可用自己的 state 做不可相加的統計，例如 KMeans；取數層不另留 tracker。Reducer 的 `start`／`add`／`output`、輸入形狀、遮罩及加總型 reducer 見 [Summed acquisition](../../lib/zcu_tools/program/README.md#summed-acquisition)。來源消耗的讀取不交給 reducer。Schedule 沒有 `RunOptions(converter=...)` 時原樣交付總和，不把類別計數當作 IQ。
 

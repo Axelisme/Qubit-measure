@@ -469,7 +469,7 @@ and the [Markov representation](../../../../docs/adr/0078-evolution-module-bound
 On the simulated ADC path, these callers use raw rather than compact counts:
 
 - Shot reducers use `acquire_summed`, including through `run_acquire_summed`.
-  In `twotone/ro_optimize`, this includes Auto (`auto_optimize`) and the
+  In `twotone/ro_optimize`, this includes `auto` and the
   `freq`, `freq_gain`, and `length` scans. In `jpa`, `auto_optimize`, `flux`,
   `freq`, and `power` use raw for SNR. `Classify` axes passed to `shot_sums`, as
   in `two_qubit/joint_readout` and heralded `conditional_phase`, classify the

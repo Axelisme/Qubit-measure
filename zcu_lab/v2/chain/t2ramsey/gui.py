@@ -57,7 +57,7 @@ def _run(
     return RunRecord(cfg=cfg, result=ChainT2RamseyExp().run(cfg, context=context))
 
 
-# No writeback: the chain T2 is reported beside the first-read value; twotone/t2ramsey calibrates.
+# No writeback: the chain T2 is reported beside the first-read value; twotone/time_domain/t2ramsey calibrates.
 DEFINITION = Adapter(
     spec=ChainT2RamseyExp.AXES_SPEC,
     make_form=make_form,

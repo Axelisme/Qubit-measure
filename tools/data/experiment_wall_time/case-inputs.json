@@ -36,7 +36,7 @@
         {
           "path": ["delay", "stop"],
           "value": 465,
-          "basis": "Keep the same bounded delay stop as twotone/t2echo so both echo workloads cover the same waiting window. This is a timing input, not a Q1 T2e calibration."
+          "basis": "Keep the same bounded delay stop as twotone/time_domain/t2echo so both echo workloads cover the same waiting window. This is a timing input, not a Q1 T2e calibration."
         }
       ]
     },
@@ -49,7 +49,7 @@
         {
           "path": ["delay", "stop"],
           "value": 180,
-          "basis": "Keep the same bounded delay stop as twotone/t2ramsey so both Ramsey workloads cover the same waiting window. This is a timing input, not a Q1 T2r calibration."
+          "basis": "Keep the same bounded delay stop as twotone/time_domain/t2ramsey so both Ramsey workloads cover the same waiting window. This is a timing input, not a Q1 T2r calibration."
         },
         {
           "path": ["detune"],
@@ -504,7 +504,7 @@
     },
     {
       "scene_id": "singleshot/t1_tone_sweep_freq",
-      "adapter": "singleshot/t1_tone_sweep_freq",
+      "adapter": "singleshot/t1_tone_sweep/freq",
       "metric": {"kind": "scan", "axes": [{"field": "xs"}, {"field": "lengths"}]},
       "basis": "The earlier workload selection retained this adapter to exercise its bounded setup or a named prerequisite.",
       "overrides": [
@@ -522,7 +522,7 @@
     },
     {
       "scene_id": "singleshot/t1_tone_sweep_gain",
-      "adapter": "singleshot/t1_tone_sweep_gain",
+      "adapter": "singleshot/t1_tone_sweep/gain",
       "metric": {"kind": "scan", "axes": [{"field": "xs"}, {"field": "lengths"}]},
       "basis": "The earlier workload selection retained this adapter to exercise its bounded setup or a named prerequisite.",
       "overrides": [
@@ -968,7 +968,7 @@
     },
     {
       "scene_id": "twotone/cpmg",
-      "adapter": "twotone/cpmg",
+      "adapter": "twotone/time_domain/cpmg",
       "metric": {"kind": "scan", "axes": [{"field": "ns"}, {"field": "delays", "dimension": 1}]},
       "basis": "Simulator speed survey scene; scan axes shortened to about 11 points per field; path timing only.",
       "overrides": [
@@ -1109,7 +1109,7 @@
     },
     {
       "scene_id": "twotone/reset/check",
-      "adapter": "twotone/reset/check",
+      "adapter": "twotone/reset/rabi_check",
       "metric": {"kind": "scan", "axes": [{"field": "gains"}]},
       "basis": "Simulator speed survey scene; scan axes shortened to about 11 points per field; path timing only.",
       "overrides": [
@@ -1337,21 +1337,21 @@
     },
     {
       "scene_id": "twotone/t1",
-      "adapter": "twotone/t1",
+      "adapter": "twotone/time_domain/t1",
       "metric": {"kind": "scan", "axes": [{"field": "times"}]},
       "basis": "The earlier workload selection named this previously unmeasured twotone workload.",
       "overrides": []
     },
     {
       "scene_id": "twotone/t1_cov",
-      "adapter": "twotone/t1_cov",
+      "adapter": "twotone/time_domain/t1_cov",
       "metric": {"kind": "scan", "axes": [{"field": "times"}]},
       "basis": "The earlier workload selection named this previously unmeasured twotone workload.",
       "overrides": []
     },
     {
       "scene_id": "twotone/t2echo",
-      "adapter": "twotone/t2echo",
+      "adapter": "twotone/time_domain/t2echo",
       "metric": {"kind": "scan", "axes": [{"field": "times"}]},
       "basis": "The earlier workload selection named this previously unmeasured twotone workload.",
       "overrides": [
@@ -1369,7 +1369,7 @@
     },
     {
       "scene_id": "twotone/t2ramsey",
-      "adapter": "twotone/t2ramsey",
+      "adapter": "twotone/time_domain/t2ramsey",
       "metric": {"kind": "scan", "axes": [{"field": "times"}]},
       "basis": "The earlier workload selection named this previously unmeasured twotone workload.",
       "overrides": [

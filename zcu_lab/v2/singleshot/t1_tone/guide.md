@@ -8,7 +8,7 @@ Optional **Reset** → optional **Initial preparation pulse** → no π pulse fo
 
 ## Key settings
 
-- Before Run, use Pulse **Readout** (not Mux) with a circle classifier and positive radius under **Advanced**. Obtain a missing radius from [GE Post-Analysis](../../ge/guide.md); linear cannot report Other. Calibrate the π pulse before comparing preparations.
+- Before Run, use Pulse **Readout** (not Mux) with a circle classifier and positive radius under **Advanced**. Obtain a missing radius from [GE Post-Analysis](../ge/guide.md); linear cannot report Other. Calibrate the π pulse before comparing preparations.
 - Check **Probe tone** frequency and gain. **Probe exposure time** is the tone length, not an idle delay. Stop starts at 5 × the stored tone T1, falling back to ordinary T1 and then 30 µs as the time scale. An invalid stored value leaves the required Stop blank. **Relax delay** is separate: it starts at 5 × ordinary T1 (150 µs if absent; blank if invalid) and is not shortened automatically by reset.
 - **Sampling** `decay` (default) concentrates points early; `linear` spaces them evenly without changing the window or point count. Enter a sweep, not a list of durations.
 
@@ -22,8 +22,8 @@ If the saved matrix is singular or solving it gives a nonfinite value at a valid
 
 ## Next step
 
-Writeback proposes T1 under the probe tone in µs at `$qubit.ext.t1_with_tone`. After Apply, the fixed-tone, tone gain, and tone frequency forms use five times the saved value as their [initial exposure Stop](../../../measure-authoring.md#t1-與等待). This starting window may miss the tail. Check the last points of both preparations and extend Stop if either trace is still changing. Ordinary `$qubit.t1` is not updated.
+Writeback proposes T1 under the probe tone in µs at `$qubit.ext.t1_with_tone`. After Apply, the fixed-tone, tone gain, and tone frequency forms use five times the saved value as their [initial exposure Stop](../../measure-authoring.md#t1-與等待). This starting window may miss the tail. Check the last points of both preparations and extend Stop if either trace is still changing. Ordinary `$qubit.t1` is not updated.
 
 Older files without class counts cannot be converted on Load; acquire again.
 
-For general operations, see [`zcu_lab/v2/operator-workflow.md`](../../../operator-workflow.md).
+For general operations, see [`zcu_lab/v2/operator-workflow.md`](../../operator-workflow.md).

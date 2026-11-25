@@ -10,7 +10,7 @@ from .core import ChainT2EchoCfg
 
 
 def make_form(ctx: FormContext) -> Form[ChainT2EchoCfg]:
-    """Use the twotone/t2echo pulses, readout and delay range; K is 5 T1.
+    """Use the twotone/time_domain/t2echo pulses, readout and delay range; K is 5 T1.
 
     Reps and rounds start at 100.
     """

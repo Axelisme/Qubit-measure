@@ -110,7 +110,7 @@ type = "OneTone"  # or "TwoTone"
 if type == "OneTone":
     spectrum_run = ze.onetone.flux_dep.core.FluxDepExp().load(Path(spect_path))
 else:
-    spectrum_run = ze.twotone.fluxdep.core.FreqFluxExp().load(Path(spect_path))
+    spectrum_run = ze.twotone.flux_dep.core.FreqFluxExp().load(Path(spect_path))
 spectrum = spectrum_run.result
 dev_values, freqs, signals = spectrum.values, spectrum.freqs, spectrum.signals
 freqs = freqs * 1e-3  # MHz -> GHz; leave the loaded spectrum unchanged.

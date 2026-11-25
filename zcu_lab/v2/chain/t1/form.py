@@ -10,7 +10,7 @@ from .core import ChainT1Cfg
 
 
 def make_form(ctx: FormContext) -> Form[ChainT1Cfg]:
-    """Use the twotone/t1 π pulse, readout and delay range; K is 5 T1.
+    """Use the twotone/time_domain/t1 π pulse, readout and delay range; K is 5 T1.
 
     Reps and rounds start at 100.
     """

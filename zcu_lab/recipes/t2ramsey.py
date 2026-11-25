@@ -102,7 +102,7 @@ async def t2ramsey(session: RecipeSession, inputs: T2RamseyInputs) -> T2RamseyRe
     Missing Form values stop before acquisition; completed Run data is saved even if analysis fails.
     """
     tab = session.open_tab(
-        "twotone/t2ramsey",
+        "twotone/time_domain/t2ramsey",
         target={"qubit": inputs.target},
         reuse=inputs.reuse_tab_id,
     )

@@ -98,7 +98,7 @@ async def t1(session: RecipeSession, inputs: T1Inputs) -> T1Report:
     Missing Form values stop before acquisition; completed Run data is saved even if analysis fails.
     """
     tab = session.open_tab(
-        "twotone/t1",
+        "twotone/time_domain/t1",
         target={"qubit": inputs.target},
         reuse=inputs.reuse_tab_id,
     )

@@ -37,6 +37,11 @@
 實驗的 leaf layout 見[套件 README](README.md)。`../definitions.py` 明列 adapter catalog，
 `../templates.py` 提供注入 Registry 的持久範本目錄。公開支援套件 `support/measure/` 提供跨 adapter
 共用的 analysis、writeback 與 context mechanics，也可集中已定案且供多個 Form 共用的具名初值政策。
+在 [`definitions.py`](../definitions.py) 直接匯入宣告 Adapter 常量或 factory 的模組，不透過家族的 re-export。
+同一筆登錄用這個模組取得 Adapter，也把模組物件列為來源。例如：`"twotone/ac_stark_ramsey": (ac_stark_ramsey_gui.DEFINITION, ac_stark_ramsey_gui)`。
+Factory 從接收登錄的 `registry.templates` 取得持久範本。key 用宣告模組相對 `zcu_lab/v2/` 的完整目錄，同目錄有多個入口時各加一段 `/變體名`。
+使用者 2026-11-24：「我认为表单的结构应该要跟实际结构对应，或者说一致，这样才好维护啊」；理由與被否決的方案見 [registry key 討論](../../docs/discussions/2026-11-24-registry-key-paths.md)。
+[Gate](../../tools/README.md#registry-key-paths) 從成功登錄取得來源，不看 Run 放在哪裡。
 
 每個實驗在 `core.py` 定義 cfg 與 FieldMeta，在 `form.py` 定義 Qt-free Form。框架透過 adapter 的 `make_form(ctx)` 呼叫它。
 core.py 的 Experiment 擁有 run 與 analyze 的計算；gui.py 只接線、解析來源、決定 writeback 與 operator guide。
@@ -397,7 +402,7 @@ Confusion correction 只讀 saved cfg；缺 cfg／classifier／matrix 就略過�
 Amp Rabi 串接各 round 的 raw IQ，reset-check 累加各 round 的 class counts。
 舊比例檔案缺少 counts 變數時拒絕載入，不補造計數。
 
-[`twotone/t1_cov`](twotone/time_domain/t1_cov/guide.md) 共用單 tone `PulseReadout.Cfg`，
+[`twotone/time_domain/t1_cov`](twotone/time_domain/t1_cov/guide.md) 共用單 tone `PulseReadout.Cfg`，
 以 `shot_sums(prog, [IQ("pre_readout"), IQ("post_readout")])` 加總未分類的 IQ 特徵外積。
 Result 保存 float64 `sums`，形狀為（delay, pre, post）。Grouped spec 從內層軸宣告，
 所以先列 `post_readout_features`，再列 `pre_readout_features` 與時間。
@@ -627,9 +632,9 @@ T1 with tone 的掃描終點依序使用歷史 t1_with_tone、普通 T1、30 µs
 自然等待仍用普通 T1，不用 tone T1。這些初值不保證熱平衡或指定保真度。
 Reps、rounds、shots、點數與其他特殊時序不因等待政策改動。
 
-固定 tone T1 的[寫回](singleshot/t1/t1_with_tone/guide.md#next-step)提供 `ext.t1_with_tone`。
-三個表單用這個值作為 Stop 初值來源：[固定 tone 的 Probe exposure time Stop](singleshot/t1/t1_with_tone/guide.md#key-settings)，
-以及[增益掃描的 Probe length Stop](singleshot/t1/t1_with_tone_sweep/guide.gain.md#key-settings)與[頻率掃描的 Probe length Stop](singleshot/t1/t1_with_tone_sweep/guide.freq.md#key-settings)。
+固定 tone T1 的[寫回](singleshot/t1_tone/guide.md#next-step)提供 `ext.t1_with_tone`。
+三個表單用這個值作為 Stop 初值來源：[固定 tone 的 Probe exposure time Stop](singleshot/t1_tone/guide.md#key-settings)，
+以及[增益掃描的 Probe length Stop](singleshot/t1_tone_sweep/guide.gain.md#key-settings)與[頻率掃描的 Probe length Stop](singleshot/t1_tone_sweep/guide.freq.md#key-settings)。
 在程式中搜尋 `ext.t1_with_tone` 找寫回與來源選擇，搜尋 `with_tone=True` 找表單呼叫點。
 
 ### Probe 與 Rabi
@@ -716,7 +721,7 @@ agent / human 判讀，guide 不暗示用自動 fidelity gate 代替判斷。
 | --- | --- |
 | Single-tone | [Freq](twotone/reset/single_tone/freq/guide.md)、[Length](twotone/reset/single_tone/length/guide.md) |
 | Dual-tone | [Freq](twotone/reset/dual_tone/freq/guide.md)、[Power](twotone/reset/dual_tone/power/guide.md)、[Length](twotone/reset/dual_tone/length/guide.md) |
-| Bath | [Freq/gain](twotone/reset/bath/freq/guide.md)、[Length](twotone/reset/bath/length/guide.md)、[Phase](twotone/reset/bath/phase/guide.md) |
+| Bath | [Freq/gain](twotone/reset/bath/freq_gain/guide.md)、[Length](twotone/reset/bath/length/guide.md)、[Phase](twotone/reset/bath/phase/guide.md) |
 | 驗證 | [Rabi check](twotone/reset/rabi_check/guide.md)、[Singleshot reset check](singleshot/reset_check/guide.md) |
 
 Singleshot 的初態、joint fit 與校準條件見 [experiment authoring](experiment-authoring.md#singleshot-initial-state)

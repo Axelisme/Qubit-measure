@@ -36,4 +36,4 @@ Mux Ramsey 的擬合失敗圖直接畫平均 IQ 的幅值，卻沿用成功圖�
 
 ## 依據
 
-2026-11-23，使用者：「B，這種投影方式應該作為慣例存在，沒有獨特理由就保持一致」。原始問答未入庫。當時以[單 qubit Ramsey](../../zcu_lab/v2/twotone/time_domain/t2ramsey/core.py)及[單 qubit two-tone flux scan](../../zcu_lab/v2/twotone/fluxdep/core.py)為對照。
+2026-11-23，使用者：「B，這種投影方式應該作為慣例存在，沒有獨特理由就保持一致」。原始問答未入庫。當時以[單 qubit Ramsey](../../zcu_lab/v2/twotone/time_domain/t2ramsey/core.py)及[單 qubit two-tone flux scan](../../zcu_lab/v2/twotone/flux_dep/core.py)為對照。

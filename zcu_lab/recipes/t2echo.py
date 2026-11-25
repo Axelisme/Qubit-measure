@@ -102,7 +102,7 @@ async def t2echo(session: RecipeSession, inputs: T2EchoInputs) -> T2EchoReport:
     selection, readiness or Analyze rule in the input schema.
     """
     tab = session.open_tab(
-        "twotone/t2echo",
+        "twotone/time_domain/t2echo",
         target={"qubit": inputs.target},
         reuse=inputs.reuse_tab_id,
     )

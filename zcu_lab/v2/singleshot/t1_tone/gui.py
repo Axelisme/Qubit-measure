@@ -16,14 +16,14 @@ from zcu_tools.gui.app.measure.adapter import (
 )
 from zcu_tools.plotting.plots import Plots
 
-from zcu_lab.v2.singleshot.t1.t1_with_tone.core import (
+from zcu_lab.v2.singleshot.t1_tone.core import (
     T1WithToneAnalysis,
     T1WithToneAnalyzeOptions,
     T1WithToneCfg,
     T1WithToneExp,
     T1WithToneResult,
 )
-from zcu_lab.v2.singleshot.t1.t1_with_tone.form import make_form
+from zcu_lab.v2.singleshot.t1_tone.form import make_form
 from zcu_lab.v2.support.singleshot.util import readout_confusion_matrix
 
 # The numeric t1 is written to the t1_with_tone parameter context key.

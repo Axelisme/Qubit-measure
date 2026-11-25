@@ -1,10 +1,10 @@
-"""Core-derived starting values for reset/bath/freq."""
+"""Core-derived starting values for reset/bath/freq_gain."""
 
 from zcu_tools.cfg_model import Hidden, Range, Slot, Template
 from zcu_tools.gui.form_adapter import Form, FormContext
 
 from zcu_lab.v2.support.measure.ctx_helpers import source, t1_initial_time
-from zcu_lab.v2.twotone.reset.bath.freq.core import FreqGainCfg
+from zcu_lab.v2.twotone.reset.bath.freq_gain.core import FreqGainCfg
 
 
 def make_form(ctx: FormContext) -> Form[FreqGainCfg]:

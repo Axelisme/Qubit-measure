@@ -15,8 +15,8 @@ from zcu_tools.gui.app.measure.adapter import (
 )
 from zcu_tools.plotting.plots import Plots
 
-from zcu_lab.v2.singleshot.t1.t1.core import T1AnalyzeOptions, T1Cfg, T1Exp, T1Result
-from zcu_lab.v2.singleshot.t1.t1.form import make_form
+from zcu_lab.v2.singleshot.t1.core import T1AnalyzeOptions, T1Cfg, T1Exp, T1Result
+from zcu_lab.v2.singleshot.t1.form import make_form
 
 SsT1RunResult: TypeAlias = RunRecord[T1Cfg, T1Result]
 

@@ -52,9 +52,9 @@ from zcu_lab.v2.singleshot.mist.power import core as singleshot_mist_power
 from zcu_lab.v2.singleshot.mist.power_freq import core as singleshot_mist_power_freq
 from zcu_lab.v2.singleshot.mist.pre_freq import core as singleshot_mist_pre_freq
 from zcu_lab.v2.singleshot.reset_check import core as singleshot_reset_check
-from zcu_lab.v2.singleshot.t1.t1 import core as singleshot_t1_t1
-from zcu_lab.v2.singleshot.t1.t1_with_tone import core as singleshot_t1_t1_with_tone
-from zcu_lab.v2.singleshot.t1.t1_with_tone_sweep import core as singleshot_t1_tone_sweep
+from zcu_lab.v2.singleshot.t1 import core as singleshot_t1
+from zcu_lab.v2.singleshot.t1_tone import core as singleshot_t1_tone
+from zcu_lab.v2.singleshot.t1_tone_sweep import core as singleshot_t1_tone_sweep
 from zcu_lab.v2.two_qubit.chevron import core as ftf_chevron
 from zcu_lab.v2.two_qubit.conditional_phase import core as ftf_conditional_phase
 from zcu_lab.v2.two_qubit.conditional_spectroscopy import (
@@ -67,16 +67,16 @@ from zcu_lab.v2.two_qubit.joint_readout import core as ftf_joint_readout
 from zcu_lab.v2.two_qubit.local_z import core as ftf_local_z
 from zcu_lab.v2.two_qubit.rb import core as ftf_rb
 from zcu_lab.v2.twotone.ac_stark import core as twotone_ac_stark
-from zcu_lab.v2.twotone.ac_stark import ramsey_core as twotone_ac_stark_ramsey
+from zcu_lab.v2.twotone.ac_stark_ramsey import core as twotone_ac_stark_ramsey
 from zcu_lab.v2.twotone.allxy import core as twotone_allxy
 from zcu_lab.v2.twotone.ckp import core as twotone_ckp
 from zcu_lab.v2.twotone.dispersive import core as twotone_dispersive
-from zcu_lab.v2.twotone.fluxdep import core as twotone_fluxdep
+from zcu_lab.v2.twotone.flux_dep import core as twotone_fluxdep
 from zcu_lab.v2.twotone.freq import core as twotone_freq
 from zcu_lab.v2.twotone.power_dep import core as twotone_power_dep
 from zcu_lab.v2.twotone.rabi.amp_rabi import core as twotone_rabi_amp_rabi
 from zcu_lab.v2.twotone.rabi.len_rabi import core as twotone_rabi_len_rabi
-from zcu_lab.v2.twotone.reset.bath.freq import core as twotone_reset_bath_freq
+from zcu_lab.v2.twotone.reset.bath.freq_gain import core as twotone_reset_bath_freq_gain
 from zcu_lab.v2.twotone.reset.bath.length import core as twotone_reset_bath_length
 from zcu_lab.v2.twotone.reset.bath.phase import core as twotone_reset_bath_phase
 from zcu_lab.v2.twotone.reset.dual_tone.freq import core as twotone_reset_dual_tone_freq
@@ -93,7 +93,7 @@ from zcu_lab.v2.twotone.reset.single_tone.freq import (
 from zcu_lab.v2.twotone.reset.single_tone.length import (
     core as twotone_reset_single_tone_length,
 )
-from zcu_lab.v2.twotone.ro_optimize.auto_optimize import (
+from zcu_lab.v2.twotone.ro_optimize.auto import (
     core as twotone_ro_optimize_auto_optimize,
 )
 from zcu_lab.v2.twotone.ro_optimize.freq import core as twotone_ro_optimize_freq
@@ -113,7 +113,7 @@ from zcu_lab.v2.twotone.time_domain.t1 import (
 from zcu_lab.v2.twotone.time_domain.t2echo import core as twotone_time_domain_t2echo
 from zcu_lab.v2.twotone.time_domain.t2ramsey import core as twotone_time_domain_t2ramsey
 from zcu_lab.v2.twotone.zigzag import core as twotone_zigzag
-from zcu_lab.v2.twotone.zigzag_sweep import core as twotone_zigzag_sweep
+from zcu_lab.v2.twotone.zigzag_scan import core as twotone_zigzag_scan
 
 # Historical disk schemas precede shot moments and run values. Neither the
 # current native variables nor the Labber export projection defines these logs.
@@ -208,8 +208,8 @@ MIGRATION_EXPERIMENTS = (
     _declaration(singleshot_mist_power_freq.FreqPowerExp.AXES_SPEC),
     _declaration(singleshot_mist_pre_freq.PreFreqExp.AXES_SPEC),
     _declaration(singleshot_reset_check.ResetCheckExp.AXES_SPEC),
-    _declaration(singleshot_t1_t1.T1Exp.AXES_SPEC),
-    _declaration(singleshot_t1_t1_with_tone.T1WithToneExp.AXES_SPEC),
+    _declaration(singleshot_t1.T1Exp.AXES_SPEC),
+    _declaration(singleshot_t1_tone.T1WithToneExp.AXES_SPEC),
     _declaration(singleshot_t1_tone_sweep.T1WithToneSweepExp.AXES_SPEC),
     _declaration(twotone_ac_stark.AcStarkExp.AXES_SPEC),
     _declaration(twotone_ac_stark_ramsey.AcStarkRamseyExp.AXES_SPEC),
@@ -221,7 +221,7 @@ MIGRATION_EXPERIMENTS = (
     _declaration(twotone_power_dep.PowerExp.AXES_SPEC),
     _declaration(twotone_rabi_amp_rabi.AmpRabiExp.AXES_SPEC),
     _declaration(twotone_rabi_len_rabi.LenRabiExp.AXES_SPEC),
-    _declaration(twotone_reset_bath_freq.FreqGainExp.AXES_SPEC),
+    _declaration(twotone_reset_bath_freq_gain.FreqGainExp.AXES_SPEC),
     _declaration(twotone_reset_bath_length.LengthExp.AXES_SPEC),
     _declaration(twotone_reset_bath_phase.PhaseExp.AXES_SPEC),
     _declaration(twotone_reset_dual_tone_freq.FreqExp.AXES_SPEC),
@@ -259,5 +259,5 @@ MIGRATION_EXPERIMENTS = (
         ),
     ),
     _declaration(twotone_zigzag.ZigZagExp.AXES_SPEC),
-    _declaration(twotone_zigzag_sweep.ZigZagScanExp.AXES_SPEC),
+    _declaration(twotone_zigzag_scan.ZigZagScanExp.AXES_SPEC),
 )

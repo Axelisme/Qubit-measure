@@ -38,4 +38,4 @@ Stop 的五倍是掃描初值，不保證曲線達到指定 plateau。舊保存�
 
 - 2026-11-23，使用者：「但我就是要寫回t1啊，你應該把振幅較大者視為t1，較小者視為副t1，我記得我都寫t1b之類的」；「3b要，a可以，也可以用總振幅而不只是e」。原始問答未入庫。
 - 推翻[按短到長命名的夜間代裁](2026-11-23-singleshot-t1-relaxation-times.md)，保留其 Stop 倍數。沿用 [ADR-0069](../adr/0069-experiment-core-and-frontends.md#呈現規範) 的數值分析與寫回分工，由 core 計算，adapter 提案。這是模型衰減模，不用 [ADR-0071](../adr/0071-coherence-units.md#pair-lifetime-與-manifold-model-t1) 的 pair lifetime 取代。
-- 操作與欄位見[普通 T1](../../zcu_lab/v2/singleshot/t1/t1/guide.md)與[固定 tone T1](../../zcu_lab/v2/singleshot/t1/t1_with_tone/guide.md)。
+- 操作與欄位見[普通 T1](../../zcu_lab/v2/singleshot/t1/guide.md)與[固定 tone T1](../../zcu_lab/v2/singleshot/t1_tone/guide.md)。

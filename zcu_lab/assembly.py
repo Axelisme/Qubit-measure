@@ -5,7 +5,8 @@ from __future__ import annotations
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
-from types import MappingProxyType
+from types import MappingProxyType, ModuleType
+from typing import Protocol
 
 import zcu_tools
 from zcu_tools.analysis.flux import ComponentFluxContext
@@ -23,13 +24,27 @@ import zcu_lab
 from zcu_lab.workflows.common.calibration_modules import Calibrated
 
 
+class ExperimentRegistrar(Protocol):
+    """Lab-only registration callback with an optional definition-source sink."""
+
+    def __call__(
+        self,
+        registry: Registry,
+        record_source: Callable[[str, ModuleType], None] | None = None,
+    ) -> None:
+        """Fill registry; if supplied, call record_source(key, module) after each success."""
+        ...
+
+
 @dataclass(frozen=True)
 class LabDefinitions[C]:
     """Lab-owned catalogs and policies shared by GUI and MCP composition roots.
 
     register_components installs component models/roles into the supplied process
     registry. register_experiments fills a supplied measure Registry without
-    registering components again. Both are definition-only operations; duplicate
+    registering components again. Its optional record_source receives each
+    accepted key and its direct declaration module. Both callbacks are
+    definition-only operations; duplicate
     registration follows the receiving registry's error contract.
     templates maps persistent template IDs to module/waveform definitions; empty
     is valid. workflow_attachments contains ordered native/form pairs sharing
@@ -47,7 +62,7 @@ class LabDefinitions[C]:
     """
 
     register_components: Callable[[ComponentRegistry], None]
-    register_experiments: Callable[[Registry], None]
+    register_experiments: ExperimentRegistrar
     templates: Mapping[str, TemplateDef]
     workflow_attachments: tuple[Attachment[C], ...]
     recipes: tuple[RecipeDeclaration, ...]

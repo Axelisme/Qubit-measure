@@ -35,6 +35,7 @@
 | `check_quality.py` | `tools/check_quality.py <subcommand>`，見[品質檢查](#品質檢查) | 0／1；`test-structure` 與 `all` 另有 2 | 現況、ratchet |
 | `check_script_awaits.py` | `tools/check_script_awaits.py [--root <repo>]` | 0 無違規、1 有違規、2 root／讀取／解析失敗 | 現況、比較 |
 | `check_mcp_text_budget.py` | `tools/check_mcp_text_budget.py [--timeout <seconds>]` | 0 預算內、1 超額、2 收集失敗 | 現況、比較 |
+| `check_registry_key_paths.py` | `tools/check_registry_key_paths.py` | 0 全部相符、1 有違規 | 現況、比較 |
 | `check_experiment_imports.py` | `lint-imports`，不經 Python 前綴 | 由 lint-imports 回報 0 通過、1 失敗 | import contracts |
 | `check_doc_readers.py` | `tools/check_doc_readers.py [--root <repo>]` | 0 宣告完整、1 有缺口 | 否 |
 | `doc_relations.py` | `tools/doc_relations.py <base>` 或 `tools/doc_relations.py --check` | diff 0；check 0 連結存在、1 有違規 | 否 |
@@ -1472,7 +1473,7 @@ uv run --directory <worktree> --no-sync -- python tools/gate.py --base <lane 起
 ```
 
 `gate.py` 是日常入口。它依序執行：受影響檔案的 ruff import 排序與 formatter、
-`lint-imports`、lab script await guardrail、measure MCP 文字預算、然後 ratchet。
+`lint-imports`、lab script await guardrail、measure MCP 文字預算、[registry key 路徑檢查](#registry-key-paths)，然後 ratchet。
 部分檢查會掃描全樹或啟動子程序，耗時不只由改動檔案數決定。Pyright 現況檢查另以 `--with-pyright` 啟用，不保證固定秒數。
 
 省略 `--base` 時回報現況，列出全樹的絕對數字。
@@ -1506,6 +1507,7 @@ ok   ruff format
 ok   import contracts
 ok   script awaits
 ok   mcp text budget
+ok   registry key paths
 FAIL ratchet
     suppressions: <path> suppression:noqa 0 -> 1
 ```
@@ -1610,6 +1612,13 @@ Lab 宣告載入錯誤直接拋出。`gate.py --base <ref>` 每次都執行此�
 不載入 lab；`main` 負責取得 lab 的 recipe names 與轉譯 collection errors。
 `tests/tools/test_check_mcp_text_budget.py` 使用合成 wire inputs 驗證計量契約，並在外部
 subprocess 邊界替換回覆以驗證 collection errors，不載入 lab 或真 server。
+
+## Registry key paths
+
+[`check_registry_key_paths.py`](check_registry_key_paths.py) 經 [Lab assembly](../zcu_lab/README.md#lab-組裝與註冊) 把所有 adapters 登錄到真 Registry，不開 GUI 或建立 Form。
+Lab 從同次成功登錄交付每個 key 的直接宣告模組。工具不查 Run、guide 或 Native tag。
+每個 registry key 必須等於宣告模組相對 `zcu_lab/v2/` 的目錄，同目錄有多個入口時各加一段 `/變體名`。
+來源缺漏、重複、額外或無效時，工具先列出有問題的 key 和原因；只在來源完整時比對目錄。違規回傳 1。
 
 ## 品質快照與熱點報表
 

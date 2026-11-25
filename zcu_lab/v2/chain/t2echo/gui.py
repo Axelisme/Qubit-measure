@@ -53,7 +53,7 @@ def _run(
     return RunRecord(cfg=cfg, result=ChainT2EchoExp().run(cfg, context=context))
 
 
-# No writeback: the chain T2 echo is reported beside the first-read value; twotone/t2echo calibrates.
+# No writeback: the chain T2 echo is reported beside the first-read value; twotone/time_domain/t2echo calibrates.
 DEFINITION = Adapter(
     spec=ChainT2EchoExp.AXES_SPEC,
     make_form=make_form,

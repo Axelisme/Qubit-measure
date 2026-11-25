@@ -47,9 +47,10 @@ Templates 發布後不修改其內容；frozen dataclass 不會遞迴凍結範�
 
 各入口的最小 Protocol 與依賴理由見 [ADR-0072](../docs/adr/0072-module-boundaries.md#lab-定義與組合根)。
 
-Measure behavior 先註冊 components，再以 `lab.templates` 建 Registry，呼叫 `lab.register_experiments` 填入 adapters。
+Measure behavior 先註冊 components，再以 `lab.templates` 建 Registry，呼叫 `lab.register_experiments(registry)` 填入 adapters。
+[路徑 gate](../tools/README.md#registry-key-paths) 在同一個註冊呼叫傳入 `record_source`。每次 `Registry.register` 成功後，Lab 把該 key 與直接宣告 Adapter 或 factory 的模組物件交給 callback。來源不存進 Registry，也不從 Run 推定。新增登錄列見 [Measure adapter authoring](v2/measure-authoring.md#目錄佈局)。
 [Two-qubit 實驗清單](v2/README.md#two-qubit-實驗清單)和 [heralded 家族](v2/heralded/README.md) 對應 New Tab 的兩個並列選單。各入口有自己的 registry key 與 guide；開啟舊 Native 檔時，依家族 README 的 tag 對照選新入口。
-[definitions.py](definitions.py) 註冊 AC Stark spectroscopy 的 `twotone/ac_stark` 與 Ramsey 的 `twotone/ac_stark_ramsey`。Ramsey 操作見 [AC Stark Ramsey guide](v2/twotone/ac_stark/guide.ramsey.md#序列與設定)。
+[definitions.py](definitions.py) 註冊 AC Stark spectroscopy 的 `twotone/ac_stark` 與 Ramsey 的 `twotone/ac_stark_ramsey`。Ramsey 操作見 [AC Stark Ramsey guide](v2/twotone/ac_stark_ramsey/guide.md#序列與設定)。
 Library 新建直接讀 `registry.templates`。`definitions.register_all` 綁同一份 catalog 給 chain_length 與 rpi_length，供兩張表在沒有擷取模組時取得長度差。
 Reload 保留既有範本與元件註冊，不重新 bootstrap components。兩張表的 factory 重新綁到該次註冊收到的 Registry 範本。
 Import 不執行註冊，重複 bootstrap 按接收 registry 的規則報錯。
@@ -74,7 +75,7 @@ Measure 在 Open／Reset 呼叫 adapter 的 `make_form(ctx)`，依固定來源�
 Form 輸出 adapter 的輸入型別，adapter.run 轉成實際實驗 cfg 並回傳 RunRecord。
 Module 與掃描欄位平鋪於頂層，只有 pulse Advanced 保留既有分組與摺疊。
 Load 不轉換舊 2.0 cfg，也不反填目前 Form；資料與 metadata 保留，record.cfg 為 None 並附原因。
-`onetone/flux_dep` 與 `twotone/fluxdep` 的 core 用具名 `flux_dev: str`；
+`onetone/flux_dep` 與 `twotone/flux_dep` 的 core 用具名 `flux_dev: str`；
 JPA 使用具名 `jpa_flux_dev` 與 `jpa_rf_dev`。Form 在 Open／Reset 讀取
 `$qubit.flux_dev`、`$mux.flux_dev` 或 JPA 的 `$jpa.flux_dev`／`$jpa.rf_source`，
 保存可覆寫的 direct 裝置名稱。既有 input 不隨 alias 或元件參數更新。

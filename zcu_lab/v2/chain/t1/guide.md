@@ -36,6 +36,6 @@ The model assumes independent thermalized cycles, Markov transitions, and three 
 
 ## Use the result
 
-Compare the two decay modes across repeats. When their amplitudes are close their order can switch, and the fit errors do not include that choice. This experiment proposes no writeback. Use a dedicated [`twotone/t1`](../../twotone/time_domain/t1/guide.md) run to update the qubit calibration.
+Compare the two decay modes across repeats. When their amplitudes are close their order can switch, and the fit errors do not include that choice. This experiment proposes no writeback. Use a dedicated [`twotone/time_domain/t1`](../../twotone/time_domain/t1/guide.md) run to update the qubit calibration.
 
 `chain_t1` rejects `null` for `readout_ref` and `pi_ref` at the required Form selector, before Run. For `max_delay_us`, `points`, `reps` and `rounds`, omission keeps the Form value and `null` clears the required value. The readiness check stops before acquisition if it is still blank after overrides. Set K with an override on `relax_delay`.
