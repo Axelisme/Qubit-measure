@@ -10,13 +10,15 @@ import zipfile
 from pathlib import Path
 
 from . import rclone, setup
+from .binding import bind_checkout, binding_issues, require_binding
 from .discovery import list_sources
 from .settings import (
     DATA_DIRS,
     SyncSettings,
     load_settings,
     save_settings,
-    validate_source,
+    validate_prefix,
+    validate_remote_root,
 )
 
 
@@ -38,13 +40,13 @@ def _parser() -> argparse.ArgumentParser:
     actions = parser.add_subparsers(dest="action", required=True)
     configure = actions.add_parser("setup", help="Authorize and select the cloud root")
     configure.add_argument(
-        "--source",
+        "--prefix",
         required=True,
-        help="Unique source prefix (suggestion: short-hostname/username)",
+        help="Labdata prefix to bind to this checkout, e.g. alice/pc1/sim",
     )
     configure.add_argument(
         "--labdata",
-        help="Local collection root; relative paths use the working directory",
+        help="Local Labdata root; relative paths use the working directory",
     )
     configure.add_argument(
         "--no-browser", action="store_true", help="Print a private setup link"
@@ -80,28 +82,48 @@ def _add_copy_options(parser: argparse.ArgumentParser) -> None:
     )
 
 
+def _print_roots(selection: SyncSettings) -> None:
+    print(f"Labdata: {selection.labdata}")
+    print(f"Labdata prefix: {selection.prefix}")
+    print(f"Local data root: {selection.local_root(selection.prefix)}")
+    print(f"Cloud data root: {selection.remote_path(selection.prefix)}")
+
+
 def _status(
-    selection: SyncSettings | None, checkout: Path, *, configured: bool, as_json: bool
+    selection: SyncSettings | None, checkout: Path, *, has_account: bool, as_json: bool
 ) -> int:
+    issues = binding_issues(checkout, selection) if selection is not None else []
+    bound = selection is not None and not issues
+    configured = bound and has_account
     if as_json:
         print(
             json.dumps(
                 {
                     "configured": configured,
+                    "bound": bound,
+                    "binding_errors": issues,
                     "remote_root": selection.remote_root if selection else None,
-                    "source": selection.source if selection else None,
+                    "prefix": selection.prefix if selection else None,
                     "labdata": str(selection.labdata) if selection else None,
+                    "local_root": (
+                        str(selection.local_root(selection.prefix))
+                        if selection
+                        else None
+                    ),
+                    "remote_data_root": (
+                        selection.remote_path(selection.prefix) if selection else None
+                    ),
                     "project_root": str(checkout),
                 },
                 ensure_ascii=False,
             )
         )
-    elif configured and selection:
-        print(
-            f"Cloud root: {selection.remote_root}\nSource: {selection.source}\nLabdata: {selection.labdata}"
-        )
     else:
-        print("Not configured. Run 'sync_data.py setup' first.")
+        if selection is not None:
+            _print_roots(selection)
+            print("Checkout binding: valid." if bound else "\n".join(issues))
+        if not configured:
+            print("Not configured. Run 'sync_data.py setup' first.")
     return 0 if configured else 1
 
 
@@ -132,25 +154,20 @@ def _copy_options(args: argparse.Namespace) -> list[str]:
 
 
 def _push(
-    checkout: Path,
     selection: SyncSettings,
     binary: Path,
     config_dir: Path,
     args: argparse.Namespace,
 ) -> int:
-    roots = [checkout / directory for directory in DATA_DIRS]
-    for root in roots:
-        if (root.exists() or root.is_symlink()) and not root.is_dir():
-            raise ValueError(f"Not a data directory: {root}")
-    for root in roots:
-        if not root.is_dir():
-            continue
-        target = selection.remote_path(f"{selection.source}/{root.name}")
-        print(f"Push: {root} -> {target}", flush=True)
+    local_root = selection.local_root(selection.prefix)
+    for name in DATA_DIRS:
+        origin = local_root / name
+        target = selection.remote_path(f"{selection.prefix}/{name}")
+        print(f"Push: {origin} -> {target}", flush=True)
         result = rclone.run_cli(
             binary,
             config_dir,
-            ["copy", str(root.resolve()), target, *_copy_options(args)],
+            ["copy", str(origin), target, *_copy_options(args)],
         )
         if result.returncode:
             return result.returncode
@@ -189,10 +206,12 @@ def _pull(
         prefixes = [
             prefix
             for prefix in list_sources(binary, config_dir, selection.remote_root)
-            if prefix != selection.source
+            if prefix != selection.prefix
         ]
     else:
-        prefixes = [validate_source(prefix) for prefix in args.prefixes]
+        prefixes = [validate_prefix(prefix) for prefix in args.prefixes]
+        if selection.prefix in prefixes:
+            require_binding(checkout, selection)
     targets = [
         (prefix, _pull_destination(selection.labdata, prefix, checkout))
         for prefix in prefixes
@@ -213,35 +232,39 @@ def _pull(
 
 
 def _run_setup(
-    settings_dir: Path, config_dir: Path, cache_dir: Path, args: argparse.Namespace
+    checkout: Path, config_dir: Path, cache_dir: Path, args: argparse.Namespace
 ) -> int:
-    source = validate_source(args.source)
+    prefix = validate_prefix(args.prefix)
     config_dir.mkdir(mode=0o700, parents=True, exist_ok=True)
-    remote_root = setup.select_remote_root(
-        rclone.prepare_rclone(cache_dir),
-        config_dir,
-        cache_dir,
-        no_browser=args.no_browser,
+    remote_root = validate_remote_root(
+        setup.select_remote_root(
+            rclone.prepare_rclone(cache_dir),
+            config_dir,
+            cache_dir,
+            no_browser=args.no_browser,
+        )
     )
-    labdata = _confirm_labdata(remote_root, source, args.labdata)
+    selection = _confirm_settings(remote_root, prefix, args.labdata)
+    bind_checkout(checkout, selection)
+    settings_dir = checkout / ".data-sync"
     settings_dir.mkdir(mode=0o700, parents=True, exist_ok=True)
-    save_settings(settings_dir, SyncSettings(remote_root, source, labdata))
-    print(f"Saved settings for {source}.")
+    save_settings(settings_dir, selection)
+    print(f"Saved settings for {prefix}.")
     return 0
 
 
-def _confirm_labdata(remote_root: str, source: str, path: str | None) -> Path:
+def _confirm_settings(remote_root: str, prefix: str, path: str | None) -> SyncSettings:
     try:
         if path is None:
             remote, _, folder = remote_root.partition(":")
             default = Path.home() / (folder.rsplit("/", 1)[-1] or remote)
-            path = input(f"Local collection root [{default}]: ") or str(default)
-        labdata = Path(path).expanduser().resolve()
-        print(f"Cloud root: {remote_root}\nSource: {source}\nLabdata: {labdata}")
-        input("Verify these settings, then press Enter to save (Ctrl+C cancels): ")
+            path = input(f"Local Labdata root [{default}]: ") or str(default)
+        selection = SyncSettings(remote_root, prefix, Path(path).expanduser().resolve())
+        _print_roots(selection)
+        input("Verify these settings, then press Enter to bind (Ctrl+C cancels): ")
     except EOFError as exc:
         raise RuntimeError("Setup cancelled: no settings were saved.") from exc
-    return labdata
+    return selection
 
 
 def _run(args: argparse.Namespace, checkout: Path) -> int:
@@ -249,14 +272,14 @@ def _run(args: argparse.Namespace, checkout: Path) -> int:
     cache_dir = args.cache_dir.expanduser().resolve()
     settings_dir = checkout / ".data-sync"
     if args.action == "setup":
-        return _run_setup(settings_dir, config_dir, cache_dir, args)
+        return _run_setup(checkout, config_dir, cache_dir, args)
     selection = load_settings(settings_dir)
     has_account = (config_dir / "rclone.conf").is_file()
     if args.action == "status":
         return _status(
             selection,
             checkout,
-            configured=selection is not None and has_account,
+            has_account=has_account,
             as_json=args.json,
         )
     if selection is None or not has_account:
@@ -270,18 +293,20 @@ def _run(args: argparse.Namespace, checkout: Path) -> int:
         return 0
     if args.jobs < 1:
         raise ValueError("--jobs must be positive.")
-    binary = rclone.prepare_rclone(cache_dir)
     if args.action == "pull":
-        return _pull(checkout, selection, binary, config_dir, args)
-    return _push(checkout, selection, binary, config_dir, args)
+        return _pull(
+            checkout, selection, rclone.prepare_rclone(cache_dir), config_dir, args
+        )
+    require_binding(checkout, selection)
+    return _push(selection, rclone.prepare_rclone(cache_dir), config_dir, args)
 
 
 def main(argv: list[str] | None = None, *, checkout: Path) -> int:
     """Run argv (None reads sys.argv) using checkout for data and .data-sync.
 
     Return a shell exit status; argparse raises SystemExit for help or invalid
-    syntax. Only setup opens the browser. A configured push reads result/ and
-    Database/ in checkout, including directories linked from those two paths.
+    syntax. Only setup opens the browser. Push requires a valid checkout
+    binding and reads result/ and Database/ from the saved Labdata prefix.
     """
     parser = _parser()
     try:

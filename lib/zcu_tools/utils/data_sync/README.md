@@ -6,11 +6,12 @@
 
 `scripts/sync_data.py` 把程式所在的 checkout 交給 `cli.main(argv, checkout=...)`。同步套件不從安裝位置或 cwd 推導 checkout，也不匯入 scripts。傳輸不解讀量測檔案，依 [ADR-0072](../../../../docs/adr/0072-module-boundaries.md#分層) 留在 `utils`。每一個來源 prefix 是獨立的 project root，操作與布局見[資料同步指南](../../../../docs/data-sync.md)。
 
-- `cli` 驗證命令、確認設定並編排 copy。上傳來源只讀 checkout 的 `result/` 與 `Database/`。Pull 比較實體目的地與 checkout 的實體資料根。
+- `cli` 顯示兩端資料根，編排設定與傳輸。`push` 先驗證綁定，再讀 `<labdata>/<prefix>` 的 `result/` 與 `Database/`。
+- `binding` 先檢查兩個連結位置與實體目標。Windows 建 junction，Linux 建目錄符號連結；正確的現有連結不重建。
+- `settings` 保存 checkout 的 `.data-sync/sync.json`，內含雲端根、預設 prefix 與本機 Labdata 根。不保存帳號憑證。舊第 1 版設定需重跑 setup。
+- `setup` 沿用官方 GUI 授權與唯讀瀏覽。操作者確認兩端資料根、`binding` 驗證兩個連結後，CLI 才保存 checkout 設定。
 - `discovery` 從一次遞迴的雲端目錄列舉找出來源。來源直接含 `result/` 或 `Database/`；這兩個目錄下的內容不參與探索。
-- `settings` 保存各 checkout 的 `.data-sync/sync.json`，內含雲端根、來源 prefix 與本地彙整根。帳號憑證不在 checkout 設定裡。
 - `rclone` 驗證固定版工具，啟動及清理本機 GUI 和 CLI 程序。使用者層的 `rclone.conf` 與工具快取沿用既有的 `qubit-measure/result-transfer` 路徑。
-- `setup` 沿用官方 GUI 授權與唯讀瀏覽。CLI 收到確認過的雲端根後才保存 checkout 設定。
 
 ## 固定版工具
 

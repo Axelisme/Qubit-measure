@@ -6,7 +6,7 @@ import json
 from pathlib import Path
 
 from . import rclone
-from .settings import DATA_DIRS, is_data_dir, validate_source
+from .settings import DATA_DIRS, is_data_dir, validate_prefix
 
 
 def list_sources(binary: Path, config_dir: Path, remote_root: str) -> list[str]:
@@ -50,5 +50,5 @@ def list_sources(binary: Path, config_dir: Path, remote_root: str) -> list[str]:
             and leaf in DATA_DIRS
             and not any(map(is_data_dir, prefix.split("/")))
         ):
-            prefixes.add(validate_source(prefix))
+            prefixes.add(validate_prefix(prefix))
     return sorted(prefixes)

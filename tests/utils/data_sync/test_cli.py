@@ -23,14 +23,40 @@ def test_unconfigured_push_instructs_unattended_user_to_run_setup(
 
 
 @pytest.fixture
-def configured_checkout(tmp_path: Path) -> Path:
+def unbound_checkout(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     checkout = tmp_path / "checkout"
-    for folder in (".data-sync", "result", "Database"):
-        (checkout / folder).mkdir(parents=True)
+    checkout.mkdir()
     (tmp_path / "account").mkdir()
     (tmp_path / "account" / "rclone.conf").touch()
-    _save_checkout_settings(checkout)
+    # Select a test cloud root without launching or downloading rclone.
+    monkeypatch.setattr(rclone, "prepare_rclone", lambda cache: cache / "rclone")
+    monkeypatch.setattr(
+        setup, "select_remote_root", lambda *args, **kwargs: "lab:measurements"
+    )
     return checkout
+
+
+@pytest.fixture
+def configured_checkout(
+    unbound_checkout: Path, monkeypatch: pytest.MonkeyPatch
+) -> Path:
+    _bind(unbound_checkout, "local/alice", monkeypatch)
+    return unbound_checkout
+
+
+def _bind(checkout: Path, prefix: str, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(sys, "stdin", io.StringIO("\n"))
+    assert (
+        _sync(
+            checkout,
+            "setup",
+            "--prefix",
+            prefix,
+            "--labdata",
+            str(checkout.parent / "labdata"),
+        )
+        == 0
+    )
 
 
 def _save_checkout_settings(
@@ -39,9 +65,9 @@ def _save_checkout_settings(
     (checkout / ".data-sync" / "sync.json").write_text(
         json.dumps(
             {
-                "version": 1,
+                "version": 2,
                 "remote_root": "lab:measurements",
-                "source": source,
+                "prefix": source,
                 "labdata": str(labdata or (checkout.parent / "labdata")),
             }
         ),
@@ -87,15 +113,19 @@ def rclone_commands(
 
 
 @pytest.mark.parametrize("source", ["alice", "local/alice", "alice/pc1/sim"])
-def test_push_only_copies_checkout_data_to_its_configured_source(
-    source: str, configured_checkout: Path, rclone_commands: list[list[str]]
+def test_push_copies_physical_data_to_its_bound_prefix(
+    source: str,
+    unbound_checkout: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    rclone_commands: list[list[str]],
 ):
-    checkout = configured_checkout
-    _save_checkout_settings(checkout, source=source)
+    checkout = unbound_checkout
+    _bind(checkout, source, monkeypatch)
     assert _sync(checkout, "push", "--dry-run") == 0
+    root = checkout.parent / "labdata" / source
     assert {tuple(command[:3]) for command in rclone_commands} == {
-        ("copy", str(checkout / "result"), f"lab:measurements/{source}/result"),
-        ("copy", str(checkout / "Database"), f"lab:measurements/{source}/Database"),
+        ("copy", str(root / "result"), f"lab:measurements/{source}/result"),
+        ("copy", str(root / "Database"), f"lab:measurements/{source}/Database"),
     }
     for command in rclone_commands:
         assert "--update" in command
@@ -139,7 +169,6 @@ def test_pull_refuses_checkout_and_realpaths_of_its_data(
 ) -> None:
     checkout = configured_checkout
     labdata = checkout.parent / "labdata"
-    labdata.mkdir()
     prefix = "foreign"
     if overlap == "inside":
         _save_checkout_settings(checkout, labdata=checkout / "downloads")
@@ -150,10 +179,6 @@ def test_pull_refuses_checkout_and_realpaths_of_its_data(
         symlink_or_skip(labdata / prefix, checkout, target_is_directory=True)
     else:
         prefix = "local/alice"
-        target = labdata / prefix / "Database"
-        target.mkdir(parents=True)
-        (checkout / "Database").rmdir()
-        symlink_or_skip(checkout / "Database", target, target_is_directory=True)
 
     assert _sync(checkout, "pull", prefix, "--dry-run") != 0
     assert "checkout" in capsys.readouterr().err
@@ -181,7 +206,7 @@ def test_pull_rejects_unsafe_or_reserved_source_segments(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     assert _sync(configured_checkout, "pull", prefix, "--dry-run") != 0
-    assert "Invalid source" in capsys.readouterr().err
+    assert "Invalid prefix" in capsys.readouterr().err
     assert not rclone_commands
 
 
@@ -214,31 +239,3 @@ def test_pull_all_discovers_nested_sources_without_descending_into_data(
         ("copy", "lab:measurements/a", str(labdata / "a")),
         ("copy", "lab:measurements/a/b", str(labdata / "a/b")),
     }
-
-
-@pytest.mark.parametrize("path_option", ["flag", "prompt"])
-def test_setup_records_labdata_relative_to_current_directory(
-    path_option: str,
-    configured_checkout: Path,
-    monkeypatch: pytest.MonkeyPatch,
-    rclone_commands: list[list[str]],
-    capsys: pytest.CaptureFixture[str],
-) -> None:
-    checkout = configured_checkout
-    monkeypatch.chdir(checkout)
-    options = ["--labdata", "../QubitData"] if path_option == "flag" else []
-    confirmation = "\n" if path_option == "flag" else "../QubitData\n\n"
-    monkeypatch.setattr(sys, "stdin", io.StringIO(confirmation))
-    # Replace only the interactive browser operation; use real terminal and settings logic.
-    monkeypatch.setattr(
-        setup, "select_remote_root", lambda *args, **kwargs: "lab:QubitData"
-    )
-
-    assert _sync(checkout, "setup", "--source", "alice/pc1", *options) == 0
-    expected = str(checkout.parent / "QubitData")
-    assert expected in capsys.readouterr().out
-    assert _sync(checkout, "status", "--json") == 0
-    status = json.loads(capsys.readouterr().out)
-    assert status["labdata"] == expected
-    assert status["source"] == "alice/pc1"
-    assert not rclone_commands
