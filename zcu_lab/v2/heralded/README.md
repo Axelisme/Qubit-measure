@@ -23,7 +23,7 @@
 
 ## 開新 tab 與載入搬移前的結果
 
-Registry key 是 `zcu_lab/v2/` 下的實驗目錄。GUI New Tab 與 MCP 的 `open_tab` 都用新 key。搬過來的三個入口保留原本的 Native tag，tag 用來識別檔案，不是另一個可開 tab 的 key。
+上表的 registry keys 採用[目錄命名慣例](../measure-authoring.md#目錄佈局)，對應 `zcu_lab/v2/` 下各實驗的目錄。GUI New Tab 與 MCP 的 `open_tab` 都用新 key。搬過來的三個入口保留原本的 Native tag，tag 用來識別檔案，不是另一個可開 tab 的 key。
 
 | 從 New Tab 或 MCP 開啟 | Native tag（不變） |
 | --- | --- |

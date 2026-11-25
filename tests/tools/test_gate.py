@@ -96,41 +96,92 @@ def test_main_status_reports_mcp_budget_overages_without_a_base(
     assert reading.split()[-1] == str(overage_count)
 
 
+_REGISTRY_CLEAN = (0, '{"violation_count": 0}', "")
+_REGISTRY_WARNING = (0, '{"violation_count": 1}', "warning: bad key\n")
+_REGISTRY_ERROR = (1, "", "Lab registration failed\n")
+_COMPARE = ["--base", "abcdef1234", "--no-fix"]
+
+
 @pytest.mark.parametrize(
-    ("argv", "expected_exit", "expected_reading"),
+    ("argv", "registry_receipt", "ratchet_exit", "gate_exit", "registry_row"),
     [
-        (["--base", "abcdef1234", "--no-fix"], 1, "FAIL registry key paths"),
-        ([], 0, "registry key paths 1"),
+        pytest.param(
+            _COMPARE, _REGISTRY_CLEAN, 0, 0, "ok registry key paths", id="clean"
+        ),
+        pytest.param(
+            _COMPARE, _REGISTRY_WARNING, 0, 0, "WARN registry key paths", id="warning"
+        ),
+        pytest.param(
+            _COMPARE,
+            _REGISTRY_ERROR,
+            0,
+            1,
+            "FAIL registry key paths",
+            id="registration-failure",
+        ),
+        pytest.param(
+            _COMPARE,
+            _REGISTRY_WARNING,
+            1,
+            1,
+            "WARN registry key paths",
+            id="ratchet-failure-with-warning",
+        ),
+        pytest.param(
+            [],
+            _REGISTRY_WARNING,
+            0,
+            0,
+            "registry key paths 1",
+            id="status-warning-count",
+        ),
+        pytest.param(
+            [],
+            _REGISTRY_ERROR,
+            0,
+            0,
+            "registry key paths unreadable",
+            id="status-missing-receipt",
+        ),
     ],
-    ids=["comparison-with-no-changed-files", "status"],
 )
-def test_main_runs_the_registry_path_check_and_reports_failures(
+def test_main_reports_registry_key_paths_without_hiding_gate_failures(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
     argv: list[str],
-    expected_exit: int,
-    expected_reading: str,
+    registry_receipt: tuple[int, str, str],
+    ratchet_exit: int,
+    gate_exit: int,
+    registry_row: str,
 ) -> None:
     def external_tool(
         command: tuple[str, ...], **_kwargs: object
     ) -> subprocess.CompletedProcess[str]:
         if any(Path(part).name == "check_registry_key_paths.py" for part in command):
-            return subprocess.CompletedProcess(
-                command, 1, '{"violation_count": 1}', "bad key"
-            )
+            return subprocess.CompletedProcess(command, *registry_receipt)
+        if any(Path(part).name == "check_ratchet.py" for part in command):
+            return subprocess.CompletedProcess(command, ratchet_exit, "{}", "")
         if command[:2] == ("git", "rev-parse"):
             return subprocess.CompletedProcess(command, 0, "abcdef1234\n", "")
         return subprocess.CompletedProcess(
-            command, 0, "" if command[0] == "git" else "{}", ""
+            command, 0, "" if command[0] == "git" else "{}", "other step stderr"
         )
 
-    # main has no process-runner injection. Stand in for the external tools so
-    # only the gate interprets their receipts and no Lab process is launched.
+    # main has no process-runner injection; replace external tool results only.
     monkeypatch.setattr(subprocess, "run", external_tool)
 
-    assert gate.main(argv) == expected_exit
-    rows = capsys.readouterr().out.splitlines()
-    assert any(row.split() == expected_reading.split() for row in rows)
+    assert gate.main(argv) == gate_exit
+    output = capsys.readouterr().out
+    assert registry_row in [" ".join(row.split()) for row in output.splitlines()]
+    assert "other step stderr" not in output
+    detail = registry_receipt[2].strip()
+    if argv:
+        assert ("FAIL ratchet" if ratchet_exit else "ok   ratchet") in output
+        if detail:
+            assert detail in output
+    else:
+        assert detail not in output
+        assert "not a verdict" in output
 
 
 def test_status_runs_a_shared_command_once_and_reads_each_count(

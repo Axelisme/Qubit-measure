@@ -1,4 +1,4 @@
-"""Check that lab registry keys match their experiment definition directories."""
+"""Warn when lab registry keys do not follow the definition directory convention."""
 
 from __future__ import annotations
 
@@ -43,21 +43,39 @@ class KeyPathViolation:
     expected: str
 
 
+@dataclass(frozen=True)
+class RegisteredKeyPathCheck:
+    """The advisory result after the Lab registrar successfully fills a Registry.
+
+    source_issues lists missing, duplicate, extra or invalid definition sources.
+    path_mismatches lists directory and variant mismatches; it is empty if any
+    source issue prevented the comparison.
+    """
+
+    source_issues: tuple[KeyPathViolation, ...]
+    path_mismatches: tuple[KeyPathViolation, ...]
+
+    @property
+    def paths_compared(self) -> bool:
+        """Return whether the complete set of definition paths was compared."""
+        return not self.source_issues
+
+
 def check_registry_key_paths(
     entries: Iterable[KeyDefinitionModule],
 ) -> tuple[KeyPathViolation, ...]:
     """Return violations in input order for named key and definition module pairs.
 
-    Supply the complete registry as dotted Python modules. A single entry in a
-    directory uses the full directory relative to zcu_lab/v2; multiple entries
-    in one directory each append exactly one nonempty variant segment. A module
-    with no definition directory under zcu_lab/v2 is itself a violation.
+    Supply the complete registry as dotted Python modules. By convention, a
+    single entry uses the full directory relative to zcu_lab/v2; multiple
+    entries in one directory each append exactly one nonempty variant segment.
+    A module with no definition directory under zcu_lab/v2 is also reported.
     """
     definitions = [(entry, _definition_directory(entry.module)) for entry in entries]
     counts = Counter(directory for _, directory in definitions if directory is not None)
     violations: list[KeyPathViolation] = []
-    # ADR-0074: the key carries the full directory and, only for shared leaves,
-    # one variant segment.
+    # ADR-0074: follow the key naming convention, with one variant segment
+    # only for shared directories.
     for entry, directory in definitions:
         key = entry.key
         if directory is None:
@@ -86,14 +104,14 @@ def _definition_directory(module: str) -> str | None:
 def check_registered_key_paths(
     registry: Registry,
     register_experiments: Callable[[Registry, Callable[[str, ModuleType], None]], None],
-) -> tuple[KeyPathViolation, ...]:
+) -> RegisteredKeyPathCheck:
     """Fill the supplied empty Registry and check the declared definition directories.
 
     The registrar receives a sink to call with the key and declaration module
-    after each registration. Return missing, duplicate, extra or invalid source
-    violations first: variant detection needs a complete set of valid sources.
-    Otherwise return directory violations. Registration errors propagate; no
-    adapter hooks run.
+    after each registration. If any source is missing, duplicate, extra or
+    invalid, report source issues and skip the entire path comparison: variant
+    detection needs a complete set of valid sources. Registration errors
+    propagate; no adapter hooks run.
     """
     sources: dict[str, list[ModuleType]] = {}
 
@@ -102,11 +120,11 @@ def check_registered_key_paths(
 
     register_experiments(registry, record_source)
     entries: list[KeyDefinitionModule] = []
-    violations: list[KeyPathViolation] = []
+    source_issues: list[KeyPathViolation] = []
     for key in registry.list_names():
         records = sources.pop(key, [])
         if len(records) != 1:
-            violations.append(
+            source_issues.append(
                 KeyPathViolation(
                     key,
                     f"{len(records)} definition sources",
@@ -116,14 +134,20 @@ def check_registered_key_paths(
             continue
         module = _source_module_name(records[0])
         if _definition_directory(module) is None:
-            violations.append(KeyPathViolation(key, module, _MODULE_SHAPE))
+            source_issues.append(KeyPathViolation(key, module, _MODULE_SHAPE))
         else:
             entries.append(KeyDefinitionModule(key, module))
-    violations.extend(
+    source_issues.extend(
         KeyPathViolation(key, "source for an unregistered key", "a registered key")
         for key in sources
     )
-    return tuple(violations) if violations else check_registry_key_paths(entries)
+    if source_issues:
+        return RegisteredKeyPathCheck(
+            source_issues=tuple(source_issues), path_mismatches=()
+        )
+    return RegisteredKeyPathCheck(
+        source_issues=(), path_mismatches=check_registry_key_paths(entries)
+    )
 
 
 def _source_module_name(source: object) -> str:
@@ -137,34 +161,50 @@ def main(argv: Sequence[str] | None = None) -> int:
     """Check this checkout's complete lab registry without opening a GUI or form.
 
     argv takes no options except --help; None reads sys.argv. Print a JSON
-    report with registered key and violation counts plus all violations, and
-    return 1 for violations or 0 otherwise. Lab assembly errors propagate.
+    receipt to stdout with the number of registered keys (checked_count) and
+    the count and details of all findings (violation_count and violations).
+    Print findings as warnings to stderr, including whether source issues
+    prevented comparison. Return 0 after successful registration; Lab import,
+    assembly, factory and Registry errors propagate.
     """
     argparse.ArgumentParser(description=__doc__).parse_args(argv)
 
     from zcu_tools.gui.app.measure.registry import Registry
 
-    # ADR-0072: read lab declarations only through its assembly entry point.
+    # ADR-0072: use Lab assembly and its advisory registration source callback.
     from zcu_lab.assembly import lab_definitions
 
     lab = lab_definitions()
     registry = Registry(templates=lab.templates)
-    violations = check_registered_key_paths(registry, lab.register_experiments)
+    result = check_registered_key_paths(registry, lab.register_experiments)
+    findings = (*result.source_issues, *result.path_mismatches)
     print(
         json.dumps(
             {
                 "checked_count": len(registry.list_names()),
-                "violation_count": len(violations),
-                "violations": [asdict(violation) for violation in violations],
+                "violation_count": len(findings),
+                "violations": [asdict(finding) for finding in findings],
             }
         )
     )
-    for violation in violations:
+    for issue in result.source_issues:
         print(
-            f"{violation.key!r}: actual {violation.actual!r}, expected {violation.expected!r}",
+            f"warning: {issue.key!r}: definition source: actual {issue.actual!r}, "
+            f"expected {issue.expected!r}",
             file=sys.stderr,
         )
-    return int(bool(violations))
+    if not result.paths_compared:
+        print(
+            "warning: registry key path comparison skipped because of definition source issues",
+            file=sys.stderr,
+        )
+    for mismatch in result.path_mismatches:
+        print(
+            f"warning: {mismatch.key!r}: definition directory {mismatch.actual!r}; "
+            f"suggested key: {mismatch.expected!r}",
+            file=sys.stderr,
+        )
+    return 0
 
 
 if __name__ == "__main__":
