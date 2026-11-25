@@ -1,6 +1,6 @@
 # Single-fluxonium acquisition
 
-**Last updated:** 2026-11-25, native drive timing
+**Last updated:** 2026-11-25, start-independent drive duration
 
 **Readers:** framework-dev, lab-author, agent. Compose complete fluxonium timelines with one physical readout cavity.
 
@@ -77,10 +77,13 @@ A null or omitted `settings.flux_line` keeps flux fixed at the live DC value.
 It binds no fast-flux generator and rejects foreign controls.
 Each `drive_lines` generator maps to its own named track, including overlapping events on different generators. Each source multiplies the full charge operator by its own complex calibration. Readout, fast-flux and microwave generator bindings must be distinct. Generator count is the largest bound index plus one; holes remain unbound. Unknown event generators fail in preflight with their event path and channel.
 Pass the originating request's `time_base` to interpret integer tick arrays.
-It converts QICK ticks/MHz/degrees into ns/GHz/radians. `TimeBase.ns` converts
-the compiled drive and readout pulse endpoints without resnapping. Readout grids
-combine trigger and sample offsets in ticks before conversion. Plan and
-preparation caches include the clock.
+The planner converts QICK ticks/MHz/degrees into ns/GHz/radians. Without
+resnapping, `TimeBase.ns` converts drive start and duration ticks separately,
+so equal duration ticks give equal durations at any onset. The drive ends at
+`start_ns + duration_ns`, within one ulp of the converted absolute end tick.
+Readout converts absolute start and end ticks separately. Readout grids combine
+trigger and sample offsets in ticks before conversion. Plan and preparation
+caches include the clock.
 Shared
 `experiment.readout_plan.drive_track` preserves signed gains, complex envelopes
 and the common carrier origin. Each template remains one `TimelineBatch`.
