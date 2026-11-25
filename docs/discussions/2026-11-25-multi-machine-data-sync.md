@@ -46,4 +46,4 @@ Prefix 不是存取控制。若兩個 checkout 選同一個 prefix，仍可覆�
 
 ## 後記
 
-後續保留同構資料樹，改以 checkout 連結至實體 Labdata。`push` 不再限於設定時的 prefix。推拉都可指定同一個 prefix，或省略 prefix 操作 checkout 綁定的資料。下載其他來源後，可用具名 `push` 明確回傳該資料集。單一 prefix 需要指定覆寫方向時，可使用 `--force`。現行用法見[資料同步指南](../data-sync.md#上傳與下載)。
+後續保留同構資料樹，改以 checkout 連結至實體 Labdata。`push` 不再限於設定時的 prefix。推拉都可指定同一個 prefix，或省略 prefix 操作 checkout 綁定的資料。下載其他來源後，可用具名 `push` 明確回傳該資料集。單一 prefix 需要指定覆寫方向時，可使用 `--force`。現行用法見[資料同步指南](../data-sync.md#上傳與下載)。輪流寫入同一 prefix 的需求後來另採[逐檔基準與雙向計畫](2026-11-25-bidirectional-labdata-sync.md)。

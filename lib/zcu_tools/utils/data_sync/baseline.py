@@ -11,7 +11,14 @@ from typing import TypedDict
 
 from zcu_tools.utils import atomic_replace
 
-from .inventory import FileStamp, file_stamp, is_data_path, list_checkable_files
+from .inventory import (
+    FileInventory,
+    FileStamp,
+    ListedFile,
+    file_stamp,
+    is_data_path,
+    list_files,
+)
 
 _VERSION = 1
 
@@ -120,19 +127,34 @@ def verify_pair(
     invalid listing; matching metadata alone cannot verify a file.
     """
     origin, destination = (local, remote) if push else (remote, local)
-    source_files = list_checkable_files(binary, config_dir, origin)
-    if not source_files:
+    source = list_files(binary, config_dir, origin)
+    if not any(
+        file.md5 is not None and file.size_bytes is not None
+        for file in source.files.values()
+    ):
         return {}
-    destination_files = list_checkable_files(binary, config_dir, destination)
-    local_files, remote_files = (
-        (source_files, destination_files) if push else (destination_files, source_files)
+    target = list_files(binary, config_dir, destination)
+    return (
+        verified_entries(source, target) if push else verified_entries(target, source)
     )
-    verified: dict[str, BaselineEntry] = {}
-    for path in local_files.keys() & remote_files.keys():
-        left, right = local_files[path], remote_files[path]
-        if (
-            left.md5 == right.md5
-            and left.stamp["size_bytes"] == right.stamp["size_bytes"]
-        ):
-            verified[path] = {"local": left.stamp, "remote": right.stamp}
-    return verified
+
+
+def verified_entry(local: ListedFile, remote: ListedFile) -> BaselineEntry | None:
+    """Return the two stamps only when size and MD5 prove the contents match."""
+    if local.md5 is None or local.md5 != remote.md5:
+        return None
+    left, right = local.stamp(), remote.stamp()
+    if left is None or right is None or left["size_bytes"] != right["size_bytes"]:
+        return None
+    return {"local": left, "remote": right}
+
+
+def verified_entries(
+    local: FileInventory, remote: FileInventory
+) -> dict[str, BaselineEntry]:
+    """Return verified stamps for matching files uniquely listed on both sides."""
+    return {
+        path: entry
+        for path in local.files.keys() & remote.files.keys()
+        if (entry := verified_entry(local.files[path], remote.files[path])) is not None
+    }

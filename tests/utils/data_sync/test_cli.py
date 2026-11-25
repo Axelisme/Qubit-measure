@@ -143,6 +143,392 @@ def test_default_push_and_pull_use_the_bound_labdata_prefix(
     assert not (physical / "outside/notes.txt").exists()
 
 
+def test_sync_previews_both_directions_then_copies_only_selected_data(
+    unbound_checkout: Path, local_cloud: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    labdata = unbound_checkout / "Labdata"
+    local, remote = labdata / "local/alice", local_cloud / "local/alice"
+    upload, download = "result/ #run [1].h5", "Database/device.yml"
+    for root, path in (
+        (local, upload),
+        (remote, download),
+        (local, "Database/stale.lock"),
+        (remote, "outside/notes.txt"),
+    ):
+        _write_file(root, path, path.encode(), mtime=1_700_000_000)
+
+    assert _sync(unbound_checkout, "sync", "--dry-run") == 0
+    plan = capsys.readouterr().out
+    assert f"Upload: {upload!r}" in plan
+    assert f"Download: {download!r}" in plan
+    assert not (local / download).exists()
+    assert not (remote / upload).exists()
+    assert not _state_dir(labdata).exists()
+
+    assert _sync(unbound_checkout, "sync", "local/alice", "--jobs", "2") == 0
+    assert (remote / upload).read_bytes() == upload.encode()
+    assert (local / download).read_bytes() == download.encode()
+    assert not (remote / "Database/stale.lock").exists()
+    assert not (local / "outside/notes.txt").exists()
+    record = _only_baseline(labdata)
+    assert _baseline_files(record).keys() == {upload, download}
+    capsys.readouterr()
+
+    assert _sync(unbound_checkout, "sync") == 0
+    plan = capsys.readouterr().out
+    assert f"Skip: {upload!r}" in plan
+    assert f"Skip: {download!r}" in plan
+    assert not (remote / ".data-sync").exists()
+
+
+@pytest.mark.parametrize("tie_content", [b"same", b"diff"])
+def test_initial_sync_orders_nanosecond_times_and_checks_content_on_ties(
+    tie_content: bytes,
+    unbound_checkout: Path,
+    local_cloud: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    labdata = unbound_checkout / "Labdata"
+    local, remote = labdata / "local/alice", local_cloud / "local/alice"
+    upload, download, tie = "result/new-local.h5", "Database/new-cloud", "result/tie.h5"
+    stamp = 1_700_000_000
+    for path, newer, older in ((upload, local, remote), (download, remote, local)):
+        _write_file(older, path, b"old", mtime=stamp)
+        _write_file(newer, path, b"new", mtime=stamp)
+        # The bare second sorts after the fractional timestamp as a UTC string.
+        nanos = stamp * 10**9 + 100
+        os.utime(newer / path, ns=(nanos, nanos))
+    _write_file(local, tie, b"same", mtime=stamp)
+    _write_file(remote, tie, tie_content, mtime=stamp)
+
+    conflict = tie_content != b"same"
+    assert _sync(unbound_checkout, "sync") == int(conflict)
+    plan = capsys.readouterr().out
+    assert f"Upload: {upload!r}" in plan
+    assert f"Download: {download!r}" in plan
+    assert (remote / upload).read_bytes() == (b"old" if conflict else b"new")
+    assert (local / download).read_bytes() == (b"old" if conflict else b"new")
+    if conflict:
+        assert f"Conflict: {tie!r}" in plan
+        assert not _state_dir(labdata).exists()
+    else:
+        assert f"Skip: {tie!r}" in plan
+        assert _baseline_files(_only_baseline(labdata)).keys() == {
+            tie,
+            upload,
+            download,
+        }
+
+
+@pytest.mark.parametrize("cloud_edit", [b"agreed", b"differ"])
+def test_sync_uses_each_endpoints_baseline_and_checks_two_edits(
+    cloud_edit: bytes,
+    unbound_checkout: Path,
+    local_cloud: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    labdata = unbound_checkout / "Labdata"
+    local, remote = labdata / "local/alice", local_cloud / "local/alice"
+    upload, download, both = "result/upload.h5", "result/download.h5", "Database/shared"
+    stamp = 1_700_000_000
+    for path in (upload, download, both):
+        _write_file(local, path, b"base", mtime=stamp)
+        _write_file(remote, path, b"base", mtime=stamp + 100)
+    assert _sync(unbound_checkout, "push") == 0
+    record = _only_baseline(labdata)
+    previous = record.read_bytes()
+    capsys.readouterr()
+
+    _write_file(local, upload, b"edit", mtime=stamp - 50)
+    _write_file(remote, download, b"larger size at the same time", mtime=stamp + 100)
+    _write_file(local, both, b"agreed", mtime=stamp + 10)
+    _write_file(remote, both, cloud_edit, mtime=stamp + 200)
+    conflict = cloud_edit != b"agreed"
+    assert _sync(unbound_checkout, "sync") == int(conflict)
+    plan = capsys.readouterr().out
+    assert f"Upload: {upload!r}" in plan
+    assert f"Download: {download!r}" in plan
+    if conflict:
+        assert f"Conflict: {both!r}" in plan
+        assert (
+            (remote / upload).read_bytes() == (local / download).read_bytes() == b"base"
+        )
+        assert record.read_bytes() == previous
+    else:
+        assert f"Skip: {both!r}" in plan
+        assert (remote / upload).read_bytes() == b"edit"
+        assert (remote / upload).stat().st_mtime == stamp - 50
+        assert (local / download).read_bytes() == b"larger size at the same time"
+        assert record.read_bytes() != previous
+        assert _sync(unbound_checkout, "sync", "--dry-run") == 0
+        assert "Upload:" not in (plan := capsys.readouterr().out)
+        assert "Download:" not in plan
+
+
+def test_sync_stops_on_one_deletion_and_retires_a_baseline_after_both_deletions(
+    unbound_checkout: Path, local_cloud: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    labdata = unbound_checkout / "Labdata"
+    local, remote = labdata / "local/alice", local_cloud / "local/alice"
+    removed, upload = "result/remove.h5", "Database/new.yml"
+    _write_file(local, removed, b"before", mtime=1_700_000_000)
+    assert _sync(unbound_checkout, "push") == 0
+    record = _only_baseline(labdata)
+    previous = record.read_bytes()
+    capsys.readouterr()
+    (local / removed).unlink()
+    _write_file(local, upload, b"new", mtime=1_700_001_000)
+
+    assert _sync(unbound_checkout, "sync") == 1
+    plan = capsys.readouterr().out
+    assert f"Conflict: {removed!r}" in plan and "deleted" in plan
+    assert f"Upload: {upload!r}" in plan
+    assert not (local / removed).exists()
+    assert (remote / removed).read_bytes() == b"before"
+    assert not (remote / upload).exists()
+    assert record.read_bytes() == previous
+
+    (remote / removed).unlink()
+    assert _sync(unbound_checkout, "sync", "--dry-run") == 0
+    assert f"Skip: {removed!r}" in capsys.readouterr().out
+    assert not (remote / upload).exists()
+    assert record.read_bytes() == previous
+    assert _sync(unbound_checkout, "sync") == 0
+    assert not (local / removed).exists() and not (remote / removed).exists()
+    assert (remote / upload).read_bytes() == b"new"
+    assert _baseline_files(record).keys() == {upload}
+
+
+def test_sync_reports_unverified_transfers_and_preserves_their_baselines(
+    unbound_checkout: Path,
+    local_cloud: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    labdata = unbound_checkout / "Labdata"
+    local, remote = labdata / "local/alice", local_cloud / "local/alice"
+    no_hash, verified, deleted = (
+        "result/no-hash.h5",
+        "Database/verified",
+        "result/deleted",
+    )
+    for path in (no_hash, verified, deleted):
+        _write_file(local, path, b"base", mtime=1_700_000_000)
+    assert _sync(unbound_checkout, "push") == 0
+    record = _only_baseline(labdata)
+    previous = _baseline_files(record)
+    for root in local, remote:
+        (root / deleted).unlink()
+    _write_file(local, no_hash, b"unverified new", mtime=1_700_001_000)
+    _write_file(remote, verified, b"verified new", mtime=1_700_001_000)
+    run_cli = rclone.run_cli
+
+    def hide_local_hash(
+        binary: Path, config: Path, args: list[str], *, capture_output: bool = False
+    ) -> subprocess.CompletedProcess[str]:
+        result = run_cli(binary, config, args, capture_output=capture_output)
+        if args[:2] == ["lsjson", str(local)] and not result.returncode:
+            entries: list[dict[str, object]] = json.loads(result.stdout)
+            for entry in entries:
+                if entry["Path"] == no_hash:
+                    entry.pop("Hashes", None)
+            return subprocess.CompletedProcess(result.args, 0, json.dumps(entries))
+        return result
+
+    # Model an endpoint without MD5 for this file, both before and after copying.
+    monkeypatch.setattr(rclone, "run_cli", hide_local_hash)
+    assert _sync(unbound_checkout, "sync") == 1
+    error = capsys.readouterr().err
+    assert "Could not verify" in error and no_hash in error and verified not in error
+    assert (remote / no_hash).read_bytes() == b"unverified new"
+    assert (local / verified).read_bytes() == b"verified new"
+    latest = _baseline_files(record)
+    assert latest[no_hash] == previous[no_hash]
+    assert latest[verified] != previous[verified]
+    assert latest[deleted] == previous[deleted]
+
+
+def test_sync_preflights_directory_collisions_in_the_second_batch(
+    unbound_checkout: Path, local_cloud: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    local = unbound_checkout / "Labdata/local/alice"
+    remote = local_cloud / "local/alice"
+    upload, download = "Database/new", "result/occupied"
+    _write_file(local, upload, b"upload", mtime=1_700_000_000)
+    _write_file(remote, download, b"download", mtime=1_700_000_000)
+    (local / download).mkdir()
+
+    assert _sync(unbound_checkout, "sync") == 1
+    assert f"Conflict: {download!r}" in capsys.readouterr().out
+    assert not (remote / upload).exists()
+    assert (local / download).is_dir()
+    assert not _state_dir(unbound_checkout / "Labdata").exists()
+
+
+def test_two_checkouts_take_turns_syncing_through_a_fresh_cloud_root(
+    unbound_checkout: Path, local_cloud: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    first = unbound_checkout
+    second = first.parent / "second-checkout"
+    second.mkdir()
+    _bind(second, "local/alice", monkeypatch, labdata=second / "Labdata")
+    remote = local_cloud / "local/alice"
+    path = "result/run.h5"
+    stamp = 1_700_000_000
+    _write_file(first, path, b"initial run", mtime=stamp)
+
+    assert _sync(first, "sync", "--dry-run") == 0
+    assert not remote.exists()
+    assert _sync(first, "sync") == 0
+    assert (remote / path).read_bytes() == b"initial run"
+    assert _sync(second, "sync") == 0
+    assert (second / path).read_bytes() == b"initial run"
+
+    _write_file(second, path, b"next run", mtime=stamp + 20)
+    assert _sync(second, "sync") == 0
+    _write_file(first, "Database/note", b"local analysis", mtime=stamp + 10)
+    assert _sync(first, "sync") == 0
+    assert (first / path).read_bytes() == b"next run"
+    assert (remote / "Database/note").read_bytes() == b"local analysis"
+    assert (second / path).read_bytes() == b"next run"
+    assert not (second / "Database/note").exists()
+
+
+def test_sync_named_prefix_accepts_absent_roots_without_creating_them_on_preview(
+    unbound_checkout: Path, local_cloud: Path, capfd: pytest.CaptureFixture[str]
+) -> None:
+    prefix, path = "other/new", "Database/device.yml"
+    local = unbound_checkout / "Labdata" / prefix
+    remote = local_cloud / prefix
+    assert _sync(unbound_checkout, "sync", prefix) == 0
+    assert "directory not found" not in capfd.readouterr().err
+    assert not local.exists() and not remote.exists()
+    _write_file(remote, path, b"new data", mtime=1_700_000_000)
+    assert _sync(unbound_checkout, "sync", prefix, "--dry-run") == 0
+    assert not local.exists()
+    assert _sync(unbound_checkout, "sync", prefix) == 0
+    assert (local / path).read_bytes() == b"new data"
+    assert not (unbound_checkout / path).exists()
+
+
+@pytest.mark.parametrize(
+    "fault", ["recursive_failure", "duplicate", "no_hash", "unencodable"]
+)
+def test_sync_does_not_start_batches_for_unsafe_or_incomplete_inventory(
+    fault: str,
+    unbound_checkout: Path,
+    local_cloud: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    local = unbound_checkout / "Labdata/local/alice"
+    remote = local_cloud / "local/alice"
+    upload, other = "Database/new", "result/other.h5"
+    stamp = 1_700_000_000
+    _write_file(local, upload, b"upload", mtime=stamp)
+    _write_file(remote, other, b"remote", mtime=stamp)
+    if fault == "no_hash":
+        _write_file(local, other, b"remote", mtime=stamp)
+    run_cli = rclone.run_cli
+
+    def faulty_listing(
+        binary: Path, config: Path, args: list[str], *, capture_output: bool = False
+    ) -> subprocess.CompletedProcess[str]:
+        if args[:2] != ["lsjson", "lab:measurements/local/alice"] or "--stat" in args:
+            return run_cli(binary, config, args, capture_output=capture_output)
+        if fault == "recursive_failure":
+            return subprocess.CompletedProcess(args, 3, "[\n")
+        result = run_cli(binary, config, args, capture_output=capture_output)
+        entries: list[dict[str, object]] = json.loads(result.stdout)
+        entry = next(row for row in entries if row.get("Path") == other)
+        if fault == "duplicate":
+            entries.append({**entry, "Size": 99})
+        elif fault == "no_hash":
+            entry.pop("Hashes", None)
+        elif fault == "unencodable":
+            entry["Path"] = "result/\ud800.h5"
+        return subprocess.CompletedProcess(result.args, 0, json.dumps(entries))
+
+    # The real local backend cannot emit these Drive or transport failures.
+    monkeypatch.setattr(rclone, "run_cli", faulty_listing)
+    assert _sync(unbound_checkout, "sync") == 1
+    output = capsys.readouterr()
+    expected = {
+        "recursive_failure": "Could not list",
+        "duplicate": "duplicate path",
+        "no_hash": "cannot be verified",
+        "unencodable": "Cannot encode sync path",
+    }
+    assert expected[fault] in output.err + output.out
+    assert not (remote / upload).exists()
+    assert not _state_dir(unbound_checkout / "Labdata").exists()
+
+
+@pytest.mark.parametrize("failure", ["second-copy", "verification"])
+def test_failed_sync_does_not_publish_a_baseline_after_partial_effects(
+    failure: str,
+    unbound_checkout: Path,
+    local_cloud: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    local = unbound_checkout / "Labdata/local/alice"
+    remote = local_cloud / "local/alice"
+    upload, download = "Database/new", "result/new.h5"
+    _write_file(local, upload, b"upload", mtime=1_700_000_000)
+    _write_file(remote, download, b"download", mtime=1_700_000_000)
+    run_cli = rclone.run_cli
+
+    def fail_after_upload(
+        binary: Path, config: Path, args: list[str], *, capture_output: bool = False
+    ) -> subprocess.CompletedProcess[str]:
+        if failure == "second-copy" and args[:2] == [
+            "copy",
+            "lab:measurements/local/alice",
+        ]:
+            return subprocess.CompletedProcess(args, 7)
+        if (
+            failure == "verification"
+            and args[0] == "lsjson"
+            and (local / download).exists()
+        ):
+            return subprocess.CompletedProcess(args, 7, "[\n")
+        return run_cli(binary, config, args, capture_output=capture_output)
+
+    # Leave the actual first transfer in place and fail at the transport boundary.
+    monkeypatch.setattr(rclone, "run_cli", fail_after_upload)
+    assert _sync(unbound_checkout, "sync") == (7 if failure == "second-copy" else 1)
+    assert (remote / upload).read_bytes() == b"upload"
+    assert not _state_dir(unbound_checkout / "Labdata").exists()
+    if failure == "verification":
+        assert (local / download).read_bytes() == b"download"
+        assert "sync baseline was not updated" in capsys.readouterr().err
+    else:
+        assert not (local / download).exists()
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX literal CR, LF and backslash")
+def test_sync_preserves_literal_path_characters_in_both_batches(
+    unbound_checkout: Path, local_cloud: Path
+) -> None:
+    local = unbound_checkout / "Labdata/local/alice"
+    remote = local_cloud / "local/alice"
+    upload = "result/ # [a]*\r\n\\  "
+    download = "Database/; [b]?\n "
+    _write_file(local, upload, b"local", mtime=1_700_000_000)
+    _write_file(remote, download, b"cloud", mtime=1_700_000_000)
+
+    assert _sync(unbound_checkout, "sync") == 0
+    assert (remote / upload).read_bytes() == b"local"
+    assert (local / download).read_bytes() == b"cloud"
+
+
+def test_sync_rejects_force(unbound_checkout: Path) -> None:
+    with pytest.raises(SystemExit) as error:
+        _sync(unbound_checkout, "sync", "--force")
+    assert error.value.code == 2
+
+
 def _state_dir(labdata: Path) -> Path:
     return labdata / ".data-sync/state"
 

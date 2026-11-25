@@ -178,8 +178,8 @@ def run_cli(
     """Run arguments against config_dir/rclone.conf without interactive prompts.
 
     The caller supplies a verified binary and CLI arguments without global account
-    flags. Stdout is inherited unless requested as UTF-8 text. Stderr is inherited.
-    Return the subprocess status, and stop the subprocess if interrupted.
+    flags. Inherit stdout and stderr unless capture_output requests both as UTF-8
+    text. Return the subprocess status, and stop the subprocess if interrupted.
     """
     command = [
         str(binary),
@@ -192,11 +192,14 @@ def run_cli(
         command,
         stdin=subprocess.DEVNULL,
         stdout=subprocess.PIPE if capture_output else None,
+        stderr=subprocess.PIPE if capture_output else None,
         encoding="utf-8",
     ) as process:
         try:
-            stdout, _ = process.communicate()
-            return subprocess.CompletedProcess(command, process.returncode, stdout)
+            stdout, stderr = process.communicate()
+            return subprocess.CompletedProcess(
+                command, process.returncode, stdout, stderr
+            )
         finally:
             _stop_process(process)
 

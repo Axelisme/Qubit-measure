@@ -2,11 +2,11 @@
 
 **讀者：** operator、agent。將 checkout 綁到 Labdata，在多台電腦間傳輸量測資料。
 
-**Last updated:** 2026-11-25
+**Last updated:** 2026-11-26
 
 ## 資料放在哪裡
 
-每個 Labdata prefix 有一個實體本機資料根和一個雲端資料根。例如 prefix `alice/pc1/sim` 可對應 `~/QubitData/alice/pc1/sim` 與 `lab-drive:QubitData/alice/pc1/sim`。兩端都用 `result/` 和 `Database/` 存放資料。Checkout 的同名目錄連到綁定的本機資料根。推拉都使用實體路徑。
+每個 Labdata prefix 有一個實體本機資料根和一個雲端資料根。例如 prefix `alice/pc1/sim` 可對應 `~/QubitData/alice/pc1/sim` 與 `lab-drive:QubitData/alice/pc1/sim`。兩端都用 `result/` 和 `Database/` 存放資料。Checkout 的同名目錄連到綁定的本機資料根。推拉與雙向同步都使用實體路徑。
 
 Prefix 識別資料集，不由主機名或使用者名推導。在另一台電腦綁定同一個 prefix 和雲端根，就會使用同一份雲端資料，本機 Labdata 可以放在不同位置。Prefix 可用一段或多段名稱，段與段用 `/` 分隔。不能有空段、`.`、`..`、反斜線，或名為 `result`、`Database` 的段。
 
@@ -47,7 +47,7 @@ uv run --directory . --no-sync -- python scripts/sync_data.py pull alice/pc1/sim
 uv run --directory . --no-sync -- python scripts/sync_data.py pull --all
 ```
 
-`status --json` 讀本機設定與連結，不測試雲端連線或授權。`bound` 表示兩個連結都到達設定的目標；`configured` 還要求本機有 `rclone.conf`。任一條件不符時回傳 1。未設定的 `push`、`pull`、`sources` 會提示先執行 setup，不開瀏覽器。
+`status --json` 讀本機設定與連結，不測試雲端連線或授權。`bound` 表示兩個連結都到達設定的目標；`configured` 還要求本機有 `rclone.conf`。任一條件不符時回傳 1。未設定的 `push`、`pull`、`sync`、`sources` 會提示先執行 setup，不開瀏覽器。
 
 `push` 從本機 Labdata 上傳到雲端，`pull` 往反方向下載。省略 prefix 時，兩個命令都用 checkout 綁定的值。指定 prefix 時，兩端都在各自的根接上同一段路徑。操作綁定的 prefix 前，工具會檢查 checkout 的兩個連結。缺少連結或連結指錯位置時會停止，請檢查後重跑 setup。
 
@@ -73,6 +73,29 @@ uv run --directory . --no-sync -- python scripts/sync_data.py pull alice/pc1/sim
 rclone copy --update --exclude '*.lock' "$checkout/Database" "$cloud_root/$prefix/Database"
 rclone copy --update --exclude '*.lock' "$checkout/result" "$cloud_root/$prefix/result"
 ```
+
+## 兩台電腦輪流接手
+
+在兩台電腦各執行一次 `setup`，選同一個雲端根與 prefix。本機 Labdata 可以不同。交接前先結束量測與存檔，再預覽同步。無衝突才正式執行，返回 0 後再到另一台電腦執行同樣的步驟。
+
+```bash
+uv run --directory . --no-sync -- python scripts/sync_data.py sync --dry-run
+uv run --directory . --no-sync -- python scripts/sync_data.py sync
+```
+
+省略 prefix 時，`sync` 使用 checkout 的綁定。也可以指定一個 prefix，例如 `sync alice/pc1/sim --dry-run`。`sync` 不支援 `--all` 或 `--force`。`--jobs` 設定每個方向的平行傳輸數量，預設 8。
+
+預覽會讀兩端的資料與本機基準，列出 `Upload`、`Download`、`Skip` 和 `Conflict`，不傳檔、不寫基準。第一次遇到沒有基準的路徑時，單邊檔案會複製到另一端。兩端都有檔案就取修改時間較新的一份。時間相同時，只有內容可確認相同才略過，否則報衝突。兩台電腦的基準各自保存在自己的 Labdata，不會隨檔案上傳。第一次同步前請核對時間較新的一側確實是要留下的版本。
+
+有基準時，各端用自己的時間與大小判斷是否修改。只有一端修改就傳那一份，即使修改後的時間比另一端舊。兩端都修改時，只有大小和 MD5 相符才略過。保留原時間與大小的覆寫可能不會被判為修改；略過不代表每次都重新證實一致。
+
+有任何衝突或單邊刪除時，命令回傳非零，該 prefix 不開始傳檔：
+
+- 內容衝突或缺少可比對的資訊時，先在同步範圍外備份兩份資料，再核對內容。確定要保留哪一端後，可用單向 `push --force` 或 `pull --force` 指定來源。這會覆寫該 prefix 的同名目的端檔案，不只覆寫衝突清單。若只想改一個檔案，請自行處理該檔後再預覽。
+- 若清單指出同一路徑有多個雲端物件，或目的路徑已被檔案或目錄占用，先核對並整理路徑再預覽。工具不會替你選其中一份。
+- 單邊刪除時，先決定是否恢復缺少的一側。若確定兩端都不再需要該檔案，備份後手動刪除剩下的一份。兩端都無原檔時，下一次成功的 `sync` 會移除該筆基準，不操作資料；預覽仍不寫基準。
+
+正式同步只複製計畫選定的檔案。複製後核對兩端大小及 MD5。若某些傳輸無法確認一致，命令會列出路徑並回傳非零；已確認的項目才更新基準，其餘保留原紀錄。若複製或整批核對失敗，該次不更新基準，已傳的檔案也不回滾。遇到任何非零結果，先檢查兩端再重跑預覽，不要把它當成交接完成。
 
 ## 開啟外來來源
 

@@ -12,6 +12,7 @@ from pathlib import Path
 
 from . import rclone, setup
 from .baseline import BaselineEntry, BaselineStore, verify_pair
+from .bidirectional import SyncPair, sync_pair
 from .binding import bind_checkout, binding_issues, require_binding
 from .discovery import list_sources
 from .inventory import data_filters
@@ -77,16 +78,25 @@ def _parser() -> argparse.ArgumentParser:
         help="Pull all discovered sources except this checkout's",
     )
     _add_copy_options(pull)
+    sync = actions.add_parser("sync", help="Plan and copy changes in both directions")
+    sync.add_argument(
+        "prefix", nargs="?", help="Labdata prefix (default: bound prefix)"
+    )
+    _add_transfer_options(sync)
     actions.add_parser("sources", help="List discovered cloud source prefixes")
     return parser
 
 
 def _add_copy_options(parser: argparse.ArgumentParser) -> None:
-    parser.add_argument(
-        "--dry-run", action="store_true", help="Report changes without copying"
-    )
+    _add_transfer_options(parser)
     parser.add_argument(
         "--force", action="store_true", help="Overwrite from the source for one prefix"
+    )
+
+
+def _add_transfer_options(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument(
+        "--dry-run", action="store_true", help="Report changes without copying"
     )
     parser.add_argument(
         "-j", "--jobs", type=int, default=8, help="Parallel transfers (default: 8)"
@@ -138,24 +148,28 @@ def _status(
     return 0 if configured else 1
 
 
-def _copy_options(args: argparse.Namespace) -> list[str]:
+def _copy_tuning(jobs: int) -> list[str]:
     command = [
         "--fast-list",
         "--checkers",
         "16",
         "--transfers",
-        str(args.jobs),
+        str(jobs),
         "--drive-pacer-min-sleep",
         "10ms",
         "--drive-pacer-burst",
         "200",
         "-v",
     ]
-    command += (
+    return command + (
         ["--progress"]
         if sys.stdout.isatty()
         else ["--stats", "10s", "--stats-one-line"]
     )
+
+
+def _copy_options(args: argparse.Namespace) -> list[str]:
+    command = _copy_tuning(args.jobs)
     # Dropping --update alone would still skip files with equal size and mtime.
     command.append("--ignore-times" if args.force else "--update")
     if args.dry_run:
@@ -288,6 +302,30 @@ def _copy_and_record(
     return 0
 
 
+def _run_sync(
+    checkout: Path,
+    selection: SyncSettings,
+    cache_dir: Path,
+    config_dir: Path,
+    args: argparse.Namespace,
+) -> int:
+    prefix = selection.prefix if args.prefix is None else validate_prefix(args.prefix)
+    if prefix == selection.prefix:
+        require_binding(checkout, selection)
+    pair = SyncPair(
+        str(_transfer_root(checkout, selection, prefix)),
+        selection.remote_path(prefix),
+        BaselineStore(selection.labdata, selection.remote_root, prefix),
+    )
+    return sync_pair(
+        rclone.prepare_rclone(cache_dir),
+        config_dir,
+        pair,
+        dry_run=args.dry_run,
+        copy_tuning=_copy_tuning(args.jobs),
+    )
+
+
 def _run_setup(
     checkout: Path, config_dir: Path, cache_dir: Path, args: argparse.Namespace
 ) -> int:
@@ -350,6 +388,8 @@ def _run(args: argparse.Namespace, checkout: Path) -> int:
         return 0
     if args.jobs < 1:
         raise ValueError("--jobs must be positive.")
+    if args.action == "sync":
+        return _run_sync(checkout, selection, cache_dir, config_dir, args)
     return _transfer(checkout, selection, cache_dir, config_dir, args)
 
 
@@ -360,10 +400,11 @@ def main(argv: list[str] | None = None, *, checkout: Path) -> int:
     syntax. Only setup opens the browser. Transfers copy result/ and Database/
     under the chosen Labdata prefix, defaulting to the checkout's bound prefix.
     Transferring the bound prefix requires both checkout links to be valid.
-    --force overwrites from the source for one prefix only. Neither direction
-    deletes destination-only files. A successful non-dry-run copy verifies file
-    contents before advancing the shared Labdata baseline. An unreadable baseline
-    blocks the copy; verification or save failures after copy return nonzero.
+    push and pull accept --force for a single prefix; sync does not. Transfers
+    do not propagate deletions. sync plans both directions before copying and
+    returns nonzero for conflicts or unverified transfers. Dry runs do not write
+    files or the baseline. Non-preview commands verify file contents before
+    advancing the shared Labdata baseline.
     """
     parser = _parser()
     try:

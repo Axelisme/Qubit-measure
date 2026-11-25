@@ -24,7 +24,7 @@ uv run --directory <worktree> --no-sync -- python -m apps.measure
 ## 操作與量測
 
 - [量測領域詞彙](docs/CONTEXT.md) 說明參數、量測成果與分析交接用語。
-- [多台電腦的資料同步](docs/data-sync.md)：用 `scripts/sync_data.py` 將 checkout 綁到 Labdata 的一個 prefix，再上傳或下載同一資料集。
+- [多台電腦的資料同步](docs/data-sync.md)：用 `scripts/sync_data.py` 將 checkout 綁到 Labdata 的一個 prefix，再上傳、下載或預覽並執行雙向同步。
 - [Notebook 用途入口](notebook_md/README.md) 指向量測、分析與電路設計主題；執行流程由各 Notebook 說明。
 
 ## 資料遷移與升級
