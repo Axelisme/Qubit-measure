@@ -11,11 +11,14 @@
 - `settings` 保存 checkout 的 `.data-sync/sync.json`，內含雲端根、預設 prefix 與本機 Labdata 根。不保存帳號憑證。舊第 1 版設定需重跑 setup。
 - `setup` 沿用官方 GUI 授權與唯讀瀏覽。操作者確認兩端資料根、`binding` 驗證兩個連結後，CLI 才保存 checkout 設定。
 - `discovery` 從一次遞迴的雲端目錄列舉找出來源。來源直接含 `result/` 或 `Database/`；這兩個目錄下的內容不參與探索。
+- `inventory` 沿用複製的範圍，透過 rclone 批量取得檔案的大小、修改時間及可用的 MD5。`baseline` 核對兩端內容，讀寫 Labdata 下每個雲端根與 prefix 共有的基準。
 - `rclone` 驗證固定版工具，啟動及清理本機 GUI 和 CLI 程序。使用者層的 `rclone.conf` 與工具快取沿用既有的 `qubit-measure/result-transfer` 路徑。
 
 ## 傳輸契約
 
-對每個 prefix，rclone 批量複製 `result/` 和 `Database/` 下的檔案，排除 `*.lock`。普通推拉使用 `copy --update`。單一 prefix 的 `--force` 改用 `copy --ignore-times`，以免 rclone 用相同的大小和修改時間略過同名檔案。兩種模式都不刪目的端獨有的檔案。`--dry-run` 不傳輸。
+對每個 prefix，rclone 批量複製 `result/` 和 `Database/` 下的檔案，排除 `*.lock`。普通推拉使用 `copy --update`。單一 prefix 的 `--force` 改用 `copy --ignore-times`，以免 rclone 用相同的大小和修改時間略過同名檔案。兩種模式都不刪目的端獨有的檔案。`--dry-run` 不傳輸，也不讀寫基準。
+
+正式推拉先讀取所有選定 prefix 的 `<labdata>/.data-sync/state/<pair-id>.json`。檔名根據雲端根和 prefix 產生，同一 Labdata 的 checkout 共用紀錄。損壞或未知版本的紀錄會阻止複製。每個 prefix 複製成功後，才核對兩端同一路徑的大小和 MD5。無共同 MD5、內容不一致或同一路徑有多個物件時，不推進該檔的基準。基準保存兩端各自的 UTC 修改時間和位元組數，以原子替換更新。傳輸不會上傳這份紀錄。
 
 傳輸測試透過 `cli.main` 使用暫存資料根。執行 `pytest tests/utils/data_sync` 前，將 `DATA_SYNC_TEST_RCLONE` 指向 `rclone.prepare_rclone` 在隔離快取中驗證的執行檔，即可跑實際的本機後端測試。測試不連雲端，也不讀使用者的 rclone 帳號。
 

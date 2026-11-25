@@ -7,11 +7,14 @@ import json
 import subprocess
 import sys
 import zipfile
+from dataclasses import dataclass
 from pathlib import Path
 
 from . import rclone, setup
+from .baseline import BaselineEntry, BaselineStore, verify_pair
 from .binding import bind_checkout, binding_issues, require_binding
 from .discovery import list_sources
+from .inventory import data_filters
 from .settings import (
     DATA_DIRS,
     SyncSettings,
@@ -147,8 +150,6 @@ def _copy_options(args: argparse.Namespace) -> list[str]:
         "--drive-pacer-burst",
         "200",
         "-v",
-        "--filter",
-        "- *.lock",
     ]
     command += (
         ["--progress"]
@@ -159,10 +160,7 @@ def _copy_options(args: argparse.Namespace) -> list[str]:
     command.append("--ignore-times" if args.force else "--update")
     if args.dry_run:
         command.append("--dry-run")
-    for directory in DATA_DIRS:
-        command += ["--filter", f"+ /{directory}/**"]
-    command += ["--filter", "- **"]
-    return command
+    return [*command, *data_filters()]
 
 
 def _transfer_root(checkout: Path, selection: SyncSettings, prefix: str) -> Path:
@@ -226,23 +224,67 @@ def _transfer(
             if prefix != selection.prefix
         ]
     targets = [
-        (
-            str(_transfer_root(checkout, selection, prefix)),
-            selection.remote_path(prefix),
-        )
+        _preflight_transfer(checkout, selection, prefix, dry_run=args.dry_run)
         for prefix in prefixes
     ]
-    options = _copy_options(args)
-    for local, remote in targets:
-        origin, destination = (
-            (local, remote) if args.action == "push" else (remote, local)
+    for target in targets:
+        code = _copy_and_record(binary, config_dir, target, args)
+        if code:
+            return code
+    return 0
+
+
+@dataclass(frozen=True)
+class _TransferTarget:
+    local: str
+    remote: str
+    store: BaselineStore | None  # None for dry-run only.
+    previous: dict[str, BaselineEntry] | None  # None when no baseline was read.
+
+
+def _preflight_transfer(
+    checkout: Path, selection: SyncSettings, prefix: str, *, dry_run: bool
+) -> _TransferTarget:
+    local = str(_transfer_root(checkout, selection, prefix))
+    remote = selection.remote_path(prefix)
+    store = (
+        None
+        if dry_run
+        else BaselineStore(selection.labdata, selection.remote_root, prefix)
+    )
+    return _TransferTarget(
+        local, remote, store, store.load() if store is not None else None
+    )
+
+
+def _copy_and_record(
+    binary: Path, config_dir: Path, target: _TransferTarget, args: argparse.Namespace
+) -> int:
+    push = args.action == "push"
+    origin, destination = (
+        (target.local, target.remote) if push else (target.remote, target.local)
+    )
+    print(f"{args.action.capitalize()}: {origin} -> {destination}", flush=True)
+    result = rclone.run_cli(
+        binary, config_dir, ["copy", origin, destination, *_copy_options(args)]
+    )
+    store = target.store
+    if result.returncode or store is None:
+        return result.returncode
+
+    try:
+        verified = verify_pair(
+            binary, config_dir, target.local, target.remote, push=push
         )
-        print(f"{args.action.capitalize()}: {origin} -> {destination}", flush=True)
-        result = rclone.run_cli(
-            binary, config_dir, ["copy", origin, destination, *options]
-        )
-        if result.returncode:
-            return result.returncode
+        entries = target.previous if target.previous is not None else {}
+        updated = entries | verified
+        if updated != entries:
+            store.save(updated)
+    except (OSError, RuntimeError, ValueError) as exc:
+        raise RuntimeError(
+            f"Files may have been copied, but the sync baseline was not updated: "
+            f"{store.path}. {exc}"
+        ) from exc
     return 0
 
 
@@ -319,7 +361,9 @@ def main(argv: list[str] | None = None, *, checkout: Path) -> int:
     under the chosen Labdata prefix, defaulting to the checkout's bound prefix.
     Transferring the bound prefix requires both checkout links to be valid.
     --force overwrites from the source for one prefix only. Neither direction
-    deletes destination-only files.
+    deletes destination-only files. A successful non-dry-run copy verifies file
+    contents before advancing the shared Labdata baseline. An unreadable baseline
+    blocks the copy; verification or save failures after copy return nonzero.
     """
     parser = _parser()
     try:

@@ -1,4 +1,5 @@
 import io
+import json
 import os
 import subprocess
 import sys
@@ -142,6 +143,209 @@ def test_default_push_and_pull_use_the_bound_labdata_prefix(
     assert not (physical / "outside/notes.txt").exists()
 
 
+def _state_dir(labdata: Path) -> Path:
+    return labdata / ".data-sync/state"
+
+
+def _only_baseline(labdata: Path) -> Path:
+    (path,) = _state_dir(labdata).glob("*.json")
+    return path
+
+
+def _baseline_files(path: Path) -> dict[str, object]:
+    return json.loads(path.read_text(encoding="utf-8"))["files"]
+
+
+@pytest.mark.parametrize(
+    "copied",
+    [
+        "result/run.h5",
+        pytest.param(
+            r"result/run\sample.h5",
+            marks=pytest.mark.skipif(os.name == "nt", reason="POSIX literal backslash"),
+        ),
+    ],
+)
+def test_push_records_copied_and_verified_skipped_files_with_each_sides_mtime(
+    copied: str, unbound_checkout: Path, local_cloud: Path
+) -> None:
+    labdata = unbound_checkout / "Labdata"
+    local, remote = labdata / "local/alice", local_cloud / "local/alice"
+    skipped = "Database/device.yml"
+    older, newer = 1_700_000_000, 1_700_001_000
+    _write_file(local, copied, b"run", mtime=older)
+    _write_file(local, skipped, b"device", mtime=older)
+    _write_file(remote, skipped, b"device", mtime=newer)
+    local_ns = older * 10**9 + 123_456_700
+    remote_ns = newer * 10**9 + 765_432_100
+    os.utime(local / skipped, ns=(local_ns, local_ns))
+    os.utime(remote / skipped, ns=(remote_ns, remote_ns))
+
+    assert _sync(unbound_checkout, "push") == 0
+    assert (remote / copied).read_bytes() == b"run"
+    assert (remote / skipped).stat().st_mtime_ns == remote_ns
+    assert not (local_cloud / ".data-sync").exists()
+    assert not (remote / ".data-sync").exists()
+    assert len(list(_state_dir(labdata).glob("*.json"))) == 1
+    copied_info = {"mtime": "2023-11-14T22:13:20Z", "size_bytes": 3}
+    assert json.loads(_only_baseline(labdata).read_text(encoding="utf-8")) == {
+        "version": 1,
+        "remote_root": "lab:measurements",
+        "prefix": "local/alice",
+        "files": {
+            copied: {"local": copied_info, "remote": copied_info},
+            skipped: {
+                "local": {"mtime": "2023-11-14T22:13:20.1234567Z", "size_bytes": 6},
+                "remote": {"mtime": "2023-11-14T22:30:00.7654321Z", "size_bytes": 6},
+            },
+        },
+    }
+
+
+@pytest.mark.parametrize(
+    ("selection", "bad_record"),
+    [(("alpha", "zulu"), b"{"), (("--all",), b'{"version": 999}')],
+)
+def test_pull_preflights_all_baselines_before_copy_but_dry_run_ignores_them(
+    selection: tuple[str, ...],
+    bad_record: bytes,
+    unbound_checkout: Path,
+    local_cloud: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    checkout = unbound_checkout
+    labdata = checkout / "Labdata"
+    rel = "result/run.h5"
+    _write_file(local_cloud / "zulu", rel, b"zulu", mtime=1_700_000_000)
+    assert _sync(checkout, "pull", "zulu") == 0
+    record = _only_baseline(labdata)
+    record.write_bytes(bad_record)
+    _write_file(local_cloud / "alpha", rel, b"alpha", mtime=1_700_000_000)
+    _write_file(local_cloud / "zulu", rel, b"new", mtime=1_700_001_000)
+
+    assert _sync(checkout, "pull", *selection, "--dry-run") == 0
+    assert not (labdata / "alpha" / rel).exists()
+    assert (labdata / "zulu" / rel).read_bytes() == b"zulu"
+    assert record.read_bytes() == bad_record
+
+    assert _sync(checkout, "pull", *selection) != 0
+    assert str(record) in capsys.readouterr().err
+    assert not (labdata / "alpha" / rel).exists()
+    assert (labdata / "zulu" / rel).read_bytes() == b"zulu"
+    assert record.read_bytes() == bad_record
+
+
+def test_verified_files_advance_without_replacing_unconfirmed_entries(
+    unbound_checkout: Path, local_cloud: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    labdata = unbound_checkout / "Labdata"
+    local, remote = labdata / "local/alice", local_cloud / "local/alice"
+    divergent, no_hash, updated = (
+        "result/divergent.h5",
+        "result/nohash.h5",
+        "Database/device.yml",
+    )
+    older, newer = 1_700_000_000, 1_700_001_000
+    for path in (divergent, no_hash, updated):
+        _write_file(local, path, b"old", mtime=older)
+    assert _sync(unbound_checkout, "push") == 0
+    record = _only_baseline(labdata)
+    previous = _baseline_files(record)
+
+    _write_file(local, divergent, b"left", mtime=newer)
+    _write_file(remote, divergent, b"rght", mtime=newer)
+    _write_file(local, no_hash, b"copied without proof", mtime=newer)
+    _write_file(local, updated, b"copied and verified", mtime=newer)
+    run_cli = rclone.run_cli
+
+    def hide_remote_hash(
+        binary: Path, config: Path, args: list[str], *, capture_output: bool = False
+    ) -> subprocess.CompletedProcess[str]:
+        result = run_cli(binary, config, args, capture_output=capture_output)
+        if (
+            args[:2] == ["lsjson", "lab:measurements/local/alice"]
+            and not result.returncode
+        ):
+            entries: list[dict[str, object]] = json.loads(result.stdout)
+            for entry in entries:
+                if entry.get("Path") == no_hash:
+                    entry.pop("Hashes", None)
+            return subprocess.CompletedProcess(result.args, 0, json.dumps(entries))
+        return result
+
+    # Model an object whose backend does not return an MD5 in its inventory.
+    monkeypatch.setattr(rclone, "run_cli", hide_remote_hash)
+    assert _sync(unbound_checkout, "push", "--dry-run") == 0
+    assert _baseline_files(record) == previous
+    assert _sync(unbound_checkout, "push") == 0
+    assert (remote / divergent).read_bytes() == b"rght"
+    assert (remote / no_hash).read_bytes() == b"copied without proof"
+    assert (remote / updated).read_bytes() == b"copied and verified"
+    latest = _baseline_files(record)
+    assert latest[divergent] == previous[divergent]
+    assert latest[no_hash] == previous[no_hash]
+    stamp = {"mtime": "2023-11-14T22:30:00Z", "size_bytes": 19}
+    assert latest[updated] == {"local": stamp, "remote": stamp}
+
+
+@pytest.mark.parametrize("failure", ["copy", "inventory", "publish"])
+def test_failed_operation_preserves_existing_baseline_and_reports_copy_result(
+    failure: str,
+    unbound_checkout: Path,
+    local_cloud: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    labdata = unbound_checkout / "Labdata"
+    local, remote = labdata / "local/alice", local_cloud / "local/alice"
+    path = "result/run.h5"
+    _write_file(local, path, b"old", mtime=1_700_000_000)
+    assert _sync(unbound_checkout, "push") == 0
+    record = _only_baseline(labdata)
+    previous = record.read_bytes()
+    _write_file(local, path, b"new contents", mtime=1_700_001_000)
+    run_cli, replace = rclone.run_cli, Path.replace
+    commands: list[str] = []
+
+    def run(
+        binary: Path, config: Path, args: list[str], *, capture_output: bool = False
+    ) -> subprocess.CompletedProcess[str]:
+        commands.append(args[0])
+        if failure == "copy" and args[0] == "copy":
+            return subprocess.CompletedProcess(args, 7)
+        if (
+            failure == "inventory"
+            and args[0] == "lsjson"
+            and args[1].startswith("lab:")
+        ):
+            return subprocess.CompletedProcess(args, 3)
+        return run_cli(binary, config, args, capture_output=capture_output)
+
+    def publish(source: Path, target: str | os.PathLike[str]) -> Path:
+        if Path(target) == record:
+            raise PermissionError("cannot replace the sync baseline")
+        return replace(source, target)
+
+    monkeypatch.setattr(rclone, "run_cli", run)
+    if failure == "publish":
+        # Reproduce an unsuccessful publication at the filesystem boundary.
+        monkeypatch.setattr(Path, "replace", publish)
+
+    result = _sync(unbound_checkout, "push")
+    assert record.read_bytes() == previous
+    assert list(record.parent.iterdir()) == [record]
+    if failure == "copy":
+        assert result == 7
+        assert commands == ["copy"]
+        assert (remote / path).read_bytes() == b"old"
+    else:
+        assert result != 0
+        assert (remote / path).read_bytes() == b"new contents"
+        error = capsys.readouterr().err
+        assert str(record) in error
+        assert "may have been copied" in error and "baseline was not updated" in error
+
+
 def test_named_push_and_pull_transfer_only_the_selected_prefix(
     unbound_checkout: Path, local_cloud: Path
 ) -> None:
@@ -184,6 +388,7 @@ def test_force_overwrites_older_and_same_metadata_files_without_deleting(
     assert _sync(checkout, *args) == 0
     assert (destination / "result/run.h5").read_bytes() == b"keep newer!"
     assert (destination / "Database/device.yml").read_bytes() == b"old bytes"
+    assert not _state_dir(checkout / "Labdata").exists()
     assert _sync(checkout, *args, "--force", "--dry-run") == 0
     assert (destination / "result/run.h5").read_bytes() == b"keep newer!"
     assert (destination / "Database/device.yml").read_bytes() == b"old bytes"
@@ -192,6 +397,10 @@ def test_force_overwrites_older_and_same_metadata_files_without_deleting(
     assert (destination / "Database/device.yml").read_bytes() == b"new bytes"
     assert (destination / "Database/extra.yml").read_bytes() == b"destination only"
     assert not (destination / "Database/device.lock").exists()
+    files = _baseline_files(_only_baseline(checkout / "Labdata"))
+    assert set(files) == {"result/run.h5", "Database/device.yml"}
+    stamp = {"mtime": "2023-11-14T22:13:20Z", "size_bytes": 9}
+    assert files["Database/device.yml"] == {"local": stamp, "remote": stamp}
 
 
 @pytest.fixture
@@ -322,3 +531,11 @@ def test_pull_batch_downloads_other_prefixes_and_leaves_bound_data(
         assert (labdata / relative).read_bytes() == content
     assert (bound / "Database/own.yml").read_bytes() == b"keep local"
     assert not (labdata / "Database").exists()
+    baseline_paths: dict[str, set[str]] = {}
+    for record in _state_dir(labdata).glob("*.json"):
+        value = json.loads(record.read_text(encoding="utf-8"))
+        baseline_paths[value["prefix"]] = set(value["files"])
+    assert baseline_paths == {
+        "a": {"result/entry/Database/embedded.yml"},
+        "a/b": {"Database/device.yml"},
+    }
