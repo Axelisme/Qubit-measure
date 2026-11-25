@@ -178,8 +178,8 @@ def run_cli(
     """Run arguments against config_dir/rclone.conf without interactive prompts.
 
     The caller supplies a verified binary and CLI arguments without global account
-    flags. Stdout is inherited unless requested as UTF-8 text. Stderr is inherited.
-    Return the subprocess status, and stop the subprocess if interrupted.
+    flags. Inherit stdout and stderr unless capture_output requests both as UTF-8
+    text. Return the subprocess status, and stop the subprocess if interrupted.
     """
     command = [
         str(binary),
@@ -192,13 +192,43 @@ def run_cli(
         command,
         stdin=subprocess.DEVNULL,
         stdout=subprocess.PIPE if capture_output else None,
+        stderr=subprocess.PIPE if capture_output else None,
         encoding="utf-8",
     ) as process:
         try:
-            stdout, _ = process.communicate()
-            return subprocess.CompletedProcess(command, process.returncode, stdout)
+            stdout, stderr = process.communicate()
+            return subprocess.CompletedProcess(
+                command, process.returncode, stdout, stderr
+            )
         finally:
             _stop_process(process)
+
+
+def case_insensitive(binary: Path, config_dir: Path, root: str) -> bool:
+    """Read the reported path-case flag for a local or named remote root.
+
+    Use the verified binary and config_dir/rclone.conf. Do not create the root.
+    Raise RuntimeError if rclone fails or does not return a boolean flag.
+    """
+    result = run_cli(
+        binary, config_dir, ["backend", "features", root], capture_output=True
+    )
+    message = f"Could not determine case sensitivity for {root!r}"
+    if result.returncode:
+        raise RuntimeError(
+            f"{message} (rclone exit {result.returncode}).\n{result.stderr.rstrip()}"
+        )
+    try:
+        report: object = json.loads(result.stdout)
+    except json.JSONDecodeError as exc:
+        raise RuntimeError(f"{message}: invalid rclone features JSON.") from exc
+    features: object = report.get("Features") if isinstance(report, dict) else None
+    flag: object = (
+        features.get("CaseInsensitive") if isinstance(features, dict) else None
+    )
+    if not isinstance(flag, bool):
+        raise RuntimeError(f"{message}: missing boolean Features.CaseInsensitive.")
+    return flag
 
 
 @dataclass(frozen=True)

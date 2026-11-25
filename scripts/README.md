@@ -52,7 +52,7 @@ Entry 已存在時直接重開並選 `initial`，不覆寫。它使用一個 wor
 
 - `upgrade_parameters.py`：長期 component YAML、entry predictor JSON 與 record JSONL 升級入口。Entry 目錄會一併預覽／升級 `predictors/*.json` 的 v1→v2，規則與還原見 [Predictor v2](../docs/storage-format-history/predictor-v2.md)。預設 component 範圍逐欄位 dry-run；`--scope records --device-name <name>` 由 operator 宣告舊值的 device 歸屬，逐列報四類形狀。兩者皆由 `--apply` 先備份原 bytes 再替換，不依賴 migrations。Component 版本、未標版分類的限制與還原見 [參數文件升級](../docs/parameter-upgrades.md)；record 保留範圍、flat-frame fallback 與改名改接線見 [Record device 升級](../docs/record-device-upgrades.md)。
 
-- `sync_data.py`：首次 `setup --source <prefix>` 用官方 rclone GUI 授權與選雲端根。`push` 只把 checkout 的 `result/`、`Database/` 複製到設定的來源。`pull` 將指定來源下載到本地彙整樹，`pull --all` 跳過自己的來源。`sources` 讀雲端清單，`status --json` 只讀本地設定。設置、`--dry-run` 與開啟外來來源的方法見[資料同步指南](../docs/data-sync.md)。
+- `sync_data.py`：`setup --prefix <prefix>` 用官方 rclone GUI 選雲端根，再將 checkout 的 `result/` 與 `Database/` 連到 Labdata。`status --json` 檢查本機綁定，不連雲端。`sync --dry-run` 預覽雙向計畫，`sync` 只執行沒有未解衝突的計畫。推拉與開啟其他 prefix 的方法見[資料同步指南](../docs/data-sync.md)。
 - `sync.py`：**用途待確認**。觀察到 `md2nb` 在 `notebook_md/` 到 `notebook/` 間同步，`nb2md` 反向同步；使用 Jupytext、Git 與工作站環境。會建立或覆寫對應檔案，`md2nb` 不同步時可互動詢問，`nb2md` 直接覆寫。未確認此流程是否仍為正式的 notebook 發布程序。
 
 ## 模擬資料庫產生

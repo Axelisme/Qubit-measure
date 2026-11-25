@@ -1,34 +1,38 @@
 # 多台電腦的資料同步
 
-**讀者：** operator、agent。設定雲端根、同步量測資料，並在彙整機開啟各個來源。
+**讀者：** operator、agent。將 checkout 綁到 Labdata，在多台電腦間傳輸量測資料。
 
-**Last updated:** 2026-11-25
+**Last updated:** 2026-11-26
 
 ## 資料放在哪裡
 
-雲端根與彙整機的 `<labdata>` 底下用相同的相對路徑。每個來源 prefix 是一個獨立的 project root。例如 `lab-drive:QubitData/alice/pc1/sim/` 與本地 `~/QubitData/alice/pc1/sim/` 下都有 `result/` 和 `Database/`。
+每個 Labdata prefix 有一個實體本機資料根和一個雲端資料根。例如 prefix `alice/pc1/sim` 可對應 `~/QubitData/alice/pc1/sim` 與 `lab-drive:QubitData/alice/pc1/sim`。兩端都用 `result/` 和 `Database/` 存放資料。Checkout 的同名目錄連到綁定的本機資料根。推拉與雙向同步都使用實體路徑。
 
-量測端不必搬資料。`push` 從這個 checkout 的 `result/` 與 `Database/` 讀取，只寫設定的雲端來源。`pull` 只寫本地彙整樹，不寫回雲端，也不會複製到 checkout 內或覆蓋其資料根。舊 Labber 目錄、非 entry 資料夾和 `Database/` 根的零散檔案都照原路徑複製。工具不改格式，也不會讓原本不支援的檔案出現在 GUI 的 Load 清單。
+Prefix 識別資料集，不由主機名或使用者名推導。在另一台電腦綁定同一個 prefix 和雲端根，就會使用同一份雲端資料，本機 Labdata 可以放在不同位置。Prefix 可用一段或多段名稱，段與段用 `/` 分隔。不能有空段、`.`、`..`、反斜線，或名為 `result`、`Database` 的段。
 
-來源可用一段或多段名稱，例如 `alice`、`pc1/alice` 或 `alice/pc1/sim`。段與段用 `/` 分隔，不能有空段、`.`、`..`、反斜線，或名為 `result`、`Database` 的段。兩個 checkout 填同一個 prefix 就會寫進同一個來源。請替每個來源選不同的 prefix。改名或重灌後，若改用新主機名當 prefix，就會新增雲端來源，舊目錄仍在。
+工具照原路徑複製舊 Labber 目錄、非 entry 資料夾和 `Database/` 根的零散檔案，不轉換格式。
 
 ## 第一次設定
 
-在 repo root 執行。建議用 `<短主機名>/<使用者>` 當來源，但 `--source` 可以給任何合法 prefix。
+在 repo root 執行，選一個代表資料集的 prefix。
 
 ```bash
-uv run --directory . --no-sync -- python scripts/sync_data.py setup --source pc1/alice
+uv run --directory . --no-sync -- python scripts/sync_data.py setup --prefix pc1/alice
 ```
 
 1. 首次啟動會下載並驗證固定版 rclone，再開啟官方 Web GUI。`setup --no-browser` 只印網址。網址含本機登入憑證，不要分享。
 2. 在 **Remotes → Add New Remote** 選雲端服務並完成授權。已有 rclone remote 可直接重用。Google Drive 的共用 OAuth client 有 2026 年停用警告。若共用 client 無法授權，請用[自有 client](https://rclone.org/drive/#making-your-own-client-id)。只需拉資料的帳號可設定 `drive.readonly`。
 3. 在 **Explorer** 進入雲端根，例如 `lab-drive:QubitData`，按 **Refresh**。不要進到來源目錄，也不要進到 `result` 或 `Database`。回終端機核對印出的路徑，按 Enter 確認。
-4. 終端機詢問本地彙整根。直接 Enter 使用 `~/<雲端根資料夾名>`，例如 `~/QubitData`；選了整個 remote 時改用 remote 名稱。可以輸入 `../QubitData`，也可以加 `setup --labdata ../QubitData` 略過這個提示。相對路徑以命令執行時的工作目錄為準。
-5. 核對終端機印出的雲端根、來源與本地絕對路徑，按 Enter 保存。Ctrl+C 取消，不覆寫既有位置設定。帳號變更由 rclone 即時保存。
+4. 終端機詢問本機 Labdata 根。直接按 Enter 使用 `~/<雲端根資料夾名>`，例如 `~/QubitData`；選了整個 remote 時改用 remote 名稱。Labdata 可放在 checkout 內或外。也可用 `--labdata ../QubitData` 略過提示。相對路徑以命令執行時的工作目錄為準。
+5. 核對顯示的 Labdata prefix、本機資料根和雲端資料根，按 Enter 綁定。Windows 在本機 NTFS 上建立 junction，Linux 建立目錄符號連結。兩個連結都驗證成功才保存設定。Ctrl+C 可在確認前取消，rclone 已保存的帳號變更不會還原。
 
 ![官方 Google Drive 連線表單](images/data-sync/drive-form.jpg)
 
-每個 checkout 的 `.data-sync/sync.json` 保存位置，不含 token。`rclone.conf` 沿用使用者層設定，在同一使用者的 checkout 間共用。它含帳號憑證，不要提交或分享。改位置就重跑 `setup`。工具不讀取舊 checkout 傳輸設定。
+同一配置重跑 `setup` 時，正確的連結會保留。若 `result` 或 `Database` 已有檔案、目錄、失效連結或指往其他地方，setup 會列出衝突位置和預期目標，不搬資料、不建立新連結，也不覆寫設定。新目標不可和兩個連結位置重疊，例如不能把 Labdata 設成 checkout 的 `result/Labdata`。
+
+若建立連結失敗，setup 會列出失敗的連結路徑、預期目標和原始錯誤，不保存 checkout 設定，也不刪除已建立的連結或目錄。Windows 建立 junction 時可能留下實體目錄；若出現檢查提示，先檢查該目錄和其中的資料，再重跑 setup。符號連結已在 Linux 實測；本次未在原生 Windows／NTFS 執行 junction 測試。
+
+每個 checkout 的 `.data-sync/sync.json` 保存位置，不含 token。舊版 checkout 設定不會自動升級，請重跑 `setup --prefix`。若已有資料，先依[下面的步驟](#把-checkout-資料搬到-labdata)自行搬移。`rclone.conf` 沿用使用者層設定，在同一使用者的 checkout 間共用。它含帳號憑證，不要提交或分享。
 
 ## 上傳與下載
 
@@ -37,13 +41,29 @@ uv run --directory . --no-sync -- python scripts/sync_data.py status --json
 uv run --directory . --no-sync -- python scripts/sync_data.py sources
 uv run --directory . --no-sync -- python scripts/sync_data.py push --dry-run
 uv run --directory . --no-sync -- python scripts/sync_data.py push
+uv run --directory . --no-sync -- python scripts/sync_data.py pull
+uv run --directory . --no-sync -- python scripts/sync_data.py push alice/pc1/sim
 uv run --directory . --no-sync -- python scripts/sync_data.py pull alice/pc1/sim bob --dry-run
 uv run --directory . --no-sync -- python scripts/sync_data.py pull --all
 ```
 
-`status --json` 只讀本地設定，不測試雲端連線或授權。未設定時回傳 1。未設定的 `push`、`pull`、`sources` 回傳 2，提示先執行 setup，不開瀏覽器。`sources` 列出直接含 `result/` 或 `Database/` 的來源。`pull --all` 使用同一份清單，跳過本 checkout 的來源。巢狀來源如 `alice` 和 `alice/pc1/sim` 可以並存，各自只傳自己的兩棵資料樹。
+`status --json` 讀本機設定與連結，不測試雲端連線或授權。`bound` 表示兩個連結都到達設定的目標；`configured` 還要求本機有 `rclone.conf`。任一條件不符時回傳 1。未設定的 `push`、`pull`、`sync`、`sources` 會提示先執行 setup，不開瀏覽器。
 
-傳輸使用 rclone `copy --update`，不刪目的地檔案，排除 `*.lock`。目的地較新的同名檔案會保留。工具不合併 YAML 或 ledger 內容；請勿讓兩台電腦寫同一來源的同名檔案。執行 `--dry-run` 可先看要複製的檔案。空目錄不會單獨建立，`push` 略過不存在的資料根。
+`push` 從本機 Labdata 上傳到雲端，`pull` 往反方向下載。省略 prefix 時，兩個命令都用 checkout 綁定的值。指定 prefix 時，兩端都在各自的根接上同一段路徑。操作綁定的 prefix 前，工具會檢查 checkout 的兩個連結。缺少連結或連結指錯位置時會停止，請檢查後重跑 setup。
+
+`sources` 列出雲端直接含 `result/` 或 `Database/` 的 prefix。`pull` 可以列出數個 prefix，也可以用 `--all` 下載清單中的其他 prefix，不動本 checkout 綁定的資料。巢狀 prefix 如 `alice` 和 `alice/pc1/sim` 可以並存，各自只傳自己的兩棵資料樹。
+
+普通推拉使用 rclone `copy --update`，保留目的地較新的同名檔案。`push --force` 或 `pull --force` 會重新複製來源檔案，即使來源較舊，或兩端檔案大小與修改時間相同。只有單一 prefix 可以強制覆寫。`pull --all --force` 和指定多個 prefix 的 `pull --force` 都會報錯。覆寫前可先預覽：
+
+```bash
+uv run --directory . --no-sync -- python scripts/sync_data.py pull alice/pc1/sim --force --dry-run
+```
+
+兩種模式都批量平行複製檔案，`--jobs` 可設定平行傳輸數量，預設 8。兩種模式都排除 `*.lock`，不刪目的地獨有的檔案，不另外建立空目錄，也不合併 YAML 或 ledger。請勿讓兩台電腦同時寫同一資料集。`--dry-run` 只預覽複製，不傳輸，也不讀寫同步基準。
+
+普通和強制推拉都在複製成功後核對兩端的檔案。只有兩端大小與 MD5 相符的檔案才推進基準；未能證實一致的檔案保留原紀錄。基準保存在 `<labdata>/.data-sync/state/`，依雲端根與 prefix 分開。使用同一 Labdata、雲端根與 prefix 的 checkout 會共用紀錄。工具不會把基準上傳到雲端。普通推拉仍由 rclone 的 `--update` 決定是否複製，不根據基準選擇覆寫方向。
+
+若正式推拉指出基準損壞或版本不支援，工具會在複製前停止並列出紀錄路徑。請先備份該紀錄並查明問題。若複製成功但工具未能完成整批核對，它會提示檔案可能已複製、基準未更新。排除核對失敗的原因後，若兩端情況不變，可重跑普通推拉來核對，不必加 `--force`。工具不會自動清除紀錄或還原已傳輸的檔案。
 
 **量測中上傳可能帶走未寫完的檔案。** 等 Run 結束後再 push 一次。
 
@@ -54,6 +74,30 @@ rclone copy --update --exclude '*.lock' "$checkout/Database" "$cloud_root/$prefi
 rclone copy --update --exclude '*.lock' "$checkout/result" "$cloud_root/$prefix/result"
 ```
 
+## 兩台電腦輪流接手
+
+在兩台電腦各執行一次 `setup`，選同一個雲端根與 prefix。本機 Labdata 可以不同。交接前先結束量測與存檔，再預覽同步。無衝突才正式執行，返回 0 後再到另一台電腦執行同樣的步驟。
+
+```bash
+uv run --directory . --no-sync -- python scripts/sync_data.py sync --dry-run
+uv run --directory . --no-sync -- python scripts/sync_data.py sync
+```
+
+省略 prefix 時，`sync` 使用 checkout 的綁定。也可以指定一個 prefix，例如 `sync alice/pc1/sim --dry-run`。`sync` 不支援 `--all` 或 `--force`。`--jobs` 設定每個方向的平行傳輸數量，預設 8。
+
+預覽會讀兩端的資料與本機基準，列出 `Upload`、`Download`、`Skip` 和 `Conflict`，不傳檔、不寫基準。第一次遇到沒有基準的路徑時，單邊檔案會複製到另一端。兩端都有檔案就取修改時間較新的一份。時間相同時，只有內容可確認相同才略過，否則報衝突。兩台電腦的基準各自保存在自己的 Labdata，不會隨檔案上傳。第一次同步前請核對時間較新的一側確實是要留下的版本。
+
+有基準時，各端用自己的時間與大小判斷是否修改。只有一端修改就傳那一份，即使修改後的時間比另一端舊。兩端都修改時，只有大小和 MD5 相符才略過。保留原時間與大小的覆寫可能不會被判為修改；略過不代表每次都重新證實一致。
+
+有任何衝突或單邊刪除時，命令回傳非零，該 prefix 不開始傳檔：
+
+- 內容衝突或缺少可比對的資訊時，先在同步範圍外備份兩份資料，再核對內容。確定要保留哪一端後，可用單向 `push --force` 或 `pull --force` 指定來源。這會覆寫該 prefix 的同名目的端檔案，不只覆寫衝突清單。若只想改一個檔案，請自行處理該檔後再預覽。
+- 若清單指出同一路徑有多個雲端物件，或目的路徑已被檔案或目錄占用，先核對並整理路徑再預覽。工具不會替你選其中一份。
+- 若 rclone 回報目的端不分大小寫，`sync` 會攔下像 `result/Run.h5` 和 `result/run.h5` 這樣會寫到同一位置的名稱。它檢查本次要寫入的路徑和目的端已有的路徑，列出相撞的名稱。`sync --dry-run` 也會報衝突；兩個命令都不傳檔或改基準。目的端區分大小寫時，這些名稱可並存。`sync` 不自動改名，`push` 和 `pull` 的規則不變。
+- 單邊刪除時，先決定是否恢復缺少的一側。若確定兩端都不再需要該檔案，備份後手動刪除剩下的一份。兩端都無原檔時，下一次成功的 `sync` 會移除該筆基準，不操作資料；預覽仍不寫基準。
+
+正式同步只複製計畫選定的檔案。複製後核對兩端大小及 MD5。若某些傳輸無法確認一致，命令會列出路徑並回傳非零；已確認的項目才更新基準，其餘保留原紀錄。若複製或整批核對失敗，該次不更新基準，已傳的檔案也不回滾。遇到任何非零結果，先檢查兩端再重跑預覽，不要把它當成交接完成。
+
 ## 開啟外來來源
 
 在彙整機以來源目錄當作 `--project-root`。路徑需用已存在的絕對路徑。不要傳 `<labdata>` 或 `Database/` 本身。
@@ -63,20 +107,15 @@ uv run --directory . --no-sync -- python -m apps.measure \
   --project-root "$HOME/QubitData/alice/pc1/sim"
 ```
 
-`apps.fluxdep`、`apps.dispersive` 也用 `--project-root` 選資料根。MCP 開新 GUI 時填 `project_root`；已開啟的 GUI 不會因 MCP attach 改根。GUI 一次只開一個來源，要看別的來源就換 project root。在外來根執行 Save 會寫入本地副本。這些存檔不在 checkout 的上傳根內，不會透過這個 checkout 的 `push` 回傳。
+`apps.fluxdep`、`apps.dispersive` 也用 `--project-root` 選資料根。MCP 開新 GUI 時填 `project_root`；已開啟的 GUI 不會因 MCP attach 改根。GUI 一次只開一個來源，要看別的來源就換 project root。在外來根執行 Save 會寫入本地副本。不指定 prefix 的 `push` 不會上傳這些存檔。需要回傳時，請明確指定該 prefix。
 
-## 把 checkout 資料搬進同構樹
+## 把 checkout 資料搬到 Labdata
 
-可以保留原目錄。若想讓本機來源也和其他來源放在一起，先在該 checkout **push 一次並確認成功**，關閉所有使用這兩個目錄的 GUI。以下是 Linux／macOS 的例子，假設從 repo root 執行，設定來源是 `pc1/alice`，彙整根是 `../QubitData`，且目的地沒有同名的 `result` 或 `Database`。
+1. 備份現有資料，關閉所有使用這兩個目錄的 GUI 與工具。
+2. 若 `<labdata>/<prefix>` 沒有同名目錄，將 checkout 內既有的 `result/` 與 `Database/` 搬到該處。若兩端都已有資料，先自行核對並決定如何合併。不要用 setup 取代核對。
+3. 重跑 `setup --prefix <prefix>` 並確認 `status` 成功。Setup 會沿用搬好的實體目錄，再建立 checkout 連結。
 
-```bash
-mkdir -p ../QubitData/pc1/alice
-mv result Database ../QubitData/pc1/alice/
-ln -s ../QubitData/pc1/alice/result result
-ln -s ../QubitData/pc1/alice/Database Database
-```
-
-連結的相對路徑從 checkout 解析。若 checkout 和 `QubitData` 隨上層目錄一起搬，連結仍指向同一批資料。`push` 讀這兩個連結的實體目錄。`pull` 比較實體路徑，不會透過別名寫進這兩棵樹。Measure 的唯讀 Results Browser 不跟隨 checkout 的資料根 symlink；要瀏覽這棵樹，請用實體來源目錄當作 `--project-root` 開啟。
+Measure 的唯讀 Results Browser 不跟隨 checkout 的資料根 symlink。要瀏覽時，用實體 prefix 目錄當作 `--project-root` 開啟。
 
 以實體來源目錄執行升級工具時，預設備份放在來源旁，例如 `../QubitData/pc1/alice-backup/`。它不在 `result/` 或 `Database/` 裡，所以不會被 push。
 

@@ -3,10 +3,11 @@
 from __future__ import annotations
 
 import json
+import sys
 from pathlib import Path
 
 from . import rclone
-from .settings import DATA_DIRS, is_data_dir, validate_source
+from .settings import DATA_DIRS, is_data_dir, validate_prefix
 
 
 def list_sources(binary: Path, config_dir: Path, remote_root: str) -> list[str]:
@@ -32,6 +33,8 @@ def list_sources(binary: Path, config_dir: Path, remote_root: str) -> list[str]:
         ],
         capture_output=True,
     )
+    if result.stderr:
+        print(result.stderr, end="", file=sys.stderr)
     result.check_returncode()
     value: object = json.loads(result.stdout)
     if not isinstance(value, list):
@@ -50,5 +53,5 @@ def list_sources(binary: Path, config_dir: Path, remote_root: str) -> list[str]:
             and leaf in DATA_DIRS
             and not any(map(is_data_dir, prefix.split("/")))
         ):
-            prefixes.add(validate_source(prefix))
+            prefixes.add(validate_prefix(prefix))
     return sorted(prefixes)

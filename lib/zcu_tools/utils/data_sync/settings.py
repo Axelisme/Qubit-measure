@@ -23,8 +23,12 @@ class SyncSettings:
     """Validated selection saved by setup; does not contain account credentials."""
 
     remote_root: str  # Named rclone remote and optional relative root, e.g. lab:data.
-    source: str  # This checkout's slash-separated prefix under remote_root.
-    labdata: Path  # Absolute local collection root for pull.
+    prefix: str  # This checkout's default slash-separated Labdata prefix.
+    labdata: Path  # Absolute root shared by all local prefixes.
+
+    def local_root(self, prefix: str) -> Path:
+        """Return the path under Labdata for a validated slash-separated prefix."""
+        return self.labdata / prefix
 
     def remote_path(self, relative: str) -> str:
         """Append a validated slash-separated path to the selected cloud root."""
@@ -44,13 +48,13 @@ def validate_remote_root(value: str) -> str:
     return name + ":" + folder.rstrip("/")
 
 
-def validate_source(value: str) -> str:
-    """Accept slash-separated safe folder names outside result and Database trees."""
+def validate_prefix(value: str) -> str:
+    """Return a safe slash-separated prefix or raise ValueError for an invalid one."""
     if not all(
         _is_folder_name(part) and not is_data_dir(part) for part in value.split("/")
     ):
         raise ValueError(
-            f"Invalid source: {value!r}; use a relative prefix without result or Database segments."
+            f"Invalid prefix: {value!r}; use a relative prefix without result or Database segments."
         )
     return value
 
@@ -82,22 +86,28 @@ def load_settings(settings_dir: Path) -> SyncSettings | None:
 
 def _decode_settings(raw: str) -> SyncSettings:
     value: object = json.loads(raw)
+    if isinstance(value, dict):
+        version = value.get("version")
+        if type(version) is int and version == 1:
+            raise ValueError(
+                "Version 1 predates checkout binding; no data is migrated."
+            )
     if (
         not isinstance(value, dict)
-        or set(value) != {"version", "remote_root", "source", "labdata"}
+        or set(value) != {"version", "remote_root", "prefix", "labdata"}
         or type(value["version"]) is not int
-        or value["version"] != 1
+        or value["version"] != 2
         or not isinstance(value["remote_root"], str)
-        or not isinstance(value["source"], str)
+        or not isinstance(value["prefix"], str)
         or not isinstance(value["labdata"], str)
     ):
-        raise ValueError("Expected version 1 with remote_root, source and labdata.")
+        raise ValueError("Expected version 2 with remote_root, prefix and labdata.")
     labdata = Path(value["labdata"])
     if not labdata.is_absolute():
         raise ValueError("Saved labdata must be an absolute path.")
     return SyncSettings(
         validate_remote_root(value["remote_root"]),
-        validate_source(value["source"]),
+        validate_prefix(value["prefix"]),
         labdata,
     )
 
@@ -105,9 +115,9 @@ def _decode_settings(raw: str) -> SyncSettings:
 def save_settings(settings_dir: Path, selection: SyncSettings) -> None:
     """Atomically replace sync.json in an existing directory with validated settings."""
     value = {
-        "version": 1,
+        "version": 2,
         "remote_root": selection.remote_root,
-        "source": selection.source,
+        "prefix": selection.prefix,
         "labdata": str(selection.labdata),
     }
     with tempfile.TemporaryDirectory(dir=settings_dir) as staging:

@@ -27,7 +27,7 @@ Database/
 result/
 /Database
 /result
-/.data-sync/
+.data-sync/
 logs/
 scratch/
 .agent_state/

@@ -43,3 +43,7 @@ Prefix 不是存取控制。若兩個 checkout 選同一個 prefix，仍可覆�
 遵循 [ADR-0063](../adr/0063-persistence-ownership.md#run-輸出位置與-writer-權責)。Database 是輸出位置，不是 entry 身分。拆開來源依靠各自的 project root，不新增資料格式或把同名 Result／Database 再綁一次。也沿用舊檔不遷移的原則：同步只複製現有路徑，舊 Labber 檔仍用合適的 reader。舊 CLI 的逐入口選目錄是當時的做法，不是需要維持的契約。
 
 調查與兩份挑戰原稿未入庫。第一份盤點各 launcher、Notebook 與工具對資料根的假設；第二份比較五年內重灌、交接、找回舊資料與誤上傳的成本。上述選項保存了影響裁決的差異。
+
+## 後記
+
+後續保留同構資料樹，改以 checkout 連結至實體 Labdata。`push` 不再限於設定時的 prefix。推拉都可指定同一個 prefix，或省略 prefix 操作 checkout 綁定的資料。下載其他來源後，可用具名 `push` 明確回傳該資料集。單一 prefix 需要指定覆寫方向時，可使用 `--force`。現行用法見[資料同步指南](../data-sync.md#上傳與下載)。輪流寫入同一 prefix 的需求後來另採[逐檔基準與雙向計畫](2026-11-25-bidirectional-labdata-sync.md)。
