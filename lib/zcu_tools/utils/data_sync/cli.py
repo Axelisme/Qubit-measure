@@ -1,4 +1,4 @@
-"""Copy result and Database trees between a checkout and named cloud sources."""
+"""Copy result and Database trees between Labdata and the cloud."""
 
 from __future__ import annotations
 
@@ -57,12 +57,17 @@ def _parser() -> argparse.ArgumentParser:
     status.add_argument(
         "--json", action="store_true", help="Emit machine-readable status"
     )
-    push = actions.add_parser(
-        "push", help="Copy checkout data to its configured source"
+    push = actions.add_parser("push", help="Copy a Labdata prefix to the cloud")
+    push.set_defaults(all=False, prefixes=())
+    push.add_argument(
+        "prefix", nargs="?", help="Labdata prefix (default: bound prefix)"
     )
     _add_copy_options(push)
-    pull = actions.add_parser("pull", help="Copy named sources to the local collection")
-    pull.add_argument("prefixes", nargs="*", help="Source prefixes, e.g. alice/pc1/sim")
+    pull = actions.add_parser("pull", help="Copy cloud data to Labdata")
+    pull.set_defaults(prefix=None)
+    pull.add_argument(
+        "prefixes", nargs="*", help="Labdata prefixes (default: bound prefix)"
+    )
     pull.add_argument(
         "--all",
         action="store_true",
@@ -76,6 +81,9 @@ def _parser() -> argparse.ArgumentParser:
 def _add_copy_options(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
         "--dry-run", action="store_true", help="Report changes without copying"
+    )
+    parser.add_argument(
+        "--force", action="store_true", help="Overwrite from the source for one prefix"
     )
     parser.add_argument(
         "-j", "--jobs", type=int, default=8, help="Parallel transfers (default: 8)"
@@ -129,7 +137,6 @@ def _status(
 
 def _copy_options(args: argparse.Namespace) -> list[str]:
     command = [
-        "--update",
         "--fast-list",
         "--checkers",
         "16",
@@ -148,83 +155,91 @@ def _copy_options(args: argparse.Namespace) -> list[str]:
         if sys.stdout.isatty()
         else ["--stats", "10s", "--stats-one-line"]
     )
+    # Dropping --update alone would still skip files with equal size and mtime.
+    command.append("--ignore-times" if args.force else "--update")
     if args.dry_run:
         command.append("--dry-run")
+    for directory in DATA_DIRS:
+        command += ["--filter", f"+ /{directory}/**"]
+    command += ["--filter", "- **"]
     return command
 
 
-def _push(
-    selection: SyncSettings,
-    binary: Path,
-    config_dir: Path,
-    args: argparse.Namespace,
-) -> int:
-    local_root = selection.local_root(selection.prefix)
-    for name in DATA_DIRS:
-        origin = local_root / name
-        target = selection.remote_path(f"{selection.prefix}/{name}")
-        print(f"Push: {origin} -> {target}", flush=True)
-        result = rclone.run_cli(
-            binary,
-            config_dir,
-            ["copy", str(origin), target, *_copy_options(args)],
-        )
-        if result.returncode:
-            return result.returncode
-    return 0
+def _transfer_root(checkout: Path, selection: SyncSettings, prefix: str) -> Path:
+    local = selection.local_root(prefix)
+    if prefix == selection.prefix:
+        return local
 
-
-def _pull_destination(labdata: Path, prefix: str, checkout: Path) -> Path:
-    destination = (labdata / prefix).resolve()
-    owned_trees = [(checkout / directory).resolve() for directory in DATA_DIRS]
-    incoming_trees = [(destination / directory).resolve() for directory in DATA_DIRS]
+    destination = local.resolve()
+    owned_trees = [
+        (root / directory).resolve()
+        for root in (checkout, selection.local_root(selection.prefix))
+        for directory in DATA_DIRS
+    ]
+    trees = [destination / directory for directory in DATA_DIRS]
+    resolved_trees = [(tree, tree.resolve()) for tree in trees]
+    # Labdata may be inside the checkout, but a different prefix must not
+    # alias a checkout path or overlap any of its bound data trees.
     if (
-        destination.is_relative_to(checkout)
-        or any(tree.is_relative_to(checkout) for tree in incoming_trees)
+        destination == checkout
+        or any(checkout.is_relative_to(tree) for _, tree in resolved_trees)
         or any(
-            incoming.is_relative_to(owned) or owned.is_relative_to(incoming)
-            for incoming in incoming_trees
+            actual != expected and actual.is_relative_to(checkout)
+            for expected, actual in [(local, destination), *resolved_trees]
+        )
+        or any(
+            tree.is_relative_to(owned) or owned.is_relative_to(tree)
+            for _, tree in resolved_trees
             for owned in owned_trees
         )
     ):
         raise ValueError(
-            f"Pull destination overlaps the checkout or its data: {destination}"
+            f"Local data root overlaps the checkout or its data: {destination}"
         )
     return destination
 
 
-def _pull(
+def _transfer(
     checkout: Path,
     selection: SyncSettings,
-    binary: Path,
+    cache_dir: Path,
     config_dir: Path,
     args: argparse.Namespace,
 ) -> int:
-    if bool(args.prefixes) == args.all:
-        raise ValueError("Specify source prefixes or --all, but not both.")
+    named = args.prefixes if args.prefix is None else [args.prefix]
+    if args.force and (args.all or len(named) > 1):
+        raise ValueError("--force requires one prefix; omit --all and extra prefixes.")
+    if args.all and named:
+        raise ValueError("Specify prefixes or --all, but not both.")
+
+    prefixes = [validate_prefix(prefix) for prefix in named]
+    if not args.all:
+        prefixes = prefixes or [selection.prefix]
+        if selection.prefix in prefixes:
+            require_binding(checkout, selection)
+
+    binary = rclone.prepare_rclone(cache_dir)
     if args.all:
         prefixes = [
             prefix
             for prefix in list_sources(binary, config_dir, selection.remote_root)
             if prefix != selection.prefix
         ]
-    else:
-        prefixes = [validate_prefix(prefix) for prefix in args.prefixes]
-        if selection.prefix in prefixes:
-            require_binding(checkout, selection)
     targets = [
-        (prefix, _pull_destination(selection.labdata, prefix, checkout))
+        (
+            str(_transfer_root(checkout, selection, prefix)),
+            selection.remote_path(prefix),
+        )
         for prefix in prefixes
     ]
     options = _copy_options(args)
-    for directory in DATA_DIRS:
-        options += ["--filter", f"+ /{directory}/**"]
-    options += ["--filter", "- **"]
-    for prefix, destination in targets:
-        origin = selection.remote_path(prefix)
-        print(f"Pull: {origin} -> {destination}", flush=True)
+    for local, remote in targets:
+        origin, destination = (
+            (local, remote) if args.action == "push" else (remote, local)
+        )
+        print(f"{args.action.capitalize()}: {origin} -> {destination}", flush=True)
         result = rclone.run_cli(
-            binary, config_dir, ["copy", origin, str(destination), *options]
+            binary, config_dir, ["copy", origin, destination, *options]
         )
         if result.returncode:
             return result.returncode
@@ -293,20 +308,18 @@ def _run(args: argparse.Namespace, checkout: Path) -> int:
         return 0
     if args.jobs < 1:
         raise ValueError("--jobs must be positive.")
-    if args.action == "pull":
-        return _pull(
-            checkout, selection, rclone.prepare_rclone(cache_dir), config_dir, args
-        )
-    require_binding(checkout, selection)
-    return _push(selection, rclone.prepare_rclone(cache_dir), config_dir, args)
+    return _transfer(checkout, selection, cache_dir, config_dir, args)
 
 
 def main(argv: list[str] | None = None, *, checkout: Path) -> int:
     """Run argv (None reads sys.argv) using checkout for data and .data-sync.
 
     Return a shell exit status; argparse raises SystemExit for help or invalid
-    syntax. Only setup opens the browser. Push requires a valid checkout
-    binding and reads result/ and Database/ from the saved Labdata prefix.
+    syntax. Only setup opens the browser. Transfers copy result/ and Database/
+    under the chosen Labdata prefix, defaulting to the checkout's bound prefix.
+    Transferring the bound prefix requires both checkout links to be valid.
+    --force overwrites from the source for one prefix only. Neither direction
+    deletes destination-only files.
     """
     parser = _parser()
     try:

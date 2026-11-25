@@ -211,16 +211,21 @@ def test_setup_rejects_overlapping_link_and_target_paths(
     assert not (checkout / ".data-sync" / "sync.json").exists()
 
 
-@pytest.mark.parametrize("transfer", [("push",), ("pull", "alice/pc1")])
-def test_missing_links_disable_status_and_bound_transfer(
+@pytest.mark.parametrize("transfer", [("push",), ("pull",), ("pull", "alice/pc1")])
+@pytest.mark.parametrize("problem", ["missing", "wrong target"])
+def test_invalid_links_disable_status_and_bound_transfer(
     transfer: tuple[str, ...],
+    problem: str,
     checkout: Path,
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     assert _configure(checkout, monkeypatch) == 0
     _remove_data_link(checkout / "Database")
-    _remove_data_link(checkout / "result")
+    if problem == "wrong target":
+        wrong_target = checkout.parent / "wrong"
+        wrong_target.mkdir()
+        symlink_or_skip(checkout / "Database", wrong_target, target_is_directory=True)
     capsys.readouterr()
 
     assert _run(checkout, "status", "--json") == 1

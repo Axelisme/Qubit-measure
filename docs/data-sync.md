@@ -6,7 +6,7 @@
 
 ## 資料放在哪裡
 
-每個 Labdata prefix 有一個實體本機資料根和一個雲端資料根。例如 prefix `alice/pc1/sim` 可對應 `~/QubitData/alice/pc1/sim` 與 `lab-drive:QubitData/alice/pc1/sim`。兩端都用 `result/` 和 `Database/` 存放資料。Checkout 的同名目錄連到本機資料根，`push` 直接讀實體路徑。
+每個 Labdata prefix 有一個實體本機資料根和一個雲端資料根。例如 prefix `alice/pc1/sim` 可對應 `~/QubitData/alice/pc1/sim` 與 `lab-drive:QubitData/alice/pc1/sim`。兩端都用 `result/` 和 `Database/` 存放資料。Checkout 的同名目錄連到綁定的本機資料根。推拉都使用實體路徑。
 
 Prefix 識別資料集，不由主機名或使用者名推導。在另一台電腦綁定同一個 prefix 和雲端根，就會使用同一份雲端資料，本機 Labdata 可以放在不同位置。Prefix 可用一段或多段名稱，段與段用 `/` 分隔。不能有空段、`.`、`..`、反斜線，或名為 `result`、`Database` 的段。
 
@@ -41,15 +41,25 @@ uv run --directory . --no-sync -- python scripts/sync_data.py status --json
 uv run --directory . --no-sync -- python scripts/sync_data.py sources
 uv run --directory . --no-sync -- python scripts/sync_data.py push --dry-run
 uv run --directory . --no-sync -- python scripts/sync_data.py push
+uv run --directory . --no-sync -- python scripts/sync_data.py pull
+uv run --directory . --no-sync -- python scripts/sync_data.py push alice/pc1/sim
 uv run --directory . --no-sync -- python scripts/sync_data.py pull alice/pc1/sim bob --dry-run
 uv run --directory . --no-sync -- python scripts/sync_data.py pull --all
 ```
 
 `status --json` 讀本機設定與連結，不測試雲端連線或授權。`bound` 表示兩個連結都到達設定的目標；`configured` 還要求本機有 `rclone.conf`。任一條件不符時回傳 1。未設定的 `push`、`pull`、`sources` 會提示先執行 setup，不開瀏覽器。
 
-`push` 驗證連結後才上傳綁定 prefix。`pull` 將其他 prefix 下載到 Labdata，不寫回雲端，不覆蓋 checkout 綁定的資料。下載目的地須在 checkout 外。`sources` 列出直接含 `result/` 或 `Database/` 的來源。`pull --all` 使用同一份清單，跳過本 checkout 的 prefix。巢狀 prefix 如 `alice` 和 `alice/pc1/sim` 可以並存，各自只傳自己的兩棵資料樹。
+`push` 從本機 Labdata 上傳到雲端，`pull` 往反方向下載。省略 prefix 時，兩個命令都用 checkout 綁定的值。指定 prefix 時，兩端都在各自的根接上同一段路徑。操作綁定的 prefix 前，工具會檢查 checkout 的兩個連結。缺少連結或連結指錯位置時會停止，請檢查後重跑 setup。
 
-傳輸使用 rclone `copy --update`，不刪目的地檔案，排除 `*.lock`。目的地較新的同名檔案會保留。工具不合併 YAML 或 ledger 內容；請勿讓兩台電腦寫同一來源的同名檔案。執行 `--dry-run` 可先看要複製的檔案。傳輸不另外建立空目錄。
+`sources` 列出雲端直接含 `result/` 或 `Database/` 的 prefix。`pull` 可以列出數個 prefix，也可以用 `--all` 下載清單中的其他 prefix，不動本 checkout 綁定的資料。巢狀 prefix 如 `alice` 和 `alice/pc1/sim` 可以並存，各自只傳自己的兩棵資料樹。
+
+普通推拉使用 rclone `copy --update`，保留目的地較新的同名檔案。`push --force` 或 `pull --force` 會重新複製來源檔案，即使來源較舊，或兩端檔案大小與修改時間相同。只有單一 prefix 可以強制覆寫。`pull --all --force` 和指定多個 prefix 的 `pull --force` 都會報錯。覆寫前可先預覽：
+
+```bash
+uv run --directory . --no-sync -- python scripts/sync_data.py pull alice/pc1/sim --force --dry-run
+```
+
+兩種模式都批量平行複製檔案，`--jobs` 可設定平行傳輸數量，預設 8。兩種模式都排除 `*.lock`，不刪目的地獨有的檔案，不另外建立空目錄，也不合併 YAML 或 ledger。請勿讓兩台電腦同時寫同一資料集。`--dry-run` 只列出預計複製的檔案，不傳輸。
 
 **量測中上傳可能帶走未寫完的檔案。** 等 Run 結束後再 push 一次。
 
@@ -69,7 +79,7 @@ uv run --directory . --no-sync -- python -m apps.measure \
   --project-root "$HOME/QubitData/alice/pc1/sim"
 ```
 
-`apps.fluxdep`、`apps.dispersive` 也用 `--project-root` 選資料根。MCP 開新 GUI 時填 `project_root`；已開啟的 GUI 不會因 MCP attach 改根。GUI 一次只開一個來源，要看別的來源就換 project root。在外來根執行 Save 會寫入本地副本。這些存檔不在 checkout 的上傳根內，不會透過這個 checkout 的 `push` 回傳。
+`apps.fluxdep`、`apps.dispersive` 也用 `--project-root` 選資料根。MCP 開新 GUI 時填 `project_root`；已開啟的 GUI 不會因 MCP attach 改根。GUI 一次只開一個來源，要看別的來源就換 project root。在外來根執行 Save 會寫入本地副本。不指定 prefix 的 `push` 不會上傳這些存檔。需要回傳時，請明確指定該 prefix。
 
 ## 把 checkout 資料搬到 Labdata
 
