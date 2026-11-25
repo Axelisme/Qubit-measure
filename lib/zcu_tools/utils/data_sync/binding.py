@@ -116,7 +116,7 @@ def _create_link(link: Path, target: Path) -> None:
         # CreateJunction can create a directory before setting its reparse tag.
         # If inspection also fails, report the original error.
         with suppress(OSError):
-            if link.is_dir(follow_symlinks=False) and not link.is_junction():
+            if stat.S_ISDIR(link.lstat().st_mode) and not link.is_junction():
                 message += (
                     "\nA plain directory is present at the link path. "
                     "Check it before retrying."

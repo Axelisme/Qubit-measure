@@ -478,33 +478,31 @@ def test_failed_sync_does_not_publish_a_baseline_after_partial_effects(
     _write_file(local, upload, b"upload", mtime=1_700_000_000)
     _write_file(remote, download, b"download", mtime=1_700_000_000)
     run_cli = rclone.run_cli
+    copy_batches = 0
 
-    def fail_after_upload(
+    def fail_after_first_batch(
         binary: Path, config: Path, args: list[str], *, capture_output: bool = False
     ) -> subprocess.CompletedProcess[str]:
-        if failure == "second-copy" and args[:2] == [
-            "copy",
-            "lab:measurements/local/alice",
-        ]:
-            return subprocess.CompletedProcess(args, 7)
-        if (
-            failure == "verification"
-            and args[0] == "lsjson"
-            and (local / download).exists()
-        ):
+        nonlocal copy_batches
+        if args[0] == "copy":
+            copy_batches += 1
+            if failure == "second-copy" and copy_batches == 2:
+                return subprocess.CompletedProcess(args, 7)
+        if failure == "verification" and args[0] == "lsjson" and copy_batches == 2:
             return subprocess.CompletedProcess(args, 7, "[\n")
         return run_cli(binary, config, args, capture_output=capture_output)
 
     # Leave the actual first transfer in place and fail at the transport boundary.
-    monkeypatch.setattr(rclone, "run_cli", fail_after_upload)
+    monkeypatch.setattr(rclone, "run_cli", fail_after_first_batch)
     assert _sync(unbound_checkout, "sync") == (7 if failure == "second-copy" else 1)
-    assert (remote / upload).read_bytes() == b"upload"
     assert not _state_dir(unbound_checkout / "Labdata").exists()
+    uploaded, downloaded = remote / upload, local / download
     if failure == "verification":
-        assert (local / download).read_bytes() == b"download"
+        assert uploaded.read_bytes() == b"upload"
+        assert downloaded.read_bytes() == b"download"
         assert "sync baseline was not updated" in capsys.readouterr().err
     else:
-        assert not (local / download).exists()
+        assert uploaded.is_file() != downloaded.is_file()
 
 
 @pytest.mark.skipif(os.name == "nt", reason="POSIX literal CR, LF and backslash")
@@ -619,6 +617,36 @@ def test_pull_preflights_all_baselines_before_copy_but_dry_run_ignores_them(
     assert not (labdata / "alpha" / rel).exists()
     assert (labdata / "zulu" / rel).read_bytes() == b"zulu"
     assert record.read_bytes() == bad_record
+
+
+@pytest.mark.parametrize("action", ["push", "pull", "sync"])
+def test_transfer_rejects_baseline_with_unequal_verified_sizes(
+    action: str,
+    unbound_checkout: Path,
+    local_cloud: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    labdata = unbound_checkout / "Labdata"
+    local, remote = labdata / "local/alice", local_cloud / "local/alice"
+    relative = "result/run.h5"
+    _write_file(local, relative, b"old", mtime=1_700_000_000)
+    assert _sync(unbound_checkout, "push") == 0
+    record = _only_baseline(labdata)
+    value = json.loads(record.read_bytes())
+    value["files"][relative]["remote"]["size_bytes"] = 4
+    corrupt = json.dumps(value).encode("utf-8")
+    record.write_bytes(corrupt)
+    _write_file(local, "result/upload.h5", b"upload", mtime=1_700_001_000)
+    _write_file(remote, "result/download.h5", b"download", mtime=1_700_001_000)
+    capsys.readouterr()
+
+    assert _sync(unbound_checkout, action) == 1
+    error = capsys.readouterr().err
+    assert "Invalid sync baseline" in error and str(record) in error
+    assert relative in error
+    assert not (remote / "result/upload.h5").exists()
+    assert not (local / "result/download.h5").exists()
+    assert record.read_bytes() == corrupt
 
 
 def test_verified_files_advance_without_replacing_unconfirmed_entries(
@@ -843,8 +871,51 @@ def test_pull_refuses_checkout_and_realpaths_of_its_data(
         symlink_or_skip(labdata / prefix, target, target_is_directory=True)
 
     assert _sync(checkout, "pull", prefix, "--dry-run") != 0
-    assert "checkout" in capsys.readouterr().err
+    error = capsys.readouterr().err
+    local = labdata / prefix
+    if overlap == "equal":
+        assert "overlaps the checkout" in error
+    else:
+        assert "aliases" in error and str(local) in error
+        assert str(local.resolve()) in error
     assert not rclone_commands
+
+
+@pytest.mark.parametrize("directory", ["", "result", "Database"])
+def test_pull_refuses_an_alias_to_another_unbound_prefix(
+    directory: str,
+    unbound_checkout: Path,
+    local_cloud: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    checkout = unbound_checkout.parent / "second-checkout"
+    checkout.mkdir()
+    labdata = checkout.parent / "labdata"
+    _bind(checkout, "local/alice", monkeypatch, labdata=labdata)
+    relative = f"{directory or 'result'}/data.h5"
+    _write_file(local_cloud / "b", relative, b"keep", mtime=1_700_000_000)
+    assert _sync(checkout, "pull", "b") == 0
+    baseline = _only_baseline(labdata)
+    saved = baseline.read_bytes()
+    file = labdata / "b" / relative
+    link, target = labdata / "a" / directory, labdata / "b" / directory
+    link.parent.mkdir(exist_ok=True)
+    symlink_or_skip(link, target, target_is_directory=True)
+    _write_file(local_cloud / "a", relative, b"wrong source", mtime=1_700_001_000)
+    capsys.readouterr()
+
+    def unexpected_rclone_call(*_args: object, **_kwargs: object) -> None:
+        pytest.fail("Prefix alias preflight must reject the pull before rclone runs")
+
+    # The preflight must stop before rclone even if it would skip a linked directory.
+    monkeypatch.setattr(rclone, "run_cli", unexpected_rclone_call)
+    assert _sync(checkout, "pull", "a") == 1
+    error = capsys.readouterr().err
+    assert "alias" in error and str(link) in error and str(target) in error
+    assert file.read_bytes() == b"keep"
+    assert _only_baseline(labdata) == baseline
+    assert baseline.read_bytes() == saved
 
 
 def test_pull_refuses_a_prefix_whose_data_tree_is_the_checkout(

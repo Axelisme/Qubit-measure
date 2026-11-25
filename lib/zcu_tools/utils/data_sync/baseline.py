@@ -43,6 +43,7 @@ class BaselineStore:
         """Return the per-pair JSON path, without reading or creating it."""
         identity = json.dumps([self.remote_root, self.prefix], ensure_ascii=False)
         pair_id = hashlib.sha256(identity.encode("utf-8")).hexdigest()
+        # Persist one record per pair in <labdata>/.data-sync/state/.
         return self.labdata / ".data-sync" / "state" / f"{pair_id}.json"
 
     def load(self) -> dict[str, BaselineEntry] | None:
@@ -103,10 +104,11 @@ class BaselineStore:
 def _decode_entry(path: str, entry: object) -> BaselineEntry:
     if not is_data_path(path) or not isinstance(entry, dict):
         raise ValueError(f"Invalid file entry for {path!r}.")
-    return {
-        "local": _decode_stamp(entry.get("local")),
-        "remote": _decode_stamp(entry.get("remote")),
-    }
+    local = _decode_stamp(entry.get("local"))
+    remote = _decode_stamp(entry.get("remote"))
+    if local["size_bytes"] != remote["size_bytes"]:
+        raise ValueError(f"Local and remote sizes differ for {path!r}.")
+    return {"local": local, "remote": remote}
 
 
 def _decode_stamp(value: object) -> FileStamp:

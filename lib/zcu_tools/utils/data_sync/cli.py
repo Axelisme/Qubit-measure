@@ -22,7 +22,6 @@ from .settings import (
     load_settings,
     save_settings,
     validate_prefix,
-    validate_remote_root,
 )
 
 
@@ -182,33 +181,31 @@ def _transfer_root(checkout: Path, selection: SyncSettings, prefix: str) -> Path
     if prefix == selection.prefix:
         return local
 
-    destination = local.resolve()
+    trees = [local / directory for directory in DATA_DIRS]
+    # A real in-repo prefix is valid unless it overlaps the checkout or its data.
     owned_trees = [
         (root / directory).resolve()
         for root in (checkout, selection.local_root(selection.prefix))
         for directory in DATA_DIRS
     ]
-    trees = [destination / directory for directory in DATA_DIRS]
-    resolved_trees = [(tree, tree.resolve()) for tree in trees]
-    # Labdata may be inside the checkout, but a different prefix must not
-    # alias a checkout path or overlap any of its bound data trees.
     if (
-        destination == checkout
-        or any(checkout.is_relative_to(tree) for _, tree in resolved_trees)
-        or any(
-            actual != expected and actual.is_relative_to(checkout)
-            for expected, actual in [(local, destination), *resolved_trees]
-        )
+        local == checkout
+        or any(checkout.is_relative_to(tree) for tree in trees)
         or any(
             tree.is_relative_to(owned) or owned.is_relative_to(tree)
-            for _, tree in resolved_trees
+            for tree in trees
             for owned in owned_trees
         )
     ):
-        raise ValueError(
-            f"Local data root overlaps the checkout or its data: {destination}"
-        )
-    return destination
+        raise ValueError(f"Local data root overlaps the checkout or its data: {local}")
+
+    for expected in (local, *trees):
+        actual = expected.resolve()
+        if actual != expected:
+            raise ValueError(
+                f"Local data path {expected} aliases {actual}; expected a physical directory."
+            )
+    return local
 
 
 def _transfer(
@@ -331,13 +328,11 @@ def _run_setup(
 ) -> int:
     prefix = validate_prefix(args.prefix)
     config_dir.mkdir(mode=0o700, parents=True, exist_ok=True)
-    remote_root = validate_remote_root(
-        setup.select_remote_root(
-            rclone.prepare_rclone(cache_dir),
-            config_dir,
-            cache_dir,
-            no_browser=args.no_browser,
-        )
+    remote_root = setup.select_remote_root(
+        rclone.prepare_rclone(cache_dir),
+        config_dir,
+        cache_dir,
+        no_browser=args.no_browser,
     )
     selection = _confirm_settings(remote_root, prefix, args.labdata)
     bind_checkout(checkout, selection)
@@ -403,9 +398,10 @@ def main(argv: list[str] | None = None, *, checkout: Path) -> int:
     push and pull accept --force for a single prefix; sync does not. Transfers
     do not propagate deletions. sync plans both directions before copying and
     returns nonzero for conflicts or unverified transfers. Dry runs do not write
-    files or the baseline. Non-preview commands verify file contents before
-    advancing the shared Labdata baseline.
+    dataset files or the baseline, but rclone bootstrap may update its cache.
+    Non-preview transfers verify file contents before advancing the baseline.
     """
+    # ADR-0072: The script supplies the checkout; this module does not locate it.
     parser = _parser()
     try:
         return _run(parser.parse_args(argv), checkout.resolve())
