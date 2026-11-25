@@ -32,6 +32,7 @@ logs/
 scratch/
 .agent_state/
 .sim_telemetry/
+.result-transfer/
 test.py
 test.ipynb
 
