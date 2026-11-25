@@ -26,11 +26,15 @@ TimeBase 的頻率為約分後的有理數 `F = num / den`，單位為 ticks/μs
 - Request 攜帶 TimeBase。Start、duration、trigger、phase reference、envelope 取樣週期及 ADC 取樣週期都用整數 tick 表達。Frontend 全程做整數運算，不先轉成浮點微秒再組合。
 - 手建 fixture 也必須落在格點上。非格點時間報 `ValueError`，不四捨五入回格點。需要非十進位的精確時間時，caller 可提供 Fraction。
 - `TimeBase.ns` 是唯一的 tick→ns 換算入口。它支援 scalar 與 int64 ndarray，array shape 不變。每個結果都等於有理數 `ticks * 1000 * den / num` 正確捨入一次所得的 float64。
-- Drive 與 readout generator pulse 的支撐區間取編譯後的 `start_ticks` 與
-  `start_ticks + duration_ticks`，各以 `TimeBase.ns` 換算一次，不再對齊 2 ns 網格。
+- Drive 與 readout generator pulse 的支撐區間都不再對齊 2 ns 網格。
   QICK v2 的 tProc 時鐘決定指令時戳，generator fabric 時鐘決定播放長度。
   只對 drive 重新對齊會改動它和 readout 的相對起點，也可能改動長度。
-  這種捨入不代表硬體的跨時鐘或播放延遲。Envelope 取樣週期與共同的 carrier 相位原點不變。
+  這種對齊不代表硬體的跨時鐘或播放延遲。Envelope 取樣週期與共同的 carrier 相位原點不變。
+- `DriveTrack` 分別將編譯後的 `start_ticks` 與 `duration_ticks` 以 `TimeBase.ns` 換算一次。
+  相同的 `duration_ticks` 在任何起點都得到相同的 `duration_ns`。
+  終點為 `start_ns + duration_ns`，與直接換算 `start_ticks + duration_ticks` 最多可差一個 ulp。
+- Readout generator pulse 的起訖仍將 `start_ticks` 與 `start_ticks + duration_ticks`
+  各以 `TimeBase.ns` 換算一次。
 - FTF fast-flux 路徑仍以 `TimeBase.ns(..., quantum_ns=2)` 對精確有理數時間做 ties-even 捨入。
 - ADC 網格先在整數域組成 `trigger + k * period`，再交給 ns。Readout plan 與環境 template 呼叫這個入口，不各自展開換算迴圈或浮點乘除。
 - Num 必須能在 float64 精確表示。Request 的時間輸入與中間結果須在 int64 範圍內，另限制 `abs(ticks * 1000 * den) <= 2**53`。超出範圍報 `OverflowError`，不截斷、不溢位回繞。

@@ -1,6 +1,6 @@
 # Explicit acquisition environments
 
-**Last updated:** 2026-11-25, native generator pulse timing
+**Last updated:** 2026-11-25, start-independent drive duration
 
 **讀者：** framework-dev。模擬 acquisition 的 request、round 與 raw source 契約。
 
@@ -455,8 +455,10 @@ arrays for point-dependent timing and demodulation.
 `materialize_point` expands one detached point for diagnostics, excluding reps.
 Readout plans and environment templates convert integer tick grids to ns through
 `TimeBase.ns`; frequency conversion to GHz remains with the physical consumers.
-The drive and readout planners use the compiled start and end ticks directly,
-without resnapping generator support after compilation.
+Neither planner resnaps compiled generator support. Drive converts start and
+duration ticks separately, keeping equal durations at any onset. Its end is
+`start_ns + duration_ns`, within one ulp of the converted absolute end tick.
+Readout converts absolute start and end ticks separately.
 Physical planners receive the request's TimeBase, and plan/preparation cache keys
 include it.
 
