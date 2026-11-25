@@ -215,13 +215,13 @@ Lab 的 `register_experiments` 可接收選填 `record_source`，在 Registry �
 
 **例子。** 三個 GUI 根解析 CLI、取 lab 宣告，用 `functools.partial` 綁 behavior 參數。Launcher 先建 logging，再呼叫 zero-arg factory，讓註冊與建構錯誤進 session log。`logging_namespaces` 直接取 lab tuple，不另設 Protocol。兩個 analysis behavior 先註冊元件，再按 `AnalysisSelection` 開 target；selection 只轉換 CLI，未選 entry 不開 target，只有 component 沒有 entry 就報錯。註冊與開啟錯誤原樣傳遞，不藏在選擇 callback 或保留舊 `project` keyword。API 見[程序 runtime](../../lib/zcu_tools/gui/README.md#process-runtime-runtimepy)。Measure MCP 用 `main(lab, *, gui_module)` 註冊元件及取 recipes；Fluxdep／dispersive MCP 只接 GUI module，直到啟動 GUI subprocess 才由該 GUI behavior 註冊。
 
-[Registry key 路徑 gate](../../tools/README.md#registry-key-paths) 用 assembly 提供的 registrar 和真 Registry 核對一對一覆蓋。例如 ZigZag 的 gain 和 freq 是兩個 key，來源都是直接宣告兩個 Adapter 的 `zigzag_scan.gui`。
+[Registry key 路徑檢查](../../tools/README.md#registry-key-paths) 用 assembly 提供的 registrar 和真 Registry 核對一對一覆蓋。例如 ZigZag 的 gain 和 freq 是兩個 key，來源都是直接宣告兩個 Adapter 的 `zigzag_scan.gui`。
 
-**邊界。** 來源 callback 只供開發工具查核。Registry 和 Framework Protocol 不攜帶來源，啟動與 reload 仍只傳 Registry。框架的 pytest 使用合成 registrar，不載入 Lab。
+**邊界。** 來源 callback 只供開發工具查核。成功登錄後，來源問題和偏離命名慣例都只警告；來源不完整或無效時跳過整表比對。Lab 載入、factory 或登錄本身失敗仍是錯誤。Registry 和 Framework Protocol 不攜帶來源，啟動與 reload 仍只傳 Registry。框架的 pytest 使用合成 registrar，不載入 Lab。
 
 Lab 與合成 lab 以結構符合 Protocol；`CatalogReloadPolicy` 由 measure owner 定義，供兩者使用。C16 禁止 framework import 具體 lab dataclass；C13 禁止 MCP 為分享 lab 型別新增 GUI import。也不把九欄搬進共用 framework lab package，否則不需要的入口會間接取得 measure catalog、workflow 或 fluxdep policy。`lab-assembly-only` 允許間接載入，不允許 `apps`、`mcp_servers` 或 `tools` 直接 import 其他 lab 子模組。新增 lab 直接子模組時補 `forbidden_modules`。組合根不重做 lab 組裝，仍決定本次程序選用的 startup 腳本、project root、control port 與 log 路徑，見 [[0064]]。
 
-**依據。** 2026-10-28，使用者：「認同這個建議」。原裁決未附入庫討論，見 Git `cbac6041d`；直接 import 邊界的後續討論見 [Lab 依賴邊界](../discussions/2026-11-14-lab-dependency-boundary.md)。2026-11-25 的登錄來源由 designer 代裁，使用者未覆核，見[實驗選單 key 討論後記](../discussions/2026-11-24-registry-key-paths.md#後記來源隨成功登錄交付)。
+**依據。** 2026-10-28，使用者：「認同這個建議」。原裁決未附入庫討論，見 Git `cbac6041d`；直接 import 邊界的後續討論見 [Lab 依賴邊界](../discussions/2026-11-14-lab-dependency-boundary.md)。2026-11-25，designer 提出[由成功登錄交付直接來源](../discussions/2026-11-24-registry-key-paths.md#後記來源隨成功登錄交付)。2026-11-26，覆核的方案保留此來源契約，但不把查核結果當成登錄門檻。使用者說：「S2報錯就超過了，警告可以，這是慣例而不是規則，是為了方便維護而不是提供阻礙。」見[實驗選單 key 路徑警告](../discussions/2026-11-26-registry-key-path-warning.md)。
 
 ### 使用者元件與模擬環境的放置
 

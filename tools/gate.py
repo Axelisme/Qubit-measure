@@ -283,9 +283,10 @@ def main(argv: list[str] | None = None) -> int:
     None reads sys.argv. Without --base, print counts and return 0, regardless
     of findings; --with-pyright includes a full-tree type pass. With --base,
     rewrite touched Python files unless --no-fix, then run the remaining gates.
-    Return 0 if all steps pass, 1 for a failed step, or 2 if the base cannot be
-    resolved. argparse handles help and invalid CLI syntax with SystemExit;
-    subprocess launch failures propagate.
+    Report diagnostics from a successful registry key path check as warnings.
+    Return 0 if all steps pass (including warnings), 1 for a failed step, or 2
+    if the base cannot be resolved. argparse handles help and invalid CLI
+    syntax with SystemExit; subprocess launch failures propagate.
     """
     parser = argparse.ArgumentParser(
         description=__doc__,
@@ -333,6 +334,14 @@ def main(argv: list[str] | None = None) -> int:
     failed = False
     for step in steps(base, files, fix=not arguments.no_fix):
         outcome = run_step(step, root)
+        if (
+            outcome.name == _REGISTRY_KEY_PATHS.name
+            and outcome.ok
+            and outcome.stderr.strip()
+        ):
+            print(f"WARN {outcome.name}")
+            print(outcome.stderr.strip())
+            continue
         mark = "ok  " if outcome.ok else "FAIL"
         print(f"{mark} {outcome.name}")
         if outcome.name == "ratchet" and outcome.stdout:

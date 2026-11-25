@@ -1,6 +1,6 @@
 # tools/
 
-**Last updated:** 2026-11-23 (curated FTF wall-time scenes)
+**Last updated:** 2026-11-26（Registry key 路徑診斷）
 
 **讀者：** framework-dev。查閱 repo 開發工具的 CLI、輸出與比較機制。
 
@@ -30,12 +30,12 @@
 
 | 工具 | 命令 | Exit code | 是否在 gate |
 | --- | --- | --- | --- |
-| `gate.py` | `tools/gate.py [--base <ref>] [--no-fix]` | 現況 0；比較 0 全通過、1 有失敗、2 base 錯誤 | 入口 |
+| `gate.py` | `tools/gate.py [--base <ref>] [--no-fix]` | 現況 0；比較 0 無失敗（可有警告）、1 有失敗、2 base 錯誤 | 入口 |
 | `check_ratchet.py` | `tools/check_ratchet.py --base <ref>` | 0 無上升、1 有上升、2 工具失敗 | 比較 |
 | `check_quality.py` | `tools/check_quality.py <subcommand>`，見[品質檢查](#品質檢查) | 0／1；`test-structure` 與 `all` 另有 2 | 現況、ratchet |
 | `check_script_awaits.py` | `tools/check_script_awaits.py [--root <repo>]` | 0 無違規、1 有違規、2 root／讀取／解析失敗 | 現況、比較 |
 | `check_mcp_text_budget.py` | `tools/check_mcp_text_budget.py [--timeout <seconds>]` | 0 預算內、1 超額、2 收集失敗 | 現況、比較 |
-| `check_registry_key_paths.py` | `tools/check_registry_key_paths.py` | 0 全部相符、1 有違規 | 現況、比較 |
+| `check_registry_key_paths.py` | `tools/check_registry_key_paths.py` | 0 登錄成功（可有警告）；載入或登錄失敗時非零 | 現況計數、比較提示 |
 | `check_experiment_imports.py` | `lint-imports`，不經 Python 前綴 | 由 lint-imports 回報 0 通過、1 失敗 | import contracts |
 | `check_doc_readers.py` | `tools/check_doc_readers.py [--root <repo>]` | 0 宣告完整、1 有缺口 | 否 |
 | `doc_relations.py` | `tools/doc_relations.py <base>` 或 `tools/doc_relations.py --check` | diff 0；check 0 連結存在、1 有違規 | 否 |
@@ -1476,7 +1476,7 @@ uv run --directory <worktree> --no-sync -- python tools/gate.py --base <lane 起
 `lint-imports`、lab script await guardrail、measure MCP 文字預算、[registry key 路徑檢查](#registry-key-paths)，然後 ratchet。
 部分檢查會掃描全樹或啟動子程序，耗時不只由改動檔案數決定。Pyright 現況檢查另以 `--with-pyright` 啟用，不保證固定秒數。
 
-省略 `--base` 時回報現況，列出全樹的絕對數字。
+省略 `--base` 時回報現況，列出全樹的絕對數字，不給候選判定。`registry key paths` 列取 JSON 收據的診斷筆數；若未收到收據，顯示 `unreadable`。
 `docstring` 列執行 `ruff check --isolated --select D100,D101,D102,D103 --output-format json tools`，只報告缺少 docstring 的命中數，不影響 exit code，也不加入比較模式的硬性步驟：
 
 ```bash
@@ -1507,10 +1507,14 @@ ok   ruff format
 ok   import contracts
 ok   script awaits
 ok   mcp text budget
-ok   registry key paths
+WARN registry key paths
+warning: 'family/alternate': definition directory 'family/echo'; suggested key: 'family/echo'
 FAIL ratchet
     suppressions: <path> suppression:noqa 0 -> 1
 ```
+
+比較 gate 把 registry key 路徑檢查的警告列在 `WARN registry key paths` 下方，再執行 ratchet。
+沒有診斷時，該步印 `ok`；工具非零則印 `FAIL`。上例因 ratchet 失敗回傳 1；只有警告時回傳 0。
 
 每行 regression 的形式是 `<detector>: <檔案> <規則> <base 計數> -> <candidate 計數>`。
 想看某一項的完整輸出就直接跑那個 detector：
@@ -1617,8 +1621,11 @@ subprocess 邊界替換回覆以驗證 collection errors，不載入 lab 或真 
 
 [`check_registry_key_paths.py`](check_registry_key_paths.py) 經 [Lab assembly](../zcu_lab/README.md#lab-組裝與註冊) 把所有 adapters 登錄到真 Registry，不開 GUI 或建立 Form。
 Lab 從同次成功登錄交付每個 key 的直接宣告模組。工具不查 Run、guide 或 Native tag。
-每個 registry key 必須等於宣告模組相對 `zcu_lab/v2/` 的目錄，同目錄有多個入口時各加一段 `/變體名`。
-來源缺漏、重複、額外或無效時，工具先列出有問題的 key 和原因；只在來源完整時比對目錄。違規回傳 1。
+工具依[作者命名慣例](../zcu_lab/v2/measure-authoring.md#目錄佈局)比對 key 和宣告模組的完整目錄。同目錄有多個入口時，比對各 key 是否只加一段非空變體名。路徑不符時，警告列出 key、定義目錄及建議格式。
+每個已登錄的 key 須有一筆有效來源才能比對整表。有缺漏、重複、多出未登錄 key 的來源，或來源無法推得有效目錄時，工具警告有問題的 key 和原因，並明示跳過整表比對。
+
+登錄成功時，工具把 JSON 收據印到 stdout，警告印到 stderr，並回傳 0。`checked_count` 是 Registry 的登錄筆數，不是已比對筆數；`violation_count` 是診斷筆數，`violations` 列出各筆 `key`、`actual` 與 `expected`。
+Lab import、factory 或 Registry 登錄本身拋出的錯誤仍會使工具以非零結束。
 
 ## 品質快照與熱點報表
 

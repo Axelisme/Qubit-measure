@@ -116,13 +116,13 @@ status: accepted
 
 #### 保留獨立 heralded 實驗的條件
 
-**規則。** 分析需要保存一類以上的 herald 結果時，使用獨立的 `heralded/` 實驗。它取得可見的 herald 與終端讀出，在取數時分類並保存聯合計數，不把 herald 讀出交給 reset 遮罩。GUI New Tab 把 `heralded` 與 `two_qubit` 並列。Registry key 跟 `zcu_lab/v2/` 下的模組目錄一致；同一模組有多個入口時，在目錄後加變體名。分組目錄也出現在選單，不另設例外。
+**規則。** 分析需要保存一類以上的 herald 結果時，使用獨立的 `heralded/` 實驗。它取得可見的 herald 與終端讀出，在取數時分類並保存聯合計數，不把 herald 讀出交給 reset 遮罩。GUI New Tab 把 `heralded` 與 `two_qubit` 並列。Heralded 入口沿用[作者文件的目錄命名慣例](../../zcu_lab/v2/measure-authoring.md#目錄佈局)。New Tab 按實際登錄的 key 分組。
 
 **例子。** `heralded/rb` 放在 `zcu_lab/v2/heralded/rb/`，用四個 herald 類別估計每臂的共同衰減。`heralded/conditional_spectroscopy` 則在名目 I／Xπ 準備之後量 herald，按實測類別畫四支條件頻譜，不共用擬合參數。若只要選出 gg 再分析終端讀出，用支援 `reset/mux_herald` 的普通入口即可。
 
 **邊界。** 家族規則不指定一種共用擬合，也不要求每類都進主估計。各入口決定用途與資料不足時的發布條件，見 [家族 README](../../zcu_lab/v2/heralded/README.md)。Registry key 不是 Native tag。搬移既有入口不改 Native tag、cfg schema 或 HDF5 映射；用新入口載入同 schema 的舊結果，不加舊 key、import 轉接或舊 schema reader。Lab 與各家族的依賴沿用 [[0072]]，本節不設 import 例外。
 
-**依據。** 2026-11-24，使用者說：「如果是 reset herdering 的话，那就是真的就是只留一种。如果你想要全部保留，或是保留一种以上的，请独立的分化实验。」引文的「herdering」「分化」依語境指 heralding、heralded。對新增五個入口答「那就采用建议吧。」對選單與目錄一併改答「我会选 C two，我认为表单的结构应该要跟实际结构对应，或者说一致，这样才好维护啊。」對以目錄定 key、不為分組層開例外的提案答「採用建議吧，對於3，新名字你要叫什麼？」本次只處理 heralded 的 key。比較與先例見 [Heralded 獨立家族](../discussions/2026-11-24-heralded-family.md)。
+**依據。** 2026-11-24，使用者說：「如果是 reset herdering 的话，那就是真的就是只留一种。如果你想要全部保留，或是保留一种以上的，请独立的分化实验。」引文的「herdering」「分化」依語境指 heralding、heralded。對新增五個入口答「那就采用建议吧。」對選單與目錄一併改答「我会选 C two，我认为表单的结构应该要跟实际结构对应，或者说一致，这样才好维护啊。」對以目錄定 key、不為分組層開例外的提案答「採用建議吧，對於3，新名字你要叫什麼？」當時只處理 heralded 的 key。比較與先例見 [Heralded 獨立家族](../discussions/2026-11-24-heralded-family.md)。2026-11-26，使用者將目錄對齊定位為命名慣例，既有 key 不變，見[實驗選單 key 路徑警告](../discussions/2026-11-26-registry-key-path-warning.md)。
 
 ### Owner 不變，caller 不重建舊配置
 

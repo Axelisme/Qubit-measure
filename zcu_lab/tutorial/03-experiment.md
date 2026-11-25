@@ -190,7 +190,7 @@ Writeback callback 提出具體 target 與值，讓 operator 審閱後套用，�
 from zcu_lab.v2.twotone.power_map import gui as power_map_gui
 ```
 
-再在 `register_all` 的 `adapters` 字典加一行，用實驗目錄當 key：
+再在 `register_all` 的 `adapters` 字典加一行，依[命名慣例](../v2/measure-authoring.md#目錄佈局)用實驗目錄作 key：
 
 ```python
 "twotone/power_map": (power_map_gui.DEFINITION, power_map_gui),
