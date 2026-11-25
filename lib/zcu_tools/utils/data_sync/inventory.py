@@ -18,6 +18,7 @@ _RFC3339 = re.compile(
     r"(?:\.([0-9]{1,9}))?(Z|[+-][0-9]{2}:[0-9]{2})"
 )
 _MD5 = re.compile(r"[0-9a-fA-F]{32}")
+_FOLDED_DATA_DIRS = frozenset(name.casefold() for name in DATA_DIRS)
 
 
 class FileStamp(TypedDict):
@@ -52,9 +53,25 @@ class FileInventory:
     root_files: set[str]  # Files occupying the names of expected data directories.
 
 
+@dataclass(frozen=True)
+class DestinationPaths:
+    """Occupied relative paths in and at the roots of the destination data trees."""
+
+    files: set[str]  # Files, including excluded locks and files occupying tree roots.
+    directories: set[str]  # Directories, including empty ones.
+
+
 def data_filters(*, include_tree_entries: bool = False) -> list[str]:
     """Return filters for data files, optionally also files occupying tree names."""
-    options = ["--filter", "- *.lock"]
+    return [
+        "--filter",
+        "- *.lock",
+        *_tree_filters(include_tree_entries=include_tree_entries),
+    ]
+
+
+def _tree_filters(*, include_tree_entries: bool) -> list[str]:
+    options: list[str] = []
     for directory in DATA_DIRS:
         if include_tree_entries:
             options += ["--filter", f"+ /{directory}"]
@@ -67,10 +84,14 @@ def is_data_path(path: str) -> bool:
     return _in_data_tree(path) and "/" in path and not path.endswith(".lock")
 
 
-def _in_data_tree(path: str) -> bool:
+def _in_data_tree(path: str, *, case_insensitive: bool = False) -> bool:
     parts = path.split("/")
+    tree = parts[0]
+    matches_tree = (
+        tree.casefold() in _FOLDED_DATA_DIRS if case_insensitive else tree in DATA_DIRS
+    )
     return (
-        parts[0] in DATA_DIRS
+        matches_tree
         and all(part not in ("", ".", "..") for part in parts)
         and "\x00" not in path
     )
@@ -114,19 +135,51 @@ def list_files(
     and sizes without dropping files. With allow_missing, an absent directory
     is empty. Raise RuntimeError on listing failure or ValueError on invalid output.
     """
+    entries = _list_entries(
+        binary,
+        config_dir,
+        root,
+        ["--hash-type", "MD5", *data_filters(include_tree_entries=True)],
+        allow_missing=allow_missing,
+    )
+    return _parse_listing(entries)
+
+
+def list_case_insensitive_destination(
+    binary: Path, config_dir: Path, root: str
+) -> DestinationPaths:
+    """List occupied paths, including case variants and excluded locks.
+
+    Use the verified binary and config_dir/rclone.conf on a reported
+    case-insensitive destination. Read no hashes or modification times.
+    Treat an absent root as empty; raise on listing failure or invalid output.
+    """
+    entries = _list_entries(
+        binary,
+        config_dir,
+        root,
+        ["--no-modtime", "--ignore-case", *_tree_filters(include_tree_entries=True)],
+        allow_missing=True,
+    )
+    paths = DestinationPaths(set(), set())
+    for entry in entries:
+        path, is_dir = _listed_path(entry, case_insensitive=True)
+        (paths.directories if is_dir else paths.files).add(path)
+    return paths
+
+
+def _list_entries(
+    binary: Path,
+    config_dir: Path,
+    root: str,
+    options: list[str],
+    *,
+    allow_missing: bool,
+) -> list[dict[str, object]]:
     result = rclone.run_cli(
         binary,
         config_dir,
-        [
-            "lsjson",
-            root,
-            "--recursive",
-            "--fast-list",
-            "--no-mimetype",
-            "--hash-type",
-            "MD5",
-            *data_filters(include_tree_entries=True),
-        ],
+        ["lsjson", root, "--recursive", "--fast-list", "--no-mimetype", *options],
         capture_output=True,
     )
     if result.returncode:
@@ -137,14 +190,19 @@ def list_files(
             and result.stdout.strip() == "["
             and _directory_not_found(binary, config_dir, root)
         ):
-            return FileInventory({}, set(), set(), set())
+            return []
         message = f"Could not list {root} (rclone exit {result.returncode})."
         if result.stderr:
             message += f"\n{result.stderr.rstrip()}"
         raise RuntimeError(message)
     if result.stderr:
         print(result.stderr, end="", file=sys.stderr)
-    return _parse_listing(result.stdout)
+    entries: object = json.loads(result.stdout)
+    if not isinstance(entries, list) or not all(
+        isinstance(item, dict) for item in entries
+    ):
+        raise ValueError("rclone did not return a list of file inventory entries.")
+    return entries
 
 
 def _directory_not_found(binary: Path, config_dir: Path, root: str) -> bool:
@@ -155,15 +213,12 @@ def _directory_not_found(binary: Path, config_dir: Path, root: str) -> bool:
     return result.returncode == 3
 
 
-def _parse_listing(raw: str) -> FileInventory:
-    value: object = json.loads(raw)
-    if not isinstance(value, list):
-        raise ValueError("rclone returned a non-list file inventory.")
+def _parse_listing(entries: list[dict[str, object]]) -> FileInventory:
     files: dict[str, ListedFile] = {}
     directories: set[str] = set()
     root_files: set[str] = set()
     duplicates: set[str] = set()
-    for item in value:
+    for item in entries:
         path, is_dir = _listed_path(item)
         if path in files or path in directories or path in root_files:
             # Drive can contain multiple objects at the same relative path.
@@ -178,13 +233,14 @@ def _parse_listing(raw: str) -> FileInventory:
     return FileInventory(files, duplicates, directories, root_files)
 
 
-def _listed_path(item: object) -> tuple[str, bool]:
+def _listed_path(
+    item: dict[str, object], *, case_insensitive: bool = False
+) -> tuple[str, bool]:
     if (
-        not isinstance(item, dict)
-        or not isinstance(path := item.get("Path"), str)
+        not isinstance(path := item.get("Path"), str)
         or not isinstance(is_dir := item.get("IsDir"), bool)
-        or not _in_data_tree(path)
-        or (not is_dir and path.endswith(".lock"))
+        or not _in_data_tree(path, case_insensitive=case_insensitive)
+        or (not case_insensitive and not is_dir and path.endswith(".lock"))
     ):
         raise ValueError(f"rclone returned an invalid data path or type: {item!r}.")
     return path, is_dir

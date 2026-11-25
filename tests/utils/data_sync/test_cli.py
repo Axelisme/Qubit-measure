@@ -6,10 +6,17 @@ import sys
 from pathlib import Path
 
 import pytest
-from zcu_tools.utils.data_sync import rclone, setup
+from zcu_tools.utils.data_sync import rclone
 from zcu_tools.utils.data_sync.cli import main
 
 from tests._filesystem import symlink_or_skip
+
+from ._support import baseline_files as _baseline_files
+from ._support import bind as _bind
+from ._support import only_baseline as _only_baseline
+from ._support import state_dir as _state_dir
+from ._support import sync as _sync
+from ._support import write_file as _write_file
 
 
 def test_unconfigured_push_instructs_unattended_user_to_run_setup(
@@ -24,92 +31,11 @@ def test_unconfigured_push_instructs_unattended_user_to_run_setup(
 
 
 @pytest.fixture
-def unbound_checkout(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
-    checkout = tmp_path / "checkout"
-    checkout.mkdir()
-    (tmp_path / "account").mkdir()
-    (tmp_path / "account" / "rclone.conf").touch()
-    # Select a test cloud root without launching or downloading rclone.
-    monkeypatch.setattr(rclone, "prepare_rclone", lambda cache: cache / "rclone")
-    monkeypatch.setattr(
-        setup, "select_remote_root", lambda *args, **kwargs: "lab:measurements"
-    )
-    return checkout
-
-
-@pytest.fixture
 def configured_checkout(
     unbound_checkout: Path, monkeypatch: pytest.MonkeyPatch
 ) -> Path:
     _bind(unbound_checkout, "local/alice", monkeypatch)
     return unbound_checkout
-
-
-def _bind(
-    checkout: Path,
-    prefix: str,
-    monkeypatch: pytest.MonkeyPatch,
-    *,
-    labdata: Path | None = None,
-) -> None:
-    monkeypatch.setattr(sys, "stdin", io.StringIO("\n"))
-    assert (
-        _sync(
-            checkout,
-            "setup",
-            "--prefix",
-            prefix,
-            "--labdata",
-            str(labdata or checkout.parent / "labdata"),
-        )
-        == 0
-    )
-
-
-def _sync(checkout: Path, *args: str) -> int:
-    return main(
-        [
-            "--config-dir",
-            str(checkout.parent / "account"),
-            "--cache-dir",
-            str(checkout.parent / "cache"),
-            *args,
-        ],
-        checkout=checkout,
-    )
-
-
-@pytest.fixture
-def local_cloud(unbound_checkout: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
-    binary = os.environ.get("DATA_SYNC_TEST_RCLONE")
-    if binary is None:
-        pytest.skip("Set DATA_SYNC_TEST_RCLONE to a verified rclone executable")
-    tmp_path = unbound_checkout.parent
-    cloud = tmp_path / "cloud"
-    cloud.mkdir()
-    for name in tuple(os.environ):
-        if name.upper().startswith("RCLONE_"):
-            monkeypatch.delenv(name)
-    monkeypatch.setenv("RCLONE_CACHE_DIR", str(tmp_path / "rclone-cache"))
-    (tmp_path / "account" / "rclone.conf").write_text(
-        f"[lab]\ntype = alias\nremote = {cloud.as_posix()}\n", encoding="utf-8"
-    )
-    # Replace the download only. The copy and listing use the real local backend.
-    monkeypatch.setattr(rclone, "prepare_rclone", lambda cache: Path(binary))
-    _bind(
-        unbound_checkout,
-        "local/alice",
-        monkeypatch,
-        labdata=unbound_checkout / "Labdata",
-    )
-    return cloud / "measurements"
-
-
-def _write_file(root: Path, relative: str, content: bytes, *, mtime: int) -> None:
-    path = root / relative
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_bytes(content)
-    os.utime(path, (mtime, mtime))
 
 
 def test_default_push_and_pull_use_the_bound_labdata_prefix(
@@ -525,19 +451,6 @@ def test_sync_rejects_force(unbound_checkout: Path) -> None:
     with pytest.raises(SystemExit) as error:
         _sync(unbound_checkout, "sync", "--force")
     assert error.value.code == 2
-
-
-def _state_dir(labdata: Path) -> Path:
-    return labdata / ".data-sync/state"
-
-
-def _only_baseline(labdata: Path) -> Path:
-    (path,) = _state_dir(labdata).glob("*.json")
-    return path
-
-
-def _baseline_files(path: Path) -> dict[str, object]:
-    return json.loads(path.read_text(encoding="utf-8"))["files"]
 
 
 @pytest.mark.parametrize(

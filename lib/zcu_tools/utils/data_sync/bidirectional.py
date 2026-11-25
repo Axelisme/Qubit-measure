@@ -4,13 +4,21 @@ from __future__ import annotations
 
 import sys
 import tempfile
+from collections import defaultdict
 from dataclasses import dataclass
 from enum import StrEnum
 from pathlib import Path, PurePosixPath
 
 from . import rclone
 from .baseline import BaselineEntry, BaselineStore, verified_entries, verified_entry
-from .inventory import FileInventory, ListedFile, list_files, mtime_order
+from .inventory import (
+    DestinationPaths,
+    FileInventory,
+    ListedFile,
+    list_case_insensitive_destination,
+    list_files,
+    mtime_order,
+)
 
 
 @dataclass(frozen=True)
@@ -48,12 +56,18 @@ def sync_pair(
 
     Use the verified rclone binary, config_dir/rclone.conf and copy performance
     and reporting flags only. Return the copy exit status on copy failure, or 1
-    for a blocked plan or unverified transfer. Raise on inventory or baseline errors. Dry-run reads
-    but does not change data or the baseline.
+    for a blocked plan or unverified transfer. Raise on inventory, destination
+    capability or baseline errors. Dry-run reads but does not change data or
+    the baseline.
     """
     previous = pair.store.load() or {}
     local, remote = _list_pair(binary, config_dir, pair)
     plan = _plan(local, remote, previous)
+    for action, root in ((_Action.UPLOAD, pair.remote), (_Action.DOWNLOAD, pair.local)):
+        writes = [path for path, step in plan.items() if step.action == action]
+        if writes and rclone.case_insensitive(binary, config_dir, root):
+            destination = list_case_insensitive_destination(binary, config_dir, root)
+            _flag_case_collisions(plan, writes, destination)
     _print_plan(pair, plan)
     if any(step.action == _Action.CONFLICT for step in plan.values()):
         return 1
@@ -137,6 +151,30 @@ def _plan(
             step = _check_destination(path, step, local)
         routes[path] = step
     return routes
+
+
+def _flag_case_collisions(
+    plan: dict[str, _Step], writes: list[str], target: DestinationPaths
+) -> None:
+    files = _case_index(target.files | set(writes))
+    directories = _case_index(target.directories)
+    for path in writes:
+        key = path.casefold()
+        others = (files[key] - {path}) | directories.get(key, set())
+        for parent in PurePosixPath(path).parents:
+            others.update(files.get(parent.as_posix().casefold(), set()))
+        if others:
+            names = ", ".join(map(repr, sorted(others)))
+            plan[path] = _Step(
+                _Action.CONFLICT, f"case-insensitive destination collision with {names}"
+            )
+
+
+def _case_index(paths: set[str]) -> dict[str, set[str]]:
+    names: dict[str, set[str]] = defaultdict(set)
+    for path in paths:
+        names[path.casefold()].add(path)
+    return names
 
 
 def _check_destination(path: str, step: _Step, target: FileInventory) -> _Step:
