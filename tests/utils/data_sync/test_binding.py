@@ -146,6 +146,45 @@ def test_setup_lists_both_conflicts_without_saving_settings(
     assert not (checkout / ".data-sync" / "sync.json").exists()
 
 
+@pytest.mark.skipif(sys.platform == "win32", reason="Inject a symlink failure on POSIX")
+@pytest.mark.parametrize("leaves_directory", [False, True])
+def test_setup_reports_link_creation_failure_without_saving_settings(
+    leaves_directory: bool,
+    checkout: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    root = checkout.parent / "Labdata" / "alice" / "pc1"
+    failed_link = checkout / "Database"
+    original_error = "could not apply directory link tag"
+    symlink_to = Path.symlink_to
+
+    def fail_on_database(
+        link: Path, target: Path, target_is_directory: bool = False
+    ) -> None:
+        if link != failed_link:
+            symlink_to(link, target, target_is_directory=target_is_directory)
+            return
+        if leaves_directory:
+            link.mkdir()
+        raise OSError(original_error)
+
+    # The CLI cannot trigger this partial failure on demand; replace the OS effect.
+    monkeypatch.setattr(Path, "symlink_to", fail_on_database)
+
+    assert _configure(checkout, monkeypatch) == 1
+    error = capsys.readouterr().err
+    assert original_error in error
+    assert ("before retrying" in error) == leaves_directory
+    assert str(failed_link) in error and str(root / "Database") in error
+    if leaves_directory:
+        assert failed_link.is_dir() and not failed_link.is_symlink()
+    else:
+        assert not failed_link.exists(follow_symlinks=False)
+    assert (checkout / "result").resolve(strict=True) == root / "result"
+    assert not (checkout / ".data-sync" / "sync.json").exists()
+
+
 @pytest.mark.parametrize("layout", ["under link", "same checkout", "aliased target"])
 def test_setup_rejects_overlapping_link_and_target_paths(
     layout: str,

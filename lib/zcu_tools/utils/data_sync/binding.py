@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import stat
 import sys
+from contextlib import suppress
 from pathlib import Path
 
 from .settings import DATA_DIRS, SyncSettings
@@ -17,7 +18,8 @@ def bind_checkout(checkout: Path, selection: SyncSettings) -> None:
 
     Check both link locations and physical targets before creating anything.
     Create missing target directories, then verify both links. Raise on an
-    invalid binding or filesystem failure without moving data or saving settings.
+    invalid binding or filesystem failure. Leave any directories or links
+    created before the failure in place; never move data or save settings.
     """
     issues = _binding_issues(checkout, selection, allow_missing=True)
     if issues:
@@ -104,7 +106,19 @@ def _link_problem(link: Path, target: Path) -> str | None:
 
 
 def _create_link(link: Path, target: Path) -> None:
-    if sys.platform == "win32":
-        _winapi.CreateJunction(str(target), str(link))
-    else:
-        link.symlink_to(target, target_is_directory=True)
+    try:
+        if sys.platform == "win32":
+            _winapi.CreateJunction(str(target), str(link))
+        else:
+            link.symlink_to(target, target_is_directory=True)
+    except OSError as exc:
+        message = f"Could not create checkout link {link} to {target}: {exc}"
+        # CreateJunction can create a directory before setting its reparse tag.
+        # If inspection also fails, report the original error.
+        with suppress(OSError):
+            if link.is_dir(follow_symlinks=False) and not link.is_junction():
+                message += (
+                    "\nA plain directory is present at the link path. "
+                    "Check it before retrying."
+                )
+        raise OSError(message) from exc

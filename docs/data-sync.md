@@ -30,6 +30,8 @@ uv run --directory . --no-sync -- python scripts/sync_data.py setup --prefix pc1
 
 同一配置重跑 `setup` 時，正確的連結會保留。若 `result` 或 `Database` 已有檔案、目錄、失效連結或指往其他地方，setup 會列出衝突位置和預期目標，不搬資料、不建立新連結，也不覆寫設定。新目標不可和兩個連結位置重疊，例如不能把 Labdata 設成 checkout 的 `result/Labdata`。
 
+若建立連結失敗，setup 會列出失敗的連結路徑、預期目標和原始錯誤，不保存 checkout 設定，也不刪除已建立的連結或目錄。Windows 建立 junction 時可能留下實體目錄；若出現檢查提示，先檢查該目錄和其中的資料，再重跑 setup。符號連結已在 Linux 實測；本次未在原生 Windows／NTFS 執行 junction 測試。
+
 每個 checkout 的 `.data-sync/sync.json` 保存位置，不含 token。舊版 checkout 設定不會自動升級，請重跑 `setup --prefix`。若已有資料，先依[下面的步驟](#把-checkout-資料搬到-labdata)自行搬移。`rclone.conf` 沿用使用者層設定，在同一使用者的 checkout 間共用。它含帳號憑證，不要提交或分享。
 
 ## 上傳與下載
